@@ -531,49 +531,19 @@
     </div>
 
     <div class="modal-backdrop" id="feedbackModal" hidden>
-      <section class="modal feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+      <section class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
         <header class="modal-header">
           <div>
             <div class="eyebrow">Обратная связь</div>
-            <h2 id="feedbackTitle">Сообщить о проблеме</h2>
+            <h2 id="feedbackTitle">Функционал в разработке</h2>
           </div>
           <button class="icon-button" id="closeFeedbackButton" type="button" aria-label="Закрыть">×</button>
         </header>
-        <div class="feedback-body">
-          <p class="feedback-hint">
-            Опишите проблему и вставьте скриншоты через Command/Ctrl+V или выберите файлы.
-          </p>
-          <label class="field">
-            <span>Ваш контакт <small>необязательно</small></span>
-            <input id="feedbackContact" type="text" placeholder="Email или имя" />
-          </label>
-          <label class="field feedback-message-field">
-            <span>Описание проблемы</span>
-            <textarea id="feedbackMessage" placeholder="Что произошло и как это воспроизвести?"></textarea>
-          </label>
-          <div class="feedback-attachments">
-            <div class="feedback-attachments-heading">
-              <strong>Скриншоты</strong>
-              <button class="button button-secondary" id="feedbackFilesButton" type="button">Добавить изображения</button>
-              <input id="feedbackFilesInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
-            </div>
-            <div class="feedback-dropzone" id="feedbackDropzone">
-              <span>Вставьте изображение из буфера или перетащите сюда</span>
-            </div>
-            <div class="feedback-preview-list" id="feedbackPreviewList"></div>
-          </div>
-          <label class="feedback-report-option">
-            <input id="feedbackIncludeReport" type="checkbox" />
-            <span>Приложить текущий чек-лист без настроек Jira и токенов</span>
-          </label>
-          <div class="feedback-error" id="feedbackError" hidden></div>
+        <div class="confirm-modal-body">
+          Отправка обратной связи временно недоступна. Корпоративный канал обратной связи будет добавлен после отдельного согласования.
         </div>
         <footer class="modal-footer">
-          <span id="feedbackState">Обращение сохранится на сервере приложения.</span>
-          <div class="modal-actions">
-            <button class="button button-ghost" id="cancelFeedbackButton" type="button">Отмена</button>
-            <button class="button button-primary" id="sendFeedbackButton" type="button">Отправить</button>
-          </div>
+          <button class="button button-primary" id="cancelFeedbackButton" type="button">Понятно</button>
         </footer>
       </section>
     </div>
@@ -592,10 +562,6 @@
             <button class="settings-nav-item active" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-send"></use></svg>
               <span>Jira</span>
-            </button>
-            <button class="settings-nav-item" id="settingsFilesSectionButton" type="button" data-settings-section="files">
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
-              <span>Файлы</span>
             </button>
             <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
@@ -659,48 +625,6 @@
                 </button>
                 <div class="connection-state" id="jiraConnectionState">Соединение ещё не проверялось.</div>
               </div>
-            </section>
-            <section class="settings-section" id="settingsFilesSection" data-settings-panel="files" hidden>
-              <div class="settings-note">
-                Токены дисков используются только сервером приложения для загрузки файлов. В браузере сохраняются только признаки активности и путь/ID папки.
-              </div>
-              <div class="storage-grid">
-                <section class="storage-card">
-                  <label class="storage-toggle">
-                    <input id="yandexStorageEnabled" type="checkbox" />
-                    <span>Яндекс.Диск активен</span>
-                  </label>
-                  <label class="field">
-                    <span>OAuth-токен Яндекса</span>
-                    <input id="yandexStorageToken" type="password" autocomplete="off" placeholder="Не сохраняется в браузере" />
-                  </label>
-                  <label class="field">
-                    <span>Папка на Диске</span>
-                    <input id="yandexStoragePath" type="text" placeholder="/QA Report" />
-                  </label>
-                  <p class="settings-curl-hint">
-                    Создайте OAuth-токен для Яндекс.Диска с доступом к REST API Диска. Укажите папку, куда будут попадать изображения.
-                  </p>
-                </section>
-                <section class="storage-card">
-                  <label class="storage-toggle">
-                    <input id="googleStorageEnabled" type="checkbox" />
-                    <span>Google Drive активен</span>
-                  </label>
-                  <label class="field">
-                    <span>OAuth access token Google</span>
-                    <input id="googleStorageToken" type="password" autocomplete="off" placeholder="Не сохраняется в браузере" />
-                  </label>
-                  <label class="field">
-                    <span>ID папки Google Drive</span>
-                    <input id="googleStorageFolder" type="text" placeholder="Например, 1AbCdEf..." />
-                  </label>
-                  <p class="settings-curl-hint">
-                    Получите access token с областью доступа Drive File или Drive. ID папки берётся из адреса открытой папки Google Drive.
-                  </p>
-                </section>
-              </div>
-              <div class="connection-state" id="storageConnectionState">Настройки файлового хранилища ещё не сохранялись.</div>
             </section>
             <section class="settings-section" id="settingsHistorySection" data-settings-panel="history" hidden>
               <div class="settings-note">

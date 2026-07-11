@@ -11,15 +11,13 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 4173
-      FEEDBACK_DIR: /app/feedback-data
       REPORTS_DB_PATH: /app/reports-data/qa-report.sqlite
-      RESEND_API_KEY_FILE: /run/secrets/resend_api_key
-      FEEDBACK_TO_EMAIL: ${FEEDBACK_TO_EMAIL:-}
-      FEEDBACK_FROM_EMAIL: ${FEEDBACK_FROM_EMAIL:-}
-    secrets:
-      - resend_api_key
+      QA_STORAGE_ENDPOINT: ${QA_STORAGE_ENDPOINT:-https://minio-buckets.adv.ru}
+      QA_STORAGE_BUCKET: ${QA_STORAGE_BUCKET:-qa-tools}
+      QA_STORAGE_REGION: ${QA_STORAGE_REGION:-us-east-1}
+      QA_STORAGE_ACCESS_KEY_FILE: ${QA_STORAGE_ACCESS_KEY_FILE:-}
+      QA_STORAGE_SECRET_KEY_FILE: ${QA_STORAGE_SECRET_KEY_FILE:-}
     volumes:
-      - feedback_data:/app/feedback-data
       - reports_data:/app/reports-data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -29,9 +27,4 @@ services:
       start_period: 5s
 
 volumes:
-  feedback_data:
   reports_data:
-
-secrets:
-  resend_api_key:
-    file: ./secrets/resend_api_key

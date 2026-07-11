@@ -4,8 +4,16 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { parseJiraMarkup } = require("../jira-markup-import");
 
 async function main() {
+  const xssImport = parseJiraMarkup(
+    "||Проверка||Статус||\n|[Открыть\\|https://jira.example/\\\" onmouseover=\\\"alert(1)]|ОК|",
+  );
+  const xssHtml = JSON.stringify(xssImport);
+  assert.equal(xssHtml.includes("<a "), false);
+  assert.equal(xssHtml.includes("javascript:"), false);
+
   const received = [];
   let fallbackCommentCreated = false;
   let wafPostAttempted = false;
@@ -104,6 +112,26 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 250));
 
   try {
+    const healthResponse = await fetch("http://127.0.0.1:4174/api/health");
+    assert.equal(healthResponse.status, 200);
+    assert.match(healthResponse.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
+    assert.equal(healthResponse.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(healthResponse.headers.get("x-frame-options"), "DENY");
+
+    const crossSiteResponse = await fetch("http://127.0.0.1:4174/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: "{}",
+    });
+    assert.equal(crossSiteResponse.status, 403);
+
+    const removedStorageResponse = await fetch("http://127.0.0.1:4174/api/storage/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(removedStorageResponse.status, 400);
+
     const testResponse = await fetch("http://127.0.0.1:4174/api/jira/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -469,7 +497,7 @@ async function main() {
           reportId: "server-report-heavy",
           publicId: "aabbccdd",
           intro:
-            '<p>Текст до</p><figure class="cell-image"><img src="data:image/png;base64,AAAA" /></figure><p>Текст после</p>',
+            '<p onclick="alert(1)">Текст до</p><script>alert(1)</script><figure class="cell-image"><img src="data:image/png;base64,AAAA" /></figure><p>Текст после</p>',
           sections: [
             {
               ...reportDocument.sections[0],
@@ -495,7 +523,9 @@ async function main() {
     assert.equal(heavyReportGetResponse.status, 200);
     const heavyReport = await heavyReportGetResponse.json();
     assert.equal(JSON.stringify(heavyReport.report.document).includes("data:image"), false);
-    assert.equal(JSON.stringify(heavyReport.report.document).includes("cell-file"), false);
+    assert.equal(JSON.stringify(heavyReport.report.document).includes("data-data-url=\"data:"), false);
+    assert.equal(JSON.stringify(heavyReport.report.document).includes("onclick"), false);
+    assert.equal(JSON.stringify(heavyReport.report.document).includes("<script"), false);
     assert.equal(heavyReport.report.document.intro.includes("Текст до"), true);
 
     const unsupportedFormatResponse = await fetch("http://127.0.0.1:4174/api/checklists/import", {

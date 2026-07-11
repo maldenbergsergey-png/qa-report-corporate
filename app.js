@@ -1,7 +1,6 @@
 const STORAGE_KEY = "qa-report-editor-draft-v2";
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
 const JIRA_SETTINGS_KEY = "qa-report-jira-settings-v1";
-const STORAGE_SETTINGS_KEY = "qa-report-storage-settings-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
@@ -133,10 +132,8 @@ const elements = {
   jiraSettingsModal: document.querySelector("#jiraSettingsModal"),
   closeJiraSettingsButton: document.querySelector("#closeJiraSettingsButton"),
   settingsJiraSectionButton: document.querySelector("#settingsJiraSectionButton"),
-  settingsFilesSectionButton: document.querySelector("#settingsFilesSectionButton"),
   settingsHistorySectionButton: document.querySelector("#settingsHistorySectionButton"),
   settingsJiraSection: document.querySelector("#settingsJiraSection"),
-  settingsFilesSection: document.querySelector("#settingsFilesSection"),
   settingsHistorySection: document.querySelector("#settingsHistorySection"),
   jiraManualTab: document.querySelector("#jiraManualTab"),
   jiraCurlTab: document.querySelector("#jiraCurlTab"),
@@ -158,13 +155,6 @@ const elements = {
   testJiraButton: document.querySelector("#testJiraButton"),
   saveJiraSettingsButton: document.querySelector("#saveJiraSettingsButton"),
   settingsSaveCheck: document.querySelector("#settingsSaveCheck"),
-  yandexStorageEnabled: document.querySelector("#yandexStorageEnabled"),
-  yandexStorageToken: document.querySelector("#yandexStorageToken"),
-  yandexStoragePath: document.querySelector("#yandexStoragePath"),
-  googleStorageEnabled: document.querySelector("#googleStorageEnabled"),
-  googleStorageToken: document.querySelector("#googleStorageToken"),
-  googleStorageFolder: document.querySelector("#googleStorageFolder"),
-  storageConnectionState: document.querySelector("#storageConnectionState"),
   cloudHistoryEnabled: document.querySelector("#cloudHistoryEnabled"),
   reportClientId: document.querySelector("#reportClientId"),
   reportWorkspaceKey: document.querySelector("#reportWorkspaceKey"),
@@ -211,16 +201,6 @@ const elements = {
   feedbackModal: document.querySelector("#feedbackModal"),
   closeFeedbackButton: document.querySelector("#closeFeedbackButton"),
   cancelFeedbackButton: document.querySelector("#cancelFeedbackButton"),
-  sendFeedbackButton: document.querySelector("#sendFeedbackButton"),
-  feedbackContact: document.querySelector("#feedbackContact"),
-  feedbackMessage: document.querySelector("#feedbackMessage"),
-  feedbackFilesButton: document.querySelector("#feedbackFilesButton"),
-  feedbackFilesInput: document.querySelector("#feedbackFilesInput"),
-  feedbackDropzone: document.querySelector("#feedbackDropzone"),
-  feedbackPreviewList: document.querySelector("#feedbackPreviewList"),
-  feedbackIncludeReport: document.querySelector("#feedbackIncludeReport"),
-  feedbackError: document.querySelector("#feedbackError"),
-  feedbackState: document.querySelector("#feedbackState"),
   draftSyncBanner: document.querySelector("#draftSyncBanner"),
   cloudConflictStatus: document.querySelector("#cloudConflictStatus"),
   versionConflictModal: document.querySelector("#versionConflictModal"),
@@ -251,8 +231,6 @@ let savedEditorRange = null;
 let floatingMenu = null;
 let jiraSecret = "";
 let jiraSettings = loadJiraSettings();
-let storageSecrets = { yandex: "", google: "" };
-let storageSettings = loadStorageSettings();
 let cloudHistoryEnabled = loadCloudHistoryEnabled();
 let reportClientId = loadReportClientId();
 let reportWorkspaceKey = loadReportWorkspaceKey();
@@ -279,7 +257,6 @@ let editingLink = null;
 let publishAbortController = null;
 let publishInProgress = false;
 let confirmResolver = null;
-let feedbackFiles = [];
 let hasUnsavedLocalChanges = false;
 let applyingRemoteDraft = false;
 let forceLocalDraftSave = false;
@@ -390,7 +367,7 @@ function normalizeDraft(value) {
     Array.isArray(parsed.sections) && parsed.sections.length
       ? normalizeSections(parsed.sections)
       : normalizeSections(base.sections);
-  return {
+  const normalized = {
     ...base,
     ...parsed,
     draftId: parsed.draftId || parsed.reportId || crypto.randomUUID(),
@@ -404,6 +381,77 @@ function normalizeDraft(value) {
     issueUrl: parsed.issueUrl || "",
     sections,
   };
+  normalized.intro = sanitizeRichHtml(normalized.intro);
+  normalized.sections.forEach((section) => {
+    section.rows.forEach((row) => {
+      Object.keys(row.cells || {}).forEach((columnId) => {
+        row.cells[columnId] = sanitizeRichHtml(row.cells[columnId]);
+      });
+    });
+  });
+  return normalized;
+}
+
+function sanitizeRichHtml(value) {
+  const template = document.createElement("template");
+  template.innerHTML = String(value || "");
+  const allowedTags = new Set([
+    "A", "BR", "CODE", "DIV", "EM", "FIGURE", "H1", "H2", "H3", "IMG", "LI",
+    "OL", "P", "PRE", "S", "SPAN", "STRONG", "U", "UL",
+  ]);
+  const allowedAttributes = new Set([
+    "alt", "class", "contenteditable", "data-align", "data-attachment-id", "data-file-extension",
+    "data-file-name", "data-file-size", "data-jira-id", "data-jira-name", "data-jira-thumbnail",
+    "data-jira-url", "data-language", "data-mime-type", "data-qa-code-snippet", "data-data-url",
+    "href", "rel", "src", "style", "target", "title",
+  ]);
+  const safeUrl = (raw, { image = false, fileData = false } = {}) => {
+    const text = String(raw || "").trim();
+    if (image && /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
+    if (fileData && /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(text)) return text;
+    try {
+      const url = new URL(text, window.location.origin);
+      return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+    } catch {
+      return "";
+    }
+  };
+  template.content.querySelectorAll("*").forEach((node) => {
+    if (!allowedTags.has(node.tagName)) {
+      node.replaceWith(...node.childNodes);
+      return;
+    }
+    [...node.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on") || !allowedAttributes.has(name)) node.removeAttribute(attribute.name);
+    });
+    if (node.hasAttribute("href")) {
+      const href = safeUrl(node.getAttribute("href"));
+      if (!href) node.removeAttribute("href");
+      else {
+        node.setAttribute("href", href);
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+    if (node.hasAttribute("src")) {
+      const src = safeUrl(node.getAttribute("src"), { image: node.tagName === "IMG" });
+      if (!src) node.removeAttribute("src");
+      else node.setAttribute("src", src);
+    }
+    if (node.hasAttribute("data-data-url")) {
+      const dataUrl = safeUrl(node.getAttribute("data-data-url"), { fileData: true });
+      if (!dataUrl) node.removeAttribute("data-data-url");
+    }
+    if (node.hasAttribute("style")) {
+      const color = node.style.color;
+      const width = node.style.width;
+      node.removeAttribute("style");
+      if (color && /^(?:#[0-9a-f]{3,8}|rgb\([\d\s,.%]+\)|rgba\([\d\s,.%]+\))$/i.test(color)) node.style.color = color;
+      if (width && /^(?:100|[1-9]?\d(?:\.\d+)?)%$/.test(width)) node.style.width = width;
+    }
+  });
+  return template.innerHTML;
 }
 
 function draftContentSnapshot(value = draft) {
@@ -426,8 +474,14 @@ function stripServerAttachmentsFromHtml(value) {
   if (!value || typeof value !== "string") return value || "";
   const template = document.createElement("template");
   template.innerHTML = value;
-  template.content.querySelectorAll(".cell-image, .cell-file, img, video, audio, source").forEach((node) => {
-    node.remove();
+  template.content.querySelectorAll(".cell-image").forEach((figure) => {
+    if (figure.querySelector("img")?.getAttribute("src")?.startsWith("data:")) figure.remove();
+  });
+  template.content.querySelectorAll(".cell-file").forEach((card) => {
+    if (card.dataset.dataUrl?.startsWith("data:")) card.remove();
+  });
+  template.content.querySelectorAll("img, video, audio, source").forEach((node) => {
+    if (node.getAttribute("src")?.startsWith("data:")) node.remove();
   });
   template.content.querySelectorAll("*").forEach((node) => {
     [...node.attributes].forEach((attribute) => {
@@ -516,27 +570,6 @@ function loadJiraSettings() {
     };
   } catch {
     return { type: "data-center", authMethod: "pat", baseUrl: "", user: "" };
-  }
-}
-
-function loadStorageSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_SETTINGS_KEY) || "{}");
-    return {
-      yandex: {
-        enabled: Boolean(saved.yandex?.enabled),
-        path: saved.yandex?.path || "/QA Report",
-      },
-      google: {
-        enabled: Boolean(saved.google?.enabled),
-        folderId: saved.google?.folderId || "",
-      },
-    };
-  } catch {
-    return {
-      yandex: { enabled: false, path: "/QA Report" },
-      google: { enabled: false, folderId: "" },
-    };
   }
 }
 
@@ -771,9 +804,119 @@ function queueServerReportSave(record) {
     });
 }
 
-function saveReportToServer(record, { force = false } = {}) {
-  const serverDocument = createServerReportDocument(record.document);
-  return reportApi("/api/reports", {
+async function uploadStoragePayload(reportId, file) {
+  const response = await fetch("/api/storage/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reportId, file }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  return result;
+}
+
+async function migrateHtmlAttachmentsToStorage(html, reportId) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  for (const image of container.querySelectorAll("img[data-attachment-id]")) {
+    if (!image.src.startsWith("data:")) continue;
+    const [header, dataBase64 = ""] = image.src.split(",");
+    if (!dataBase64) continue;
+    const type = image.dataset.mimeType || header.match(/^data:([^;]+)/)?.[1] || "image/png";
+    const result = await uploadStoragePayload(reportId, {
+      name: image.dataset.fileName || `image.${type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`,
+      type,
+      dataBase64,
+    });
+    image.src = result.url;
+    image.dataset.storageKey = result.key;
+  }
+  for (const card of container.querySelectorAll(".cell-file[data-attachment-id]")) {
+    const dataUrl = card.dataset.dataUrl || "";
+    if (!dataUrl.startsWith("data:")) continue;
+    const [header, dataBase64 = ""] = dataUrl.split(",");
+    if (!dataBase64) continue;
+    const result = await uploadStoragePayload(reportId, {
+      name: card.dataset.fileName || "file",
+      type: card.dataset.mimeType || header.match(/^data:([^;]+)/)?.[1] || "application/octet-stream",
+      dataBase64,
+    });
+    card.dataset.dataUrl = result.url;
+    card.dataset.storageKey = result.key;
+  }
+  return sanitizeRichHtml(container.innerHTML);
+}
+
+async function migrateDocumentAttachmentsToStorage(document, reportId) {
+  const copy = normalizeDraft(clone(document));
+  copy.intro = await migrateHtmlAttachmentsToStorage(copy.intro, reportId);
+  for (const section of copy.sections) {
+    for (const row of section.rows) {
+      for (const columnId of Object.keys(row.cells || {})) {
+        row.cells[columnId] = await migrateHtmlAttachmentsToStorage(row.cells[columnId], reportId);
+      }
+    }
+  }
+  return copy;
+}
+
+function isStoredObjectUrl(value) {
+  try {
+    return new URL(String(value || ""), window.location.origin).pathname.startsWith("/api/storage/object/");
+  } catch {
+    return false;
+  }
+}
+
+function applyStorageReferences(sourceDocument) {
+  const references = new Map();
+  const collect = (html) => {
+    const container = document.createElement("div");
+    container.innerHTML = html || "";
+    container.querySelectorAll("img[data-attachment-id]").forEach((image) => {
+      if (isStoredObjectUrl(image.src)) references.set(image.dataset.attachmentId, { kind: "image", url: image.src });
+    });
+    container.querySelectorAll(".cell-file[data-attachment-id]").forEach((card) => {
+      if (isStoredObjectUrl(card.dataset.dataUrl)) references.set(card.dataset.attachmentId, { kind: "file", url: card.dataset.dataUrl });
+    });
+  };
+  collect(sourceDocument.intro);
+  sourceDocument.sections.forEach((section) => section.rows.forEach((row) => Object.values(row.cells).forEach(collect)));
+  const updateRoot = (root) => {
+    root.querySelectorAll("img[data-attachment-id]").forEach((image) => {
+      const reference = references.get(image.dataset.attachmentId);
+      if (reference?.kind === "image") image.src = reference.url;
+    });
+    root.querySelectorAll(".cell-file[data-attachment-id]").forEach((card) => {
+      const reference = references.get(card.dataset.attachmentId);
+      if (reference?.kind === "file") card.dataset.dataUrl = reference.url;
+    });
+  };
+  const updateHtml = (html) => {
+    const container = document.createElement("div");
+    container.innerHTML = html || "";
+    updateRoot(container);
+    return sanitizeRichHtml(container.innerHTML);
+  };
+  draft.intro = updateHtml(draft.intro);
+  draft.sections.forEach((section) => section.rows.forEach((row) => {
+    Object.keys(row.cells).forEach((columnId) => { row.cells[columnId] = updateHtml(row.cells[columnId]); });
+  }));
+  updateRoot(elements.introEditor);
+  updateRoot(elements.sections);
+  enhanceImageControls(elements.introEditor);
+  enhanceImageControls(elements.sections);
+  enhanceFileControls(elements.introEditor);
+  enhanceFileControls(elements.sections);
+}
+
+async function saveReportToServer(record, { force = false } = {}) {
+  const backend = await checkBackendCompatibility();
+  const documentForCloud = backend.objectStorageConfigured
+    ? await migrateDocumentAttachmentsToStorage(record.document, record.id)
+    : record.document;
+  const serverDocument = createServerReportDocument(documentForCloud);
+  const result = await reportApi("/api/reports", {
     method: "POST",
     body: JSON.stringify({
       id: record.id,
@@ -792,6 +935,14 @@ function saveReportToServer(record, { force = false } = {}) {
       document: serverDocument,
     }),
   });
+  if (backend.objectStorageConfigured && draft.reportId === record.id) {
+    applyStorageReferences(documentForCloud);
+    collectDocumentFields();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(draft)); } catch {}
+    const localRecord = await getReportRecord(record.id);
+    if (localRecord) await dbTransaction("readwrite", (store) => store.put({ ...localRecord, document: clone(draft) }));
+  }
+  return result;
 }
 
 async function getReportRecord(id) {
@@ -2651,6 +2802,7 @@ function htmlToWiki(html) {
     }
     if (tag === "img") {
       const name = node.dataset.jiraName || node.dataset.fileName || node.alt || "image.png";
+      if (isStoredObjectUrl(node.src)) return `[${name}|${node.src}]`;
       // Ссылка по имени вложения даёт Jira возможность открыть изображение
       // во встроенном просмотрщике, а параметр thumbnail оставляет его компактным.
       return `!${name}|thumbnail!`;
@@ -3289,11 +3441,6 @@ function setConnectionState(message, type = "") {
   elements.jiraConnectionState.className = `connection-state ${type}`.trim();
 }
 
-function setStorageConnectionState(message, type = "") {
-  elements.storageConnectionState.textContent = message;
-  elements.storageConnectionState.className = `connection-state ${type}`.trim();
-}
-
 function setReportIdentityState(message, type = "") {
   elements.reportIdentityState.textContent = message;
   elements.reportIdentityState.className = `connection-state ${type}`.trim();
@@ -3319,37 +3466,6 @@ function setSettingsSavedState(saved) {
 
 function markSettingsDirty() {
   setSettingsSavedState(false);
-}
-
-function fillStorageSettingsForm() {
-  elements.yandexStorageEnabled.checked = Boolean(storageSettings.yandex.enabled);
-  elements.yandexStoragePath.value = storageSettings.yandex.path || "/QA Report";
-  elements.yandexStorageToken.value = storageSecrets.yandex;
-  elements.googleStorageEnabled.checked = Boolean(storageSettings.google.enabled);
-  elements.googleStorageFolder.value = storageSettings.google.folderId || "";
-  elements.googleStorageToken.value = storageSecrets.google;
-}
-
-function readStorageSettingsForm() {
-  return {
-    yandex: {
-      enabled: elements.yandexStorageEnabled.checked,
-      path: elements.yandexStoragePath.value.trim() || "/QA Report",
-    },
-    google: {
-      enabled: elements.googleStorageEnabled.checked,
-      folderId: elements.googleStorageFolder.value.trim(),
-    },
-  };
-}
-
-function saveStorageSettings() {
-  storageSettings = readStorageSettingsForm();
-  storageSecrets = {
-    yandex: elements.yandexStorageToken.value,
-    google: elements.googleStorageToken.value,
-  };
-  localStorage.setItem(STORAGE_SETTINGS_KEY, JSON.stringify(storageSettings));
 }
 
 function fillReportIdentityForm() {
@@ -3380,32 +3496,30 @@ function saveReportIdentitySettings() {
   }
   updateCloudHistorySettingsState();
   elements.reportIdentityState.classList.add("success");
+  enhanceImageControls(elements.introEditor);
+  enhanceImageControls(elements.sections);
+  enhanceFileControls(elements.introEditor);
+  enhanceFileControls(elements.sections);
 }
 
 function setSettingsSection(section) {
-  const files = section === "files";
   const history = section === "history";
-  const jira = !files && !history;
+  const jira = !history;
   elements.settingsJiraSectionButton.classList.toggle("active", jira);
-  elements.settingsFilesSectionButton.classList.toggle("active", files);
   elements.settingsHistorySectionButton.classList.toggle("active", history);
   elements.settingsJiraSection.hidden = !jira;
-  elements.settingsFilesSection.hidden = !files;
   elements.settingsHistorySection.hidden = !history;
   elements.settingsJiraSection.classList.toggle("active", jira);
-  elements.settingsFilesSection.classList.toggle("active", files);
   elements.settingsHistorySection.classList.toggle("active", history);
 }
 
 function openJiraSettings() {
   fillJiraSettingsForm();
-  fillStorageSettingsForm();
   fillReportIdentityForm();
   setSettingsSection("jira");
   setJiraSettingsTab("manual");
   setSettingsSavedState(false);
   setConnectionState("Соединение ещё не проверялось.");
-  setStorageConnectionState("Настройки файлового хранилища ещё не сохранялись.");
   setReportIdentityState(
     !cloudHistoryEnabled
       ? "Чек-листы сохраняются только локально в этом браузере."
@@ -3428,10 +3542,8 @@ function saveJiraSettings() {
     jiraSettings = settings;
     jiraSecret = elements.jiraToken.value;
     localStorage.setItem(JIRA_SETTINGS_KEY, JSON.stringify(settings));
-    saveStorageSettings();
     saveReportIdentitySettings();
     setConnectionState("Настройки сохранены. Секрет останется только до перезагрузки.", "success");
-    setStorageConnectionState("Настройки файлов сохранены. Токены останутся только до перезагрузки.", "success");
     setSettingsSavedState(true);
   } catch (error) {
     setSettingsSavedState(false);
@@ -4311,7 +4423,7 @@ function cleanEditorHtml(editor) {
   clone.querySelectorAll(".cell-file").forEach((card) => {
     card.removeAttribute("tabindex");
   });
-  return clone.innerHTML;
+  return sanitizeRichHtml(clone.innerHTML);
 }
 
 function cssColorToHex(color) {
@@ -4931,121 +5043,14 @@ function readFileAsDataUrl(file) {
 }
 
 function openFeedback() {
-  feedbackFiles = [];
-  elements.feedbackContact.value = "";
-  elements.feedbackMessage.value = "";
-  elements.feedbackIncludeReport.checked = false;
-  elements.feedbackError.hidden = true;
-  elements.feedbackState.textContent = "Обращение сохранится на сервере приложения.";
-  renderFeedbackFiles();
   elements.feedbackModal.hidden = false;
   document.body.style.overflow = "hidden";
-  requestAnimationFrame(() => elements.feedbackMessage.focus());
+  requestAnimationFrame(() => elements.cancelFeedbackButton.focus());
 }
 
 function closeFeedback() {
   elements.feedbackModal.hidden = true;
   document.body.style.overflow = "";
-  feedbackFiles = [];
-  renderFeedbackFiles();
-}
-
-async function addFeedbackFiles(files) {
-  const images = [...files].filter((file) => file.type.startsWith("image/"));
-  for (const file of images) {
-    if (feedbackFiles.length >= 6) {
-      elements.feedbackError.textContent = "Можно приложить не более 6 изображений";
-      elements.feedbackError.hidden = false;
-      break;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      elements.feedbackError.textContent = `Файл «${file.name}» больше 8 МБ`;
-      elements.feedbackError.hidden = false;
-      continue;
-    }
-    const totalSize = feedbackFiles.reduce((sum, entry) => sum + entry.size, 0) + file.size;
-    if (totalSize > 18 * 1024 * 1024) {
-      elements.feedbackError.textContent = "Общий размер изображений больше 18 МБ";
-      elements.feedbackError.hidden = false;
-      break;
-    }
-    feedbackFiles.push({
-      id: crypto.randomUUID(),
-      name: file.name || `screenshot-${feedbackFiles.length + 1}.png`,
-      type: file.type,
-      size: file.size,
-      dataUrl: await readFileAsDataUrl(file),
-    });
-  }
-  renderFeedbackFiles();
-}
-
-function renderFeedbackFiles() {
-  elements.feedbackPreviewList.innerHTML = "";
-  elements.feedbackDropzone.hidden = feedbackFiles.length > 0;
-  feedbackFiles.forEach((file) => {
-    const item = document.createElement("div");
-    item.className = "feedback-preview-item";
-    const image = document.createElement("img");
-    image.src = file.dataUrl;
-    image.alt = "";
-    const info = document.createElement("span");
-    info.textContent = file.name;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "×";
-    remove.title = "Удалить изображение";
-    remove.addEventListener("click", () => {
-      feedbackFiles = feedbackFiles.filter((entry) => entry.id !== file.id);
-      renderFeedbackFiles();
-    });
-    item.append(image, info, remove);
-    elements.feedbackPreviewList.append(item);
-  });
-}
-
-async function sendFeedback() {
-  const message = elements.feedbackMessage.value.trim();
-  if (!message) {
-    elements.feedbackError.textContent = "Опишите проблему";
-    elements.feedbackError.hidden = false;
-    elements.feedbackMessage.focus();
-    return;
-  }
-  elements.feedbackError.hidden = true;
-  elements.sendFeedbackButton.disabled = true;
-  elements.feedbackState.textContent = "Отправляем обращение…";
-  try {
-    collectDocumentFields();
-    const response = await fetch("/api/feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contact: elements.feedbackContact.value.trim(),
-        message,
-        pageUrl: window.location.href,
-        userAgent: navigator.userAgent,
-        viewport: `${window.innerWidth}×${window.innerHeight}`,
-        theme: document.documentElement.dataset.theme || "light",
-        report: elements.feedbackIncludeReport.checked ? clone(draft) : null,
-        files: feedbackFiles.map((file) => ({
-          name: file.name,
-          type: file.type,
-          dataBase64: file.dataUrl.split(",")[1] || "",
-        })),
-      }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    closeFeedback();
-    showToast("Обращение отправлено", 4500);
-  } catch (error) {
-    elements.feedbackError.textContent = `Не удалось отправить: ${error.message}`;
-    elements.feedbackError.hidden = false;
-    elements.feedbackState.textContent = "Проверьте соединение и попробуйте ещё раз.";
-  } finally {
-    elements.sendFeedbackButton.disabled = false;
-  }
 }
 
 async function insertImages(files) {
@@ -5139,7 +5144,8 @@ async function insertAttachments(files) {
 
 function fileCardToWiki(card) {
   const name = card.dataset.jiraName || card.dataset.fileName || "file";
-  const url = card.dataset.jiraUrl || "";
+  const storageUrl = isStoredObjectUrl(card.dataset.dataUrl) ? card.dataset.dataUrl : "";
+  const url = card.dataset.jiraUrl || storageUrl;
   if (card.dataset.jiraName) return `[^${name}]`;
   return url ? `[${name}|${url}]` : `[Файл: ${name}]`;
 }
@@ -5194,8 +5200,85 @@ async function copyFileLink(card) {
   }
 }
 
+async function uploadEditorObjectToStorage(object, kind) {
+  const isImage = kind === "image";
+  const source = isImage ? object.querySelector("img")?.src : object.dataset.dataUrl;
+  if (!source) return showToast("У объекта нет данных для загрузки");
+  try {
+    const backend = await checkBackendCompatibility();
+    if (!backend.objectStorageConfigured) throw new Error("корпоративное хранилище не настроено на сервере");
+    const sourceResponse = await fetch(source);
+    const blob = await sourceResponse.blob();
+    const dataUrl = await readFileAsDataUrl(new File([blob], "upload", { type: blob.type }));
+    const name = isImage
+      ? object.querySelector("img")?.dataset.fileName || `image.${blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`
+      : object.dataset.fileName || "file";
+    showToast("Загружаем в корпоративное хранилище…", 3500);
+    const response = await fetch("/api/storage/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reportId: draft.reportId,
+        file: { name, type: blob.type || object.dataset.mimeType, dataBase64: dataUrl.split(",")[1] || "" },
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (isImage) {
+      const image = object.querySelector("img");
+      image.src = result.url;
+      image.dataset.fileName = name;
+      image.dataset.storageKey = result.key;
+    } else {
+      object.dataset.dataUrl = result.url;
+      object.dataset.storageKey = result.key;
+    }
+    object.closest(".cell-editor, .intro-editor")?.dispatchEvent(new Event("input", { bubbles: true }));
+    if (isImage) enhanceImageControls(object.closest(".cell-editor, .intro-editor") || document);
+    else enhanceFileControls(object.closest(".cell-editor, .intro-editor") || document);
+    showToast("Файл загружен в корпоративное хранилище");
+  } catch (error) {
+    showToast(`Не удалось загрузить: ${error.message}`, 6500);
+  }
+}
+
+function createStorageStatusBadge(stored) {
+  const badge = document.createElement("span");
+  badge.className = `storage-object-status ${stored ? "stored" : "pending"}`;
+  badge.dataset.editorUi = "true";
+  badge.contentEditable = "false";
+  badge.title = stored ? "Сохранено в корпоративном хранилище" : "Ожидает загрузки в корпоративное хранилище";
+  badge.textContent = stored ? "☁" : "";
+  return badge;
+}
+
+function replaceStoredObjectWithLink(object, kind) {
+  const isImage = kind === "image";
+  const image = isImage ? object.querySelector("img") : null;
+  const url = isImage ? image?.src : object.dataset.dataUrl;
+  if (!isStoredObjectUrl(url)) return showToast("Объект ещё не загружен в хранилище");
+  const name = isImage
+    ? image.dataset.fileName || image.alt || "Изображение"
+    : object.dataset.fileName || "Файл";
+  const paragraph = document.createElement("p");
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = name;
+  paragraph.append(link);
+  const editor = object.closest(".cell-editor, .intro-editor");
+  object.replaceWith(paragraph);
+  editor?.dispatchEvent(new Event("input", { bubbles: true }));
+  showToast("Объект заменён ссылкой");
+}
+
 function showFileMenu(card, anchor = card) {
+  const stored = isStoredObjectUrl(card.dataset.dataUrl);
   showFloatingMenu(anchor, [
+    stored
+      ? { label: "Заменить на ссылку", icon: "link", action: () => replaceStoredObjectWithLink(card, "file") }
+      : { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(card, "file") },
     { label: "Скачать файл", icon: "download", action: () => downloadFileCard(card) },
   ]);
 }
@@ -5209,6 +5292,8 @@ function enhanceFileControls(root = document) {
     card.setAttribute("aria-label", `Файл ${name}`);
     const nameNode = card.querySelector(".file-card-name");
     if (nameNode) nameNode.title = name;
+    const stored = isStoredObjectUrl(card.dataset.dataUrl);
+    if (stored || cloudHistoryEnabled) card.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel file-controls";
     controls.dataset.editorUi = "true";
@@ -5298,85 +5383,6 @@ async function downloadImage(image) {
   }
 }
 
-function activeStorageProviders() {
-  return [
-    storageSettings.yandex.enabled ? { id: "yandex", label: "Яндекс.Диск" } : null,
-    storageSettings.google.enabled ? { id: "google", label: "Google Drive" } : null,
-  ].filter(Boolean);
-}
-
-function blobToDataBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function imageToUploadFile(image) {
-  const response = await fetch(image.src);
-  const blob = await response.blob();
-  return {
-    name: image.dataset.fileName || image.dataset.jiraName || `image.${blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`,
-    type: image.dataset.mimeType || blob.type || "image/png",
-    dataBase64: await blobToDataBase64(blob),
-  };
-}
-
-function replaceImageWithLink(figure, url, label) {
-  const editor = figure.closest(".cell-editor, .intro-editor");
-  const paragraph = document.createElement("p");
-  const link = document.createElement("a");
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  link.textContent = label;
-  paragraph.append(link);
-  figure.replaceWith(paragraph);
-  editor?.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-async function uploadImageToStorage(figure, provider) {
-  const image = figure.querySelector("img");
-  if (!image) return;
-  const providerName = provider === "yandex" ? "Яндекс.Диск" : "Google Drive";
-  const token = storageSecrets[provider] || "";
-  if (!token) {
-    setSettingsSection("files");
-    fillStorageSettingsForm();
-    elements.jiraSettingsModal.hidden = false;
-    document.body.style.overflow = "hidden";
-    showToast(`Укажите токен для ${providerName} в настройках`, 4500);
-    return;
-  }
-  showToast(`Загружаем изображение в ${providerName}...`, 3500);
-  try {
-    await checkBackendCompatibility();
-    const file = await imageToUploadFile(image);
-    const response = await fetch("/api/storage/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        provider,
-        token,
-        yandexPath: storageSettings.yandex.path,
-        googleFolderId: storageSettings.google.folderId,
-        file,
-      }),
-    });
-    const result = await response.json().catch(() => ({}));
-    assertCurrentBackend(result);
-    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const url = result.publicUrl || result.webViewLink || result.url;
-    if (!url) throw new Error("Хранилище не вернуло ссылку на файл");
-    replaceImageWithLink(figure, url, `${file.name} (${providerName})`);
-    showToast(`Изображение загружено в ${providerName}`);
-  } catch (error) {
-    showToast(`Не удалось загрузить в ${providerName}: ${error.message}`, 6000);
-  }
-}
-
 function enhanceImageControls(root = document) {
   root.querySelectorAll(".cell-image").forEach((figure) => {
     ensureMediaBoundaries(figure);
@@ -5385,6 +5391,8 @@ function enhanceImageControls(root = document) {
     if (!image) return;
     figure.tabIndex = 0;
     figure.setAttribute("aria-label", "Открыть изображение");
+    const stored = isStoredObjectUrl(image.src);
+    if (stored || cloudHistoryEnabled) figure.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel image-controls";
     controls.dataset.editorUi = "true";
@@ -5444,13 +5452,11 @@ function setImageAlignment(figure, alignment) {
 
 function showImageMenu(figure, anchor = figure) {
   selectImage(figure);
-  const storageActions = activeStorageProviders().map((provider) => ({
-    label: `Загрузить в ${provider.label}`,
-    icon: "download",
-    action: () => uploadImageToStorage(figure, provider.id),
-  }));
+  const stored = isStoredObjectUrl(figure.querySelector("img")?.src);
   showFloatingMenu(anchor, [
-    ...storageActions,
+    stored
+      ? { label: "Заменить на ссылку", icon: "link", action: () => replaceStoredObjectWithLink(figure, "image") }
+      : { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(figure, "image") },
     { label: "Скачать изображение", icon: "download", action: () => downloadImage(figure.querySelector("img")) },
     { label: "Выровнять слева", icon: "align-left", action: () => setImageAlignment(figure, "left") },
     { label: "Выровнять по центру", icon: "align-center", action: () => setImageAlignment(figure, "center") },
@@ -6546,20 +6552,6 @@ document.addEventListener("paste", async (event) => {
     pasteTarget?.matches?.("input:not([type='file']), textarea") ||
     pasteTarget?.isContentEditable;
 
-  if (!elements.feedbackModal.hidden) {
-    const images = [...(event.clipboardData?.files || [])].filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (images.length) {
-      event.preventDefault();
-      await addFeedbackFiles(images);
-      return;
-    }
-    if (elements.feedbackModal.contains(event.target)) return;
-    event.preventDefault();
-    elements.feedbackMessage.focus();
-    return;
-  }
   if (
     isNativeTextControl &&
     !pasteTarget.closest?.(".cell-editor, .intro-editor")
@@ -6832,24 +6824,6 @@ elements.previewButton.addEventListener("click", openPreview);
 elements.feedbackButton.addEventListener("click", openFeedback);
 elements.closeFeedbackButton.addEventListener("click", closeFeedback);
 elements.cancelFeedbackButton.addEventListener("click", closeFeedback);
-elements.sendFeedbackButton.addEventListener("click", sendFeedback);
-elements.feedbackFilesButton.addEventListener("click", () => elements.feedbackFilesInput.click());
-elements.feedbackFilesInput.addEventListener("change", async () => {
-  await addFeedbackFiles(elements.feedbackFilesInput.files);
-  elements.feedbackFilesInput.value = "";
-});
-elements.feedbackDropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  elements.feedbackDropzone.classList.add("drag-over");
-});
-elements.feedbackDropzone.addEventListener("dragleave", () => {
-  elements.feedbackDropzone.classList.remove("drag-over");
-});
-elements.feedbackDropzone.addEventListener("drop", async (event) => {
-  event.preventDefault();
-  elements.feedbackDropzone.classList.remove("drag-over");
-  await addFeedbackFiles(event.dataTransfer.files);
-});
 elements.copyButton.addEventListener("click", copyMarkup);
 elements.copyVisualButton.addEventListener("click", copyVisualReport);
 elements.exportXlsxButton.addEventListener("click", exportChecklistXlsx);
@@ -7000,7 +6974,6 @@ elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCo
 elements.jiraType.addEventListener("change", updateJiraSettingsLabels);
 elements.jiraAuthMethod.addEventListener("change", updateJiraSettingsLabels);
 elements.settingsJiraSectionButton.addEventListener("click", () => setSettingsSection("jira"));
-elements.settingsFilesSectionButton.addEventListener("click", () => setSettingsSection("files"));
 elements.settingsHistorySectionButton.addEventListener("click", () => setSettingsSection("history"));
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
 elements.jiraSettingsModal.addEventListener("change", markSettingsDirty);

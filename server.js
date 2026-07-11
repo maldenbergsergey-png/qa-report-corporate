@@ -44,29 +44,101 @@ const MAX_ATTACHMENT_FILE = readSizeMb("QA_REPORT_MAX_ATTACHMENT_MB", 50);
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
 const APP_VERSION = "0.2.2";
 const API_REVISION = 5;
-const FEEDBACK_DIR = process.env.FEEDBACK_DIR || path.join(ROOT, "feedback-data");
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
-const feedbackRateLimit = new Map();
+const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
+const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
+const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1").trim();
 const CHECKLIST_IMPORT_TTL_MS = 15 * 60 * 1000;
 const checklistImports = new Map();
+const apiRateLimit = new Map();
 let reportsDb;
 
 function readSecret(name) {
-  const candidates = [
-    process.env[`${name}_FILE`],
-    path.join(ROOT, "secrets", name.toLowerCase()),
-  ].filter(Boolean);
-  for (const filePath of candidates) {
-    try {
-      return fs.readFileSync(filePath, "utf8").trim();
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        console.warn(`Не удалось прочитать secret ${name}: ${error.message}`);
-      }
-    }
+  const filePath = process.env[`${name}_FILE`];
+  if (filePath) {
+    try { return fs.readFileSync(filePath, "utf8").trim(); }
+    catch (error) { if (error.code !== "ENOENT") console.warn(`Не удалось прочитать ${name}_FILE: ${error.message}`); }
   }
   return String(process.env[name] || "").trim();
 }
+
+function objectStorageCredentials() {
+  return {
+    accessKey: readSecret("QA_STORAGE_ACCESS_KEY"),
+    secretKey: readSecret("QA_STORAGE_SECRET_KEY"),
+  };
+}
+
+function objectStorageConfigured() {
+  const credentials = objectStorageCredentials();
+  return Boolean(OBJECT_STORAGE_ENDPOINT && OBJECT_STORAGE_BUCKET && credentials.accessKey && credentials.secretKey);
+}
+
+function hmac(key, value, encoding) {
+  return crypto.createHmac("sha256", key).update(value).digest(encoding);
+}
+
+function s3ObjectPath(key) {
+  return `/${encodeURIComponent(OBJECT_STORAGE_BUCKET)}/${String(key).split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function s3Request(method, key, { body, contentType = "application/octet-stream" } = {}) {
+  const { accessKey, secretKey } = objectStorageCredentials();
+  if (!accessKey || !secretKey) {
+    const error = new Error("Корпоративное файловое хранилище не настроено");
+    error.status = 503;
+    throw error;
+  }
+  const endpoint = new URL(OBJECT_STORAGE_ENDPOINT);
+  const pathname = s3ObjectPath(key);
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const date = amzDate.slice(0, 8);
+  const payload = body == null ? Buffer.alloc(0) : Buffer.isBuffer(body) ? body : Buffer.from(body);
+  const payloadHash = crypto.createHash("sha256").update(payload).digest("hex");
+  const headers = {
+    host: endpoint.host,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+  };
+  if (body != null) headers["content-type"] = contentType;
+  const signedHeaderNames = Object.keys(headers).sort();
+  const canonicalHeaders = signedHeaderNames.map((name) => `${name}:${headers[name]}\n`).join("");
+  const canonicalRequest = [method, pathname, "", canonicalHeaders, signedHeaderNames.join(";"), payloadHash].join("\n");
+  const scope = `${date}/${OBJECT_STORAGE_REGION}/s3/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, crypto.createHash("sha256").update(canonicalRequest).digest("hex")].join("\n");
+  const dateKey = hmac(`AWS4${secretKey}`, date);
+  const regionKey = hmac(dateKey, OBJECT_STORAGE_REGION);
+  const serviceKey = hmac(regionKey, "s3");
+  const signingKey = hmac(serviceKey, "aws4_request");
+  const signature = hmac(signingKey, stringToSign, "hex");
+  const response = await fetch(new URL(pathname, endpoint), {
+    method,
+    headers: {
+      ...headers,
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaderNames.join(";")}, Signature=${signature}`,
+    },
+    ...(body == null ? {} : { body: payload }),
+  });
+  if (!response.ok) {
+    const details = (await response.text()).slice(0, 500);
+    const error = new Error(`Хранилище вернуло HTTP ${response.status}${details ? `: ${details}` : ""}`);
+    error.status = response.status === 404 ? 404 : 502;
+    throw error;
+  }
+  return response;
+}
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; media-src 'self' data: https:",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+};
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -85,6 +157,46 @@ function sendJson(response, status, payload) {
     "Cache-Control": "no-store",
   });
   response.end(JSON.stringify({ ...payload, appVersion: APP_VERSION, apiRevision: API_REVISION }));
+}
+
+function applySecurityHeaders(response) {
+  Object.entries(SECURITY_HEADERS).forEach(([name, value]) => response.setHeader(name, value));
+}
+
+function enforceSameOrigin(request) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) return;
+  const fetchSite = firstHeaderValue(request, "sec-fetch-site");
+  if (fetchSite === "cross-site") {
+    const error = new Error("Запрос с другого сайта запрещён");
+    error.status = 403;
+    throw error;
+  }
+  const origin = normalizeOrigin(firstHeaderValue(request, "origin"));
+  if (origin && origin !== normalizeOrigin(requestOrigin(request))) {
+    const error = new Error("Источник запроса не разрешён");
+    error.status = 403;
+    throw error;
+  }
+}
+
+function enforceApiRateLimit(request, requestPath) {
+  if (!requestPath.startsWith("/api/") || requestPath === "/api/health") return;
+  const now = Date.now();
+  const key = request.socket.remoteAddress || "unknown";
+  const recent = (apiRateLimit.get(key) || []).filter((timestamp) => now - timestamp < 60_000);
+  const limit = request.method === "GET" ? 180 : 60;
+  if (recent.length >= limit) {
+    const error = new Error("Слишком много запросов. Повторите позже");
+    error.status = 429;
+    throw error;
+  }
+  recent.push(now);
+  apiRateLimit.set(key, recent);
+  if (apiRateLimit.size > 1000) {
+    for (const [address, timestamps] of apiRateLimit) {
+      if (!timestamps.some((timestamp) => now - timestamp < 60_000)) apiRateLimit.delete(address);
+    }
+  }
 }
 
 function normalizeOrigin(value) {
@@ -250,19 +362,32 @@ function reportContentHash(document) {
 
 function stripReportAttachmentsFromHtml(value) {
   return String(value || "")
-    .replace(/<([a-z][a-z0-9-]*)\b[^>]*class=(["'])[^"']*\bcell-(?:image|file)\b[^"']*\2[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/<img\b[^>]*>/gi, "")
+    .replace(/<figure\b[^>]*class=(["'])[^"']*\bcell-image\b[^"']*\1[^>]*>[\s\S]*?<img\b[^>]*src=(["'])data:[\s\S]*?\2[^>]*>[\s\S]*?<\/figure>/gi, "")
+    .replace(/<figure\b[^>]*class=(["'])[^"']*\bcell-file\b[^"']*\1[^>]*data-data-url=(["'])data:[\s\S]*?\2[^>]*>[\s\S]*?<\/figure>/gi, "")
+    .replace(/<img\b[^>]*src=(["'])data:[\s\S]*?\1[^>]*>/gi, "")
     .replace(/\s(?:src|href)=("|')data:[\s\S]*?\1/gi, "");
+}
+
+function stripDangerousReportHtml(value) {
+  return String(value || "")
+    .replace(/<(script|style|iframe|object|embed|meta|link|base)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|style|iframe|object|embed|meta|link|base)\b[^>]*\/?>/gi, "")
+    .replace(/\s+on[a-z0-9_-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s+(href|src)\s*=\s*(["'])\s*(?:javascript|vbscript):[\s\S]*?\2/gi, "")
+    .replace(/\s+(href|src)\s*=\s*([^\s>]*(?:javascript|vbscript):[^\s>]*)/gi, "");
 }
 
 function sanitizeReportDocumentForServer(document) {
   const copy = JSON.parse(JSON.stringify(document || {}));
-  if (STORE_REPORT_ATTACHMENTS) return copy;
-  if (typeof copy.intro === "string") copy.intro = stripReportAttachmentsFromHtml(copy.intro);
+  if (typeof copy.intro === "string") {
+    copy.intro = stripDangerousReportHtml(copy.intro);
+    if (!STORE_REPORT_ATTACHMENTS) copy.intro = stripReportAttachmentsFromHtml(copy.intro);
+  }
   for (const section of copy.sections || []) {
     for (const row of section.rows || []) {
       for (const [columnId, value] of Object.entries(row.cells || {})) {
-        row.cells[columnId] = stripReportAttachmentsFromHtml(value);
+        row.cells[columnId] = stripDangerousReportHtml(value);
+        if (!STORE_REPORT_ATTACHMENTS) row.cells[columnId] = stripReportAttachmentsFromHtml(row.cells[columnId]);
       }
     }
   }
@@ -659,162 +784,6 @@ function decodeAttachmentFile(file, index) {
   };
 }
 
-function safeStorageFilename(name, mimeType) {
-  return sanitizeAttachmentName(name, mimeType || "image/png", 0).replace(/^image-1(\.[a-z0-9]+)$/i, `image-${Date.now()}$1`);
-}
-
-async function storageFetch(url, options = {}) {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  let payload = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { message: text };
-  }
-  if (!response.ok) {
-    const details = payload.message || payload.error_description || payload.error || response.statusText;
-    const error = new Error(`${response.status}: ${details}`);
-    error.status = response.status;
-    throw error;
-  }
-  return payload;
-}
-
-function normalizeYandexFolder(value) {
-  const pathValue = String(value || "/QA Report").trim() || "/QA Report";
-  return `/${pathValue.replace(/^\/+|\/+$/g, "")}`;
-}
-
-async function ensureYandexFolder(token, folderPath) {
-  const parts = folderPath.split("/").filter(Boolean);
-  let current = "";
-  for (const part of parts) {
-    current += `/${part}`;
-    const url = new URL("https://cloud-api.yandex.net/v1/disk/resources");
-    url.searchParams.set("path", current);
-    const response = await fetch(url, { method: "PUT", headers: { Authorization: `OAuth ${token}` } });
-    if (response.ok || response.status === 409) continue;
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(`Не удалось создать папку Яндекс.Диска ${current}: ${payload.message || response.statusText}`);
-  }
-}
-
-async function uploadToYandexDisk({ token, folderPath, file }) {
-  const folder = normalizeYandexFolder(folderPath);
-  await ensureYandexFolder(token, folder);
-  const targetPath = `${folder}/${file.name}`;
-  const uploadUrl = new URL("https://cloud-api.yandex.net/v1/disk/resources/upload");
-  uploadUrl.searchParams.set("path", targetPath);
-  uploadUrl.searchParams.set("overwrite", "true");
-  const uploadLink = await storageFetch(uploadUrl, {
-    headers: { Authorization: `OAuth ${token}` },
-  });
-  if (!uploadLink.href) throw new Error("Яндекс.Диск не вернул адрес загрузки");
-  const uploadResponse = await fetch(uploadLink.href, {
-    method: uploadLink.method || "PUT",
-    headers: { "Content-Type": file.type },
-    body: file.bytes,
-  });
-  if (!uploadResponse.ok) throw new Error(`Яндекс.Диск не принял файл: HTTP ${uploadResponse.status}`);
-  const publishUrl = new URL("https://cloud-api.yandex.net/v1/disk/resources/publish");
-  publishUrl.searchParams.set("path", targetPath);
-  await storageFetch(publishUrl, {
-    method: "PUT",
-    headers: { Authorization: `OAuth ${token}` },
-  });
-  const metaUrl = new URL("https://cloud-api.yandex.net/v1/disk/resources");
-  metaUrl.searchParams.set("path", targetPath);
-  metaUrl.searchParams.set("fields", "name,public_url,path");
-  const meta = await storageFetch(metaUrl, {
-    headers: { Authorization: `OAuth ${token}` },
-  });
-  return {
-    provider: "yandex",
-    name: meta.name || file.name,
-    publicUrl: meta.public_url,
-    path: meta.path || targetPath,
-  };
-}
-
-function multipartBody(parts, boundary) {
-  const chunks = [];
-  parts.forEach((part) => {
-    chunks.push(Buffer.from(`--${boundary}\r\n${part.headers}\r\n\r\n`));
-    chunks.push(Buffer.isBuffer(part.body) ? part.body : Buffer.from(String(part.body)));
-    chunks.push(Buffer.from("\r\n"));
-  });
-  chunks.push(Buffer.from(`--${boundary}--\r\n`));
-  return Buffer.concat(chunks);
-}
-
-async function uploadToGoogleDrive({ token, folderId, file }) {
-  const metadata = {
-    name: file.name,
-    ...(folderId ? { parents: [folderId] } : {}),
-  };
-  const boundary = `qa-report-${crypto.randomUUID()}`;
-  const body = multipartBody(
-    [
-      {
-        headers: "Content-Type: application/json; charset=UTF-8",
-        body: JSON.stringify(metadata),
-      },
-      {
-        headers: `Content-Type: ${file.type}`,
-        body: file.bytes,
-      },
-    ],
-    boundary,
-  );
-  const upload = await storageFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": `multipart/related; boundary=${boundary}`,
-      "Content-Length": String(body.length),
-    },
-    body,
-  });
-  if (!upload.id) throw new Error("Google Drive не вернул ID файла");
-  await storageFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(upload.id)}/permissions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ role: "reader", type: "anyone" }),
-  });
-  const meta = await storageFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(upload.id)}?fields=id,name,webViewLink,webContentLink`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return {
-    provider: "google",
-    id: meta.id,
-    name: meta.name || file.name,
-    publicUrl: meta.webViewLink || upload.webViewLink || meta.webContentLink || upload.webContentLink,
-  };
-}
-
-async function handleStorageUpload(request, response) {
-  const body = await readJson(request);
-  const provider = body.provider === "google" ? "google" : body.provider === "yandex" ? "yandex" : "";
-  if (!provider) throw new Error("Выберите хранилище: yandex или google");
-  const token = String(body.token || "").trim();
-  if (!token) throw new Error("Токен хранилища не указан");
-  const decoded = decodeImageFile(body.file || {}, 0);
-  const file = {
-    ...decoded,
-    name: safeStorageFilename(body.file?.name || decoded.name, decoded.type),
-  };
-  const result =
-    provider === "yandex"
-      ? await uploadToYandexDisk({ token, folderPath: body.yandexPath, file })
-      : await uploadToGoogleDrive({ token, folderId: String(body.googleFolderId || "").trim(), file });
-  if (!result.publicUrl) throw new Error("Хранилище загрузило файл, но не вернуло публичную ссылку");
-  sendJson(response, 200, { ok: true, ...result });
-}
-
 async function handleJiraTest(request, response) {
   const body = await readJson(request);
   const connection = normalizeConnection(body);
@@ -1114,6 +1083,12 @@ async function handleReportSave(request, response) {
     });
     return;
   }
+  if (objectStorageConfigured()) {
+    await s3Request("PUT", `reports/${id}/report.json`, {
+      body: Buffer.from(documentJson),
+      contentType: "application/json; charset=utf-8",
+    });
+  }
   const createdAt = existing?.created_at || body.createdAt || now;
   getReportsDb()
     .prepare(`
@@ -1389,132 +1364,38 @@ async function handleJiraAttachments(request, response) {
   sendJson(response, 200, { ok: true, attachments: results });
 }
 
-function escapeHtmlText(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function normalizeStorageReportId(value) {
+  const id = String(value || "").trim();
+  if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(id)) throw new Error("Некорректный ID отчёта");
+  return id;
 }
 
-async function emailFeedback(metadata, files, report) {
-  const apiKey = readSecret("RESEND_API_KEY");
-  const to = process.env.FEEDBACK_TO_EMAIL || "maldenbergsergey@gmail.com";
-  if (!apiKey) return { emailed: false, configured: false, reason: "email-not-configured" };
-  const from = process.env.FEEDBACK_FROM_EMAIL || "QA Report <onboarding@resend.dev>";
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: `QA Report — обратная связь ${metadata.id}`,
-      html: `
-        <h2>Новое обращение QA Report</h2>
-        <p><strong>Контакт:</strong> ${escapeHtmlText(metadata.contact || "не указан")}</p>
-        <p><strong>Время:</strong> ${escapeHtmlText(metadata.createdAt)}</p>
-        <p><strong>Страница:</strong> ${escapeHtmlText(metadata.pageUrl)}</p>
-        <p><strong>Viewport:</strong> ${escapeHtmlText(metadata.viewport)}</p>
-        <h3>Описание</h3>
-        <p>${escapeHtmlText(metadata.message).replace(/\n/g, "<br>")}</p>
-        <p>Текущий отчёт: ${metadata.reportIncluded ? "приложен в report.json" : "не приложен"}</p>
-      `,
-      attachments: [
-        ...files.map((file) => ({
-          filename: file.name,
-          content: file.bytes.toString("base64"),
-        })),
-        ...(report
-          ? [{
-              filename: "report.json",
-              content: Buffer.from(JSON.stringify(report, null, 2)).toString("base64"),
-            }]
-          : []),
-      ],
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    return {
-      emailed: false,
-      configured: true,
-      reason: payload.message || `Resend HTTP ${response.status}`,
-    };
-  }
-  return { emailed: true, configured: true, emailId: payload.id || "" };
-}
-
-async function handleFeedback(request, response) {
-  const clientAddress = request.socket.remoteAddress || "unknown";
-  const now = Date.now();
-  const recent = (feedbackRateLimit.get(clientAddress) || []).filter(
-    (timestamp) => now - timestamp < 10 * 60 * 1000,
-  );
-  if (recent.length >= 5) {
-    const error = new Error("Слишком много обращений. Попробуйте снова через несколько минут");
-    error.status = 429;
-    throw error;
-  }
-  recent.push(now);
-  feedbackRateLimit.set(clientAddress, recent);
+async function handleObjectStorageUpload(request, response) {
   const body = await readJson(request);
-  const message = String(body.message || "").trim();
-  if (!message) throw new Error("Описание проблемы не заполнено");
-  if (message.length > 20000) throw new Error("Описание проблемы слишком длинное");
-  const rawFiles = Array.isArray(body.files) ? body.files : [];
-  if (rawFiles.length > 6) throw new Error("Можно приложить не более 6 изображений");
-  const files = rawFiles.map((file, index) =>
-    decodeImageFile({ ...file, attachmentId: `feedback-${index + 1}` }, index),
-  );
-  const totalSize = files.reduce((sum, file) => sum + file.bytes.length, 0);
-  if (totalSize > 20 * 1024 * 1024) throw new Error("Общий размер изображений больше 20 МБ");
+  const reportId = normalizeStorageReportId(body.reportId);
+  const file = decodeAttachmentFile(body.file || {}, 0);
+  const kind = file.kind === "image" ? "images" : "files";
+  const storedName = `${crypto.randomUUID()}-${sanitizeGenericAttachmentName(file.name, 0)}`;
+  const key = `reports/${reportId}/${kind}/${storedName}`;
+  await s3Request("PUT", key, { body: file.bytes, contentType: file.type });
+  const url = `/api/storage/object/${encodeURIComponent(reportId)}/${kind}/${encodeURIComponent(storedName)}`;
+  sendJson(response, 201, { ok: true, reportId, kind, name: file.name, key, url });
+}
 
-  const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}`;
-  const entryDir = path.join(FEEDBACK_DIR, id);
-  await fs.promises.mkdir(entryDir, { recursive: true });
-  const metadata = {
-    id,
-    createdAt: new Date().toISOString(),
-    contact: String(body.contact || "").trim().slice(0, 500),
-    message,
-    pageUrl: String(body.pageUrl || "").slice(0, 2000),
-    userAgent: String(body.userAgent || "").slice(0, 1000),
-    viewport: String(body.viewport || "").slice(0, 100),
-    theme: String(body.theme || "").slice(0, 40),
-    reportIncluded: Boolean(body.report),
-    attachments: files.map((file) => ({ name: file.name, type: file.type, size: file.bytes.length })),
-  };
-  await Promise.all([
-    fs.promises.writeFile(path.join(entryDir, "feedback.json"), JSON.stringify(metadata, null, 2)),
-    ...(body.report
-      ? [fs.promises.writeFile(path.join(entryDir, "report.json"), JSON.stringify(body.report, null, 2))]
-      : []),
-    ...files.map((file) => fs.promises.writeFile(path.join(entryDir, file.name), file.bytes)),
-  ]);
-
-  const mail = await emailFeedback(metadata, files, body.report || null).catch((error) => ({
-    emailed: false,
-    configured: true,
-    reason: error.message,
-  }));
-  if (mail.configured && !mail.emailed) {
-    const error = new Error(
-      `Обращение сохранено, но email не отправлен: ${mail.reason || "неизвестная ошибка"}`,
-    );
-    error.status = 502;
-    throw error;
-  }
-  sendJson(response, 201, {
-    ok: true,
-    feedbackId: id,
-    stored: true,
-    emailed: mail.emailed,
-    emailId: mail.emailId || "",
-    emailReason: mail.reason || "",
+async function handleObjectStorageGet(request, response, reportId, kind, storedName) {
+  const safeReportId = normalizeStorageReportId(decodeURIComponent(reportId));
+  if (!['images', 'files'].includes(kind)) throw new Error("Некорректный тип объекта");
+  const safeName = path.basename(decodeURIComponent(storedName));
+  if (!safeName || safeName !== decodeURIComponent(storedName)) throw new Error("Некорректное имя объекта");
+  const storageResponse = await s3Request("GET", `reports/${safeReportId}/${kind}/${safeName}`);
+  const contentLength = storageResponse.headers.get("content-length");
+  response.writeHead(200, {
+    "Content-Type": storageResponse.headers.get("content-type") || "application/octet-stream",
+    ...(contentLength ? { "Content-Length": contentLength } : {}),
+    "Cache-Control": "private, max-age=300",
+    "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(safeName.replace(/^[0-9a-f-]{36}-/, ""))}`,
   });
+  response.end(Buffer.from(await storageResponse.arrayBuffer()));
 }
 
 function serveStatic(request, response) {
@@ -1522,7 +1403,8 @@ function serveStatic(request, response) {
   const isReportRoute = /^\/report\/[a-f0-9]{7,8}$/i.test(requestPath);
   const relative = requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
   const filePath = path.resolve(ROOT, relative);
-  if (!filePath.startsWith(`${ROOT}${path.sep}`) && filePath !== path.join(ROOT, "index.html")) {
+  const pathFromRoot = path.relative(ROOT, filePath);
+  if (pathFromRoot.startsWith("..") || path.isAbsolute(pathFromRoot)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;
@@ -1542,10 +1424,13 @@ function serveStatic(request, response) {
 }
 
 const server = http.createServer(async (request, response) => {
+  applySecurityHeaders(response);
   try {
     const requestPath = new URL(request.url, "http://localhost").pathname;
+    enforceSameOrigin(request);
+    enforceApiRateLimit(request, requestPath);
     if (request.method === "GET" && requestPath === "/api/health") {
-      sendJson(response, 200, { ok: true, service: "qa-report" });
+      sendJson(response, 200, { ok: true, service: "qa-report", objectStorageConfigured: objectStorageConfigured() });
       return;
     }
     if (request.method === "GET" && requestPath === "/api/reports") {
@@ -1600,11 +1485,12 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && requestPath === "/api/storage/upload") {
-      await handleStorageUpload(request, response);
+      await handleObjectStorageUpload(request, response);
       return;
     }
-    if (request.method === "POST" && requestPath === "/api/feedback") {
-      await handleFeedback(request, response);
+    const storedObjectMatch = requestPath.match(/^\/api\/storage\/object\/([^/]+)\/(images|files)\/([^/]+)$/);
+    if (request.method === "GET" && storedObjectMatch) {
+      await handleObjectStorageGet(request, response, storedObjectMatch[1], storedObjectMatch[2], storedObjectMatch[3]);
       return;
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -1613,11 +1499,12 @@ const server = http.createServer(async (request, response) => {
     }
     serveStatic(request, response);
   } catch (error) {
-    const status = error.status || 400;
+    const status = Number.isInteger(error.status) ? error.status : 400;
+    const hideDetails = process.env.NODE_ENV === "production" && status >= 500;
+    if (hideDetails) console.error(`Ошибка запроса: ${error.stack || error.message}`);
     sendJson(response, status, {
-      error: error.message || "Неизвестная ошибка",
-      errorCode: error.code || "",
-      jiraPath: error.pathname || "",
+      error: hideDetails ? "Внутренняя ошибка сервера" : error.message || "Неизвестная ошибка",
+      ...(hideDetails ? {} : { errorCode: error.code || "", jiraPath: error.pathname || "" }),
     });
   }
 });

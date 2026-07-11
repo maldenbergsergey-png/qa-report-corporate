@@ -14,6 +14,17 @@
       .replace(/'/g, "&#039;");
   }
 
+  function safeHttpUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw || /[\s"'<>\\]/.test(raw)) return "";
+    try {
+      const url = new URL(raw);
+      return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  }
+
   function splitWikiRow(line) {
     const delimiter = line.startsWith("||") ? "||" : "|";
     const source = line.slice(delimiter.length, line.endsWith(delimiter) ? -delimiter.length : undefined);
@@ -52,6 +63,7 @@
 
   function wikiInlineToHtml(value, attachments = []) {
     const codeBlocks = [];
+    const linkBlocks = [];
     let source = String(value || "").replace(
       /\{code(?::(?:language=)?([^}]+))?\}([\s\S]*?)\{code\}/gi,
       (_, language, code) => {
@@ -62,20 +74,31 @@
         return token;
       },
     );
+    source = source.replace(/\[([^\]|]+)\|([^\]]+)\]/g, (_, text, href) => {
+      const token = `@@LINK${linkBlocks.length}@@`;
+      const safeHref = safeHttpUrl(href);
+      linkBlocks.push(
+        safeHref
+          ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
+          : escapeHtml(text),
+      );
+      return token;
+    });
     const attachmentByName = new Map(attachments.map((item) => [item.filename, item]));
     return escapeHtml(source)
       .replace(/\\\\/g, "<br>")
       .replace(/!([^|!\n]+)(?:\|[^!]*)?!/g, (_, filename) => {
         const attachment = attachmentByName.get(filename);
         if (!attachment?.content && !attachment?.thumbnail) return `<span>[Изображение: ${filename}]</span>`;
-        const src = attachment.thumbnail || attachment.content;
+        const src = safeHttpUrl(attachment.thumbnail || attachment.content);
+        if (!src) return `<span>[Изображение: ${escapeHtml(filename)}]</span>`;
         return `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(src)}" alt="" data-attachment-id="${escapeHtml(attachment.id)}" data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}" data-jira-id="${escapeHtml(attachment.id)}" data-jira-url="${escapeHtml(attachment.content || "")}"></figure>`;
       })
-      .replace(/\[([^\]|]+)\|([^\]]+)\]/g, '<a href="$2">$1</a>')
       .replace(/\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}/gi, '<span style="color:$1">$2</span>')
       .replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>")
       .replace(/_([^_\n]+)_/g, "<em>$1</em>")
       .replace(/\+([^+\n]+)\+/g, "<u>$1</u>")
+      .replace(/@@LINK(\d+)@@/g, (_, index) => linkBlocks[Number(index)] || "")
       .replace(/@@CODE(\d+)@@/g, (_, index) => codeBlocks[Number(index)] || "");
   }
 

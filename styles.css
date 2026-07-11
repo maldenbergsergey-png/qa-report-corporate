@@ -2171,137 +2171,6 @@ body.section-sticky-active .editor-toolbar::after {
   gap: 8px;
 }
 
-.feedback-modal {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(760px, 94vw);
-  height: min(760px, 90vh);
-}
-
-.feedback-body {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-  overflow-y: auto;
-  padding: 22px;
-}
-
-.feedback-hint {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.feedback-message-field textarea {
-  width: 100%;
-  min-height: 150px;
-  resize: vertical;
-  padding: 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  outline: 0;
-  background: var(--surface);
-  color: var(--ink);
-  line-height: 1.5;
-}
-
-.feedback-message-field textarea:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
-}
-
-.feedback-attachments {
-  display: grid;
-  gap: 10px;
-}
-
-.feedback-attachments-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.feedback-dropzone {
-  display: grid;
-  min-height: 92px;
-  place-items: center;
-  padding: 16px;
-  border: 1px dashed var(--muted);
-  border-radius: 8px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.feedback-dropzone.drag-over {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 8%, transparent);
-}
-
-.feedback-preview-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
-}
-
-.feedback-preview-item {
-  position: relative;
-  min-width: 0;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--canvas);
-}
-
-.feedback-preview-item img {
-  display: block;
-  width: 100%;
-  height: 92px;
-  border-radius: 5px;
-  object-fit: cover;
-}
-
-.feedback-preview-item span {
-  display: block;
-  overflow: hidden;
-  padding: 6px 2px 1px;
-  color: var(--muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.feedback-preview-item button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 25px;
-  height: 25px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  color: white;
-  background: rgba(9, 30, 66, 0.78);
-  font-size: 18px;
-}
-
-.feedback-report-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.feedback-error {
-  padding: 9px 11px;
-  border-radius: 6px;
-  color: #ae2e24;
-  background: #ffeceb;
-  font-size: 12px;
-}
-
 .settings-layout {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
@@ -2473,27 +2342,6 @@ body.section-sticky-active .editor-toolbar::after {
 
 .button-primary.is-saved:hover {
   background: #216e4e;
-}
-
-.storage-grid {
-  display: grid;
-  gap: 14px;
-}
-
-.storage-card {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.storage-toggle {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-weight: 800;
 }
 
 .settings-toggle-card {
@@ -2839,6 +2687,37 @@ body.section-sticky-active .editor-toolbar::after {
     opacity 120ms ease,
     transform 120ms ease;
   pointer-events: none;
+}
+
+.storage-object-status {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 3px 10px rgba(9, 30, 66, 0.14);
+  color: #1f845a;
+  font-size: 17px;
+}
+
+.storage-object-status.pending::before {
+  width: 13px;
+  height: 13px;
+  border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  content: "";
+  animation: storage-object-spin 800ms linear infinite;
+}
+
+@keyframes storage-object-spin {
+  to { transform: rotate(360deg); }
 }
 
 .cell-code-block:hover .object-action-panel,

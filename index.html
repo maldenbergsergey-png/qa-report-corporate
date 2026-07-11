@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7fb" />
+    <title>QA Report — редактор чек-листов</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=54" />
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5" /><path d="M4 9h9a7 7 0 0 1 7 7v4" /></symbol>
+      <symbol id="icon-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5" /><path d="M20 9h-9a7 7 0 0 0-7 7v4" /></symbol>
+      <symbol id="icon-focus" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" /></symbol>
+      <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
+      <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></symbol>
+      <symbol id="icon-import" viewBox="0 0 24 24"><path d="M12 3v10m0 0 4-4m-4 4-4-4" /><path d="M5 15v4h14v-4" /></symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 21V9m0 0 5 5m-5-5-5 5M5 3h14" /></symbol>
+      <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
+      <symbol id="icon-ticket" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2Z" /><path d="M9 9h6M9 13h4" /></symbol>
+      <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
+      <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></symbol>
+      <symbol id="icon-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1" /></symbol>
+      <symbol id="icon-paperclip" viewBox="0 0 24 24"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L10 17.4a2 2 0 0 1-2.8-2.8l8.5-8.5" /></symbol>
+      <symbol id="icon-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></symbol>
+      <symbol id="icon-list-ordered" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11" /><path d="M4 5h1v4M3.5 9h3M3.5 11.5h2.2c.8 0 1.3.5 1.3 1.2 0 .5-.2.9-.7 1.3l-2.8 2.5H7M4 18h1.6c.8 0 1.4.4 1.4 1.1 0 .6-.4 1-1.2 1.1.9.1 1.4.5 1.4 1.2 0 .8-.6 1.2-1.5 1.2H4" /></symbol>
+      <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 9 9 0 1 0 20.5 14.2Z" /></symbol>
+      <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></symbol>
+      <symbol id="icon-circle-half" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18" /></symbol>
+      <symbol id="icon-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18Z" style="fill: currentColor; stroke: none" /></symbol>
+      <symbol id="icon-cloud-alert" viewBox="0 0 24 24"><path d="M17.5 18H8a5 5 0 1 1 1.5-9.8A6 6 0 0 1 21 11a3.5 3.5 0 0 1-3.5 7Z" /><path d="M12 9v4M12 16h.01" /></symbol>
+      <symbol id="icon-corporate" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="5" /><path d="M8 8h8v8H8z" /><path d="M10 4v4M14 16v4M4 10h4M16 14h4" /></symbol>
+      <symbol id="icon-life-buoy" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /><path d="m5.6 5.6 4.3 4.3M14.1 14.1l4.3 4.3M18.4 5.6l-4.3 4.3M9.9 14.1l-4.3 4.3" /></symbol>
+      <symbol id="icon-bug" viewBox="0 0 24 24"><path d="M8 6.5A4 4 0 0 1 16 6.5M9 3 7.5 1.5M15 3l1.5-1.5M8 9h8v6a4 4 0 0 1-8 0V9ZM4 10h4M16 10h4M4 15h4M16 15h4M6 20l2.5-2.5M18 20l-2.5-2.5M12 9v10" /></symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></symbol>
+      <symbol id="icon-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5Z" /><path d="M8 4v6h8V4M8 20v-6h8v6" /></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" /></symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></symbol>
+      <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="M15 6 9 12l6 6" /><path d="M20 12H9" /></symbol>
+      <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /><path d="M4 12h11" /></symbol>
+      <symbol id="icon-arrow-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" /><path d="M12 20V9" /></symbol>
+      <symbol id="icon-arrow-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /><path d="M12 4v11" /></symbol>
+      <symbol id="icon-column-insert-left" viewBox="0 0 24 24"><rect x="9" y="4" width="10" height="16" rx="2" /><path d="M14 4v16M5 9v6M2 12h6" /></symbol>
+      <symbol id="icon-column-insert-right" viewBox="0 0 24 24"><rect x="5" y="4" width="10" height="16" rx="2" /><path d="M10 4v16M19 9v6M16 12h6" /></symbol>
+      <symbol id="icon-row-insert-above" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="10" rx="2" /><path d="M4 14h16M9 5h6M12 2v6" /></symbol>
+      <symbol id="icon-row-insert-below" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="10" rx="2" /><path d="M4 10h16M9 19h6M12 16v6" /></symbol>
+      <symbol id="icon-section-split" viewBox="0 0 24 24"><path d="M5 5h14M5 19h14M5 12h6M17 9l3 3-3 3" /><path d="M14 12h6" /></symbol>
+      <symbol id="icon-align-left" viewBox="0 0 24 24"><path d="M4 6h16M4 10h10M4 14h16M4 18h10" /></symbol>
+      <symbol id="icon-align-center" viewBox="0 0 24 24"><path d="M4 6h16M7 10h10M4 14h16M7 18h10" /></symbol>
+      <symbol id="icon-align-right" viewBox="0 0 24 24"><path d="M4 6h16M10 10h10M4 14h16M10 18h10" /></symbol>
+      <symbol id="icon-stretch" viewBox="0 0 24 24"><path d="M4 12h16M4 12l3-3M4 12l3 3M20 12l-3-3M20 12l-3 3M3 5v14M21 5v14" /></symbol>
+    </svg>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="header-brand-group">
+          <a class="brand" href="#" aria-label="QA Report">
+            <span class="brand-mark">
+              QA
+            </span>
+            <span class="brand-copy">
+              <strong>QA Report</strong>
+              <small>Редактор чек-листов</small>
+            </span>
+          </a>
+          <div class="save-state" id="saveState">
+            <span class="save-dot"></span>
+            <span>Сохранено</span>
+          </div>
+          <div class="theme-selector">
+            <button class="header-icon-button theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="Выберите тему" aria-label="Выберите тему">
+              <svg class="ui-icon theme-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+            </button>
+            <div class="theme-menu" id="themeMenu" role="menu" hidden>
+              <button class="theme-menu-item" data-theme="light" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-sun"></use></svg>
+                <span>Светлая</span>
+              </button>
+              <button class="theme-menu-item" data-theme="graphite" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg>
+                <span>Графитовая</span>
+              </button>
+              <button class="theme-menu-item" data-theme="dark" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+                <span>Тёмная</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <nav class="header-report-actions" aria-label="Действия с отчётом">
+          <div class="header-action-group">
+            <button class="header-action" id="clearButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
+              <span>Новый</span>
+            </button>
+            <button class="header-action" id="historyButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
+              <span>История</span>
+            </button>
+          </div>
+          <div class="header-action-group">
+            <button class="header-icon-button" id="undoButton" type="button" title="Отменить" aria-label="Отменить" disabled>
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-undo"></use></svg>
+            </button>
+            <button class="header-icon-button" id="redoButton" type="button" title="Повторить" aria-label="Повторить" disabled>
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-redo"></use></svg>
+            </button>
+          </div>
+          <div class="header-action-group">
+            <button class="header-action" id="focusModeButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-focus"></use></svg>
+              <span>Фокус</span>
+            </button>
+            <button class="header-action" id="previewButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-eye"></use></svg>
+              <span>Предпросмотр</span>
+            </button>
+          </div>
+        </nav>
+
+        <div class="header-integrations">
+          <div class="header-dropdown">
+            <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu">
+              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg>
+              <span>Jira</span>
+              <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+            </button>
+            <div class="header-dropdown-menu" id="jiraMenu" role="menu" hidden>
+              <button class="header-dropdown-item" id="importButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg>
+                <span>Загрузить из Jira</span>
+              </button>
+              <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
+                <svg class="ui-icon primary-action-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
+                <span class="primary-action-label">Отправить в Jira</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="header-dropdown">
+            <button class="header-dropdown-trigger" id="copyMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="copyMenu">
+              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
+              <span>Скопировать как</span>
+              <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+            </button>
+            <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" hidden>
+              <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
+                <span>Визуальную таблицу</span>
+              </button>
+              <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
+                <span>Jira-разметку</span>
+              </button>
+              <button class="header-dropdown-item" id="exportXlsxButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
+                <span>Excel XLSX</span>
+              </button>
+            </div>
+          </div>
+          <button class="header-icon-button" id="settingsButton" type="button" title="Настройки" aria-label="Настройки">
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <button class="cloud-conflict-popover" id="cloudConflictStatus" type="button" title="Открыть сравнение локальной и облачной версии" hidden>
+        <svg class="ui-icon" aria-hidden="true"><use href="#icon-cloud-alert"></use></svg>
+        <span>
+          <strong>Есть изменения в облаке</strong>
+          <small>Локальная и облачная версии отличаются</small>
+        </span>
+        <b>Сравнить</b>
+      </button>
+
+      <main class="workspace">
+        <section class="report-card">
+          <div class="report-heading">
+            <div class="eyebrow">Отчёт о тестировании</div>
+            <h1>Чек-лист</h1>
+          </div>
+
+          <div class="metadata-grid">
+            <label class="field issue-field">
+              <span>Ссылка на задачу</span>
+              <input
+                id="issueUrl"
+                type="url"
+                placeholder="https://company.atlassian.net/browse/QA-1234"
+              />
+            </label>
+            <label class="field environment-field">
+              <span>Окружение</span>
+              <input id="environment" type="text" list="environmentOptions" placeholder="Например, STAGE" />
+              <datalist id="environmentOptions">
+                <option value="STAGE"></option>
+                <option value="DEV"></option>
+                <option value="PROD"></option>
+                <option value="Локально"></option>
+              </datalist>
+            </label>
+            <label class="field overall-status-field">
+              <span>Итог</span>
+              <select id="overallStatus">
+                <option value="OK">OK</option>
+                <option value="НЕ ОК">НЕ ОК</option>
+                <option value="ПОЧТИ ОК">ПОЧТИ ОК</option>
+                <option value="НЕ ПРОВЕРЕНО">НЕ ПРОВЕРЕНО</option>
+                <option value="ЧАСТИЧНО ПРОВЕРЕНО">ЧАСТИЧНО ПРОВЕРЕНО</option>
+                <option value="ТРЕБУЕТ УТОЧНЕНИЯ">ТРЕБУЕТ УТОЧНЕНИЯ</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="editor-toolbar" role="toolbar" aria-label="Форматирование текста">
+            <select id="blockFormat" title="Стиль текста" aria-label="Стиль текста">
+              <option value="p">Обычный текст</option>
+              <option value="h2">Заголовок 2</option>
+              <option value="h3">Заголовок 3</option>
+            </select>
+            <span class="toolbar-divider"></span>
+            <button type="button" class="toolbar-icon-button" data-command="bold" title="Жирный" aria-label="Жирный"><span class="toolbar-text-icon toolbar-bold">B</span></button>
+            <button type="button" class="toolbar-icon-button" data-command="italic" title="Курсив" aria-label="Курсив"><span class="toolbar-text-icon toolbar-italic">I</span></button>
+            <button type="button" class="toolbar-icon-button" data-command="underline" title="Подчёркнутый" aria-label="Подчёркнутый"><span class="toolbar-text-icon toolbar-underline">U</span></button>
+            <button type="button" class="toolbar-icon-button" data-command="strikeThrough" title="Зачёркнутый" aria-label="Зачёркнутый"><span class="toolbar-text-icon toolbar-strike">S</span></button>
+            <span class="toolbar-divider"></span>
+            <button type="button" class="toolbar-icon-button" data-command="insertUnorderedList" title="Маркированный список" aria-label="Маркированный список">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-list"></use></svg>
+            </button>
+            <button type="button" class="toolbar-icon-button" data-command="insertOrderedList" title="Нумерованный список" aria-label="Нумерованный список">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-list-ordered"></use></svg>
+            </button>
+            <button type="button" id="linkButton" class="toolbar-icon-button" title="Добавить ссылку" aria-label="Добавить ссылку">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg>
+              <svg class="toolbar-chevron" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+            </button>
+            <div class="toolbar-color-wrap">
+              <button type="button" id="textColorInput" class="toolbar-color-button" title="Цвет текста" aria-label="Цвет текста" aria-haspopup="true" aria-expanded="false">
+                <span class="toolbar-color-letter">A</span>
+                <svg class="toolbar-chevron" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
+              </button>
+              <div class="toolbar-color-menu" id="textColorMenu" hidden>
+                <button type="button" style="--swatch:#172b4d" data-color="#172b4d" aria-label="Чёрный"></button>
+                <button type="button" style="--swatch:#5e6c84" data-color="#5e6c84" aria-label="Серый"></button>
+                <button type="button" style="--swatch:#c1c7d0" data-color="#c1c7d0" aria-label="Светло-серый"></button>
+                <button type="button" style="--swatch:#0052cc" data-color="#0052cc" aria-label="Синий"></button>
+                <button type="button" style="--swatch:#4c9aff" data-color="#4c9aff" aria-label="Голубой"></button>
+                <button type="button" style="--swatch:#00875a" data-color="#00875a" aria-label="Зелёный"></button>
+                <button type="button" style="--swatch:#57d9a3" data-color="#57d9a3" aria-label="Мятный"></button>
+                <button type="button" style="--swatch:#de350b" data-color="#de350b" aria-label="Красный"></button>
+                <button type="button" style="--swatch:#ff8b00" data-color="#ff8b00" aria-label="Оранжевый"></button>
+                <button type="button" style="--swatch:#ffab00" data-color="#ffab00" aria-label="Жёлтый"></button>
+                <button type="button" style="--swatch:#403294" data-color="#403294" aria-label="Фиолетовый"></button>
+                <button type="button" style="--swatch:#ffbdad" data-color="#ffbdad" aria-label="Розовый"></button>
+              </div>
+            </div>
+            <button type="button" id="codeButton" class="toolbar-icon-button" title="Вставить блок кода" aria-label="Вставить блок кода">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
+            </button>
+            <button type="button" id="imageButton" class="toolbar-icon-button" title="Добавить вложение" aria-label="Добавить вложение">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
+            </button>
+            <input id="imageInput" type="file" multiple hidden />
+          </div>
+          <div class="link-popover" id="linkPopover" hidden>
+            <div class="link-popover-heading">
+              <strong id="linkPopoverTitle">Добавить ссылку</strong>
+              <button class="link-popover-close" id="closeLinkPopoverButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>
+              <span>Текст ссылки</span>
+              <input id="linkTextInput" type="text" placeholder="Например, документация" />
+            </label>
+            <label>
+              <span>Адрес</span>
+              <input id="linkUrlInput" type="url" placeholder="https://example.com" />
+            </label>
+            <div class="link-popover-error" id="linkPopoverError" hidden></div>
+            <div class="link-popover-actions">
+              <button class="button button-ghost danger-text" id="removeLinkButton" type="button" hidden>
+                Удалить ссылку
+              </button>
+              <button class="button button-primary" id="applyLinkButton" type="button">Применить</button>
+            </div>
+          </div>
+
+          <div
+            class="intro-editor"
+            id="introEditor"
+            contenteditable="true"
+            data-placeholder="Добавьте вводный текст: что проверялось, сборка, важные условия…"
+          ></div>
+
+          <div class="sections" id="sections"></div>
+
+          <button class="add-section-button" id="addSectionButton" type="button">
+            <span>＋</span>
+            Добавить раздел
+          </button>
+        </section>
+
+        <aside class="summary-card">
+          <div class="summary-heading">
+            <div>
+              <div class="eyebrow">Сводка</div>
+              <h2>Результат проверок</h2>
+            </div>
+            <span class="summary-total" id="summaryTotal">0</span>
+          </div>
+          <div class="summary-chart" id="summaryChart"></div>
+          <div class="summary-list" id="summaryList"></div>
+          <div class="summary-note">
+            Статусы пересчитываются автоматически. Незаполненные строки не попадают в сводку.
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <button class="floating-help-button" id="feedbackButton" type="button" title="Помощь и обратная связь" aria-label="Помощь и обратная связь">
+      <svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg>
+    </button>
+
+    <div class="modal-backdrop" id="previewModal" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Экспорт</div>
+            <h2 id="previewTitle">Предпросмотр</h2>
+          </div>
+          <div class="modal-header-actions">
+            <button class="header-icon-button modal-save-button" id="modalSaveMarkupButton" type="button" title="Сохранить результат экспорта" aria-label="Сохранить результат экспорта">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-save"></use></svg>
+            </button>
+            <button class="icon-button" id="closePreviewButton" type="button" aria-label="Закрыть">×</button>
+          </div>
+        </header>
+        <div class="preview-tabs" role="tablist">
+          <button class="preview-tab active" data-preview-tab="visual" type="button">Визуально</button>
+          <button class="preview-tab" data-preview-tab="markup" type="button">Разметка</button>
+        </div>
+        <div class="preview-body">
+          <div id="visualPreview" class="jira-preview"></div>
+          <textarea id="markupPreview" class="markup-preview" aria-label="Редактируемая Jira-разметка" hidden></textarea>
+        </div>
+        <footer class="modal-footer">
+          <span>Разметку можно отредактировать перед копированием.</span>
+          <div class="modal-actions">
+            <button class="button button-secondary" id="modalCopyVisualButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
+              <span>Копировать визуальную таблицу</span>
+            </button>
+            <button class="button button-primary" id="modalCopyButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
+              <span>Копировать Jira-разметку</span>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop publish-progress-backdrop" id="publishProgressModal" hidden>
+      <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="publishProgressTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Jira</div>
+            <h2 id="publishProgressTitle">Публикация в Jira</h2>
+          </div>
+        </header>
+        <div class="publish-progress-body">
+          <div class="publish-progress-bar" aria-hidden="true">
+            <span id="publishProgressBar"></span>
+          </div>
+          <ol class="publish-steps" id="publishSteps">
+            <li data-step="prepare">Подготовка отчёта</li>
+            <li data-step="attachments">Загрузка вложений</li>
+            <li data-step="comment">Публикация комментария</li>
+            <li data-step="verify">Проверка результата</li>
+          </ol>
+          <p class="publish-status" id="publishStatusText">Ожидание запуска</p>
+          <p class="publish-error" id="publishErrorText" hidden></p>
+        </div>
+        <footer class="modal-footer">
+          <span id="publishProgressHint">Не закрывайте страницу до завершения публикации.</span>
+          <button class="button button-secondary" id="publishCancelButton" type="button">Отменить</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="importModal" hidden>
+      <section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Импорт</div>
+            <h2 id="importTitle">Вставить чек-лист из Jira</h2>
+          </div>
+          <button class="icon-button" id="closeImportButton" type="button" aria-label="Закрыть импорт">×</button>
+        </header>
+        <div class="import-body">
+          <div class="import-source-tabs">
+            <button class="import-source-tab active" data-import-source="markup" type="button">Разметка</button>
+            <button class="import-source-tab" data-import-source="comment" type="button">Ссылка на комментарий</button>
+          </div>
+          <div id="markupImportPane" class="import-pane">
+            <p>
+              Скопируйте содержимое комментария из режима Jira «Текст». Таблицы, разделы,
+              статусы и форматирование будут преобразованы в редактируемый отчёт.
+            </p>
+            <textarea
+              id="importMarkup"
+              class="import-textarea"
+              placeholder="||Номер||Проверка||ФР||Статус||Комментарий||&#10;|1.|Проверка...|Результат...|{color:#14892c}*OK*{color}| |"
+            ></textarea>
+          </div>
+          <div id="commentImportPane" class="import-pane" hidden>
+            <label class="field">
+              <span>Ссылка на комментарий</span>
+              <input id="commentImportUrl" type="url" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
+            </label>
+            <p>
+              Вставьте прямую ссылку на комментарий Jira. Подключение берётся из настроек Jira.
+            </p>
+          </div>
+          <div class="import-warning" id="importWarning" hidden></div>
+          <div class="import-summary" id="importSummary" hidden></div>
+        </div>
+        <footer class="modal-footer">
+          <span>Перед импортом текущий отчёт будет сохранён в истории.</span>
+          <div class="modal-actions">
+            <button class="button button-primary" id="applyImportButton" type="button">Заменить отчёт</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="historyModal" hidden>
+      <section class="modal history-modal" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Сервер и браузер</div>
+            <h2 id="historyTitle">История отчётов</h2>
+          </div>
+          <button class="icon-button" id="closeHistoryButton" type="button" aria-label="Закрыть историю">×</button>
+        </header>
+        <div class="history-toolbar">
+          <input id="historySearch" type="search" placeholder="Поиск по задаче или названию" />
+          <span id="historyUsage"></span>
+          <button class="button button-ghost danger-text" id="clearHistoryButton" type="button">Очистить историю</button>
+        </div>
+        <div class="history-list" id="historyList"></div>
+        <footer class="modal-footer">
+          <span>Серверная история дополняется локальным кэшем браузера.</span>
+          <button class="button button-secondary" id="saveHistorySnapshotButton" type="button">Сохранить снимок</button>
+        </footer>
+      </section>
+    </div>
+
+    <button class="focus-exit-button" id="focusExitButton" type="button" hidden>Выйти из фокус-режима</button>
+
+    <div class="modal-backdrop" id="mediaViewerModal" hidden>
+      <section class="modal media-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="mediaViewerTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Вложение</div>
+            <h2 id="mediaViewerTitle">Просмотр изображения</h2>
+          </div>
+          <button class="icon-button" id="closeMediaViewerButton" type="button" aria-label="Закрыть просмотр">×</button>
+        </header>
+        <div class="media-viewer-body">
+          <img id="mediaViewerImage" alt="Просматриваемое вложение" />
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="codeEditorModal" hidden>
+      <section class="modal code-editor-modal" role="dialog" aria-modal="true" aria-labelledby="codeEditorTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Фрагмент кода</div>
+            <h2 id="codeEditorTitle">Редактирование кода</h2>
+          </div>
+          <button class="icon-button" id="closeCodeEditorButton" type="button" aria-label="Закрыть редактор кода">×</button>
+        </header>
+        <div class="code-editor-body">
+          <div class="code-editor-meta">
+            <span>Содержимое фрагмента</span>
+            <strong id="codeEditorLanguage">1 строка</strong>
+          </div>
+          <div class="code-editor-input">
+            <pre id="codeEditorLineNumbers" class="code-editor-line-numbers" aria-hidden="true">1</pre>
+            <textarea id="codeEditorTextarea" spellcheck="false" aria-label="Код" wrap="off"></textarea>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <span id="codeEditorState">Изменений нет</span>
+          <button
+            class="code-save-button"
+            id="saveCodeButton"
+            type="button"
+            disabled
+            title="Сохранить изменения"
+            aria-label="Сохранить изменения"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 4h11l3 3v13H5V4Zm3 0v6h8V4H8Zm0 10v4h8v-4H8Z" />
+            </svg>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="confirmModal" hidden>
+      <section class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Подтверждение</div>
+            <h2 id="confirmModalTitle">Подтвердите действие</h2>
+          </div>
+          <button class="icon-button" id="closeConfirmButton" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="confirm-modal-body" id="confirmModalMessage"></div>
+        <footer class="modal-footer">
+          <button class="button button-ghost" id="cancelConfirmButton" type="button">Отмена</button>
+          <button class="button button-primary" id="acceptConfirmButton" type="button">Подтвердить</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="feedbackModal" hidden>
+      <section class="modal feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Обратная связь</div>
+            <h2 id="feedbackTitle">Сообщить о проблеме</h2>
+          </div>
+          <button class="icon-button" id="closeFeedbackButton" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="feedback-body">
+          <p class="feedback-hint">
+            Опишите проблему и вставьте скриншоты через Command/Ctrl+V или выберите файлы.
+          </p>
+          <label class="field">
+            <span>Ваш контакт <small>необязательно</small></span>
+            <input id="feedbackContact" type="text" placeholder="Email или имя" />
+          </label>
+          <label class="field feedback-message-field">
+            <span>Описание проблемы</span>
+            <textarea id="feedbackMessage" placeholder="Что произошло и как это воспроизвести?"></textarea>
+          </label>
+          <div class="feedback-attachments">
+            <div class="feedback-attachments-heading">
+              <strong>Скриншоты</strong>
+              <button class="button button-secondary" id="feedbackFilesButton" type="button">Добавить изображения</button>
+              <input id="feedbackFilesInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+            </div>
+            <div class="feedback-dropzone" id="feedbackDropzone">
+              <span>Вставьте изображение из буфера или перетащите сюда</span>
+            </div>
+            <div class="feedback-preview-list" id="feedbackPreviewList"></div>
+          </div>
+          <label class="feedback-report-option">
+            <input id="feedbackIncludeReport" type="checkbox" />
+            <span>Приложить текущий чек-лист без настроек Jira и токенов</span>
+          </label>
+          <div class="feedback-error" id="feedbackError" hidden></div>
+        </div>
+        <footer class="modal-footer">
+          <span id="feedbackState">Обращение сохранится на сервере приложения.</span>
+          <div class="modal-actions">
+            <button class="button button-ghost" id="cancelFeedbackButton" type="button">Отмена</button>
+            <button class="button button-primary" id="sendFeedbackButton" type="button">Отправить</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="jiraSettingsModal" hidden>
+      <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="jiraSettingsTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Настройки</div>
+            <h2 id="jiraSettingsTitle">Интеграции</h2>
+          </div>
+          <button class="icon-button" id="closeJiraSettingsButton" type="button" aria-label="Закрыть настройки">×</button>
+        </header>
+        <div class="settings-layout">
+          <nav class="settings-sidebar" aria-label="Разделы настроек">
+            <button class="settings-nav-item active" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-send"></use></svg>
+              <span>Jira</span>
+            </button>
+            <button class="settings-nav-item" id="settingsFilesSectionButton" type="button" data-settings-section="files">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
+              <span>Файлы</span>
+            </button>
+            <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
+              <span>История</span>
+            </button>
+          </nav>
+          <div class="settings-body">
+            <section class="settings-section active" id="settingsJiraSection" data-settings-panel="jira">
+              <div class="settings-note">
+                Токен, пароль или cookie хранятся только в памяти открытой вкладки и исчезают после перезагрузки. Остальные настройки сохраняются локально в браузере.
+              </div>
+              <div class="settings-tabs" role="tablist" aria-label="Способ настройки Jira">
+                <button class="settings-tab active" id="jiraManualTab" data-jira-settings-tab="manual" type="button" role="tab" aria-selected="true" aria-controls="jiraManualPane">Вручную</button>
+                <button class="settings-tab" id="jiraCurlTab" data-jira-settings-tab="curl" type="button" role="tab" aria-selected="false" aria-controls="jiraCurlPane">Из curl</button>
+              </div>
+              <div class="settings-pane" id="jiraManualPane" role="tabpanel" aria-labelledby="jiraManualTab">
+                <label class="field">
+                  <span>Тип Jira</span>
+                  <select id="jiraType">
+                    <option value="data-center">Data Center / Server</option>
+                    <option value="cloud">Cloud</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Адрес Jira</span>
+                  <input id="jiraBaseUrl" type="url" placeholder="https://jira.company.ru" />
+                </label>
+                <label class="field" id="jiraAuthMethodField">
+                  <span>Способ авторизации</span>
+                  <select id="jiraAuthMethod">
+                    <option value="pat">Personal Access Token</option>
+                    <option value="basic">Логин и пароль</option>
+                    <option value="cookie">Cookie из curl</option>
+                  </select>
+                </label>
+                <label class="field" id="jiraUserField">
+                  <span id="jiraUserLabel">Имя пользователя</span>
+                  <input id="jiraUser" type="text" autocomplete="username" placeholder="username" />
+                </label>
+                <label class="field">
+                  <span id="jiraTokenLabel">Personal Access Token</span>
+                  <input id="jiraToken" type="password" autocomplete="off" placeholder="Токен не сохраняется" />
+                </label>
+              </div>
+              <div class="settings-pane" id="jiraCurlPane" role="tabpanel" aria-labelledby="jiraCurlTab" hidden>
+                <label class="field">
+                  <span>curl-запрос из Jira</span>
+                  <textarea id="jiraCurlInput" class="settings-curl-input" spellcheck="false" placeholder="curl 'https://jira.company.ru/rest/api/2/issue/QA-123/comment' -H 'Authorization: Bearer ...'"></textarea>
+                </label>
+                <p class="settings-curl-hint">
+                  Можно вставить curl с Bearer, Basic, -u user:password или Cookie. Секрет из curl будет применён только в текущей вкладке.
+                </p>
+                <div class="settings-curl-state" id="jiraCurlState" hidden></div>
+                <button class="button button-secondary" id="parseJiraCurlButton" type="button">
+                  Разобрать и сохранить
+                </button>
+              </div>
+              <div class="settings-section-actions">
+                <button class="button button-secondary" id="testJiraButton" type="button">
+                  Проверить подключение
+                </button>
+                <div class="connection-state" id="jiraConnectionState">Соединение ещё не проверялось.</div>
+              </div>
+            </section>
+            <section class="settings-section" id="settingsFilesSection" data-settings-panel="files" hidden>
+              <div class="settings-note">
+                Токены дисков используются только сервером приложения для загрузки файлов. В браузере сохраняются только признаки активности и путь/ID папки.
+              </div>
+              <div class="storage-grid">
+                <section class="storage-card">
+                  <label class="storage-toggle">
+                    <input id="yandexStorageEnabled" type="checkbox" />
+                    <span>Яндекс.Диск активен</span>
+                  </label>
+                  <label class="field">
+                    <span>OAuth-токен Яндекса</span>
+                    <input id="yandexStorageToken" type="password" autocomplete="off" placeholder="Не сохраняется в браузере" />
+                  </label>
+                  <label class="field">
+                    <span>Папка на Диске</span>
+                    <input id="yandexStoragePath" type="text" placeholder="/QA Report" />
+                  </label>
+                  <p class="settings-curl-hint">
+                    Создайте OAuth-токен для Яндекс.Диска с доступом к REST API Диска. Укажите папку, куда будут попадать изображения.
+                  </p>
+                </section>
+                <section class="storage-card">
+                  <label class="storage-toggle">
+                    <input id="googleStorageEnabled" type="checkbox" />
+                    <span>Google Drive активен</span>
+                  </label>
+                  <label class="field">
+                    <span>OAuth access token Google</span>
+                    <input id="googleStorageToken" type="password" autocomplete="off" placeholder="Не сохраняется в браузере" />
+                  </label>
+                  <label class="field">
+                    <span>ID папки Google Drive</span>
+                    <input id="googleStorageFolder" type="text" placeholder="Например, 1AbCdEf..." />
+                  </label>
+                  <p class="settings-curl-hint">
+                    Получите access token с областью доступа Drive File или Drive. ID папки берётся из адреса открытой папки Google Drive.
+                  </p>
+                </section>
+              </div>
+              <div class="connection-state" id="storageConnectionState">Настройки файлового хранилища ещё не сохранялись.</div>
+            </section>
+            <section class="settings-section" id="settingsHistorySection" data-settings-panel="history" hidden>
+              <div class="settings-note">
+                Облачное хранилище позволяет открывать чек-листы в разных браузерах при одинаковом ключе пространства. Если опция выключена, данные остаются только в этом браузере.
+              </div>
+              <label class="settings-toggle-card">
+                <input id="cloudHistoryEnabled" type="checkbox" />
+                <span>
+                  <strong>Сохранять чек-листы в облачном хранилище</strong>
+                  <small>Если включено, чек-листы будут синхронизироваться через серверное хранилище. Если выключено, используется только локальное хранилище браузера.</small>
+                </span>
+              </label>
+              <label class="field">
+                <span>ID этого браузера</span>
+                <input id="reportClientId" type="text" readonly />
+              </label>
+              <label class="field">
+                <span>Ключ пространства</span>
+                <input id="reportWorkspaceKey" type="text" autocomplete="off" placeholder="Например, qa-team или project-advinta" />
+              </label>
+              <p class="settings-curl-hint">
+                Одинаковый ключ пространства позволяет использовать одну облачную историю в разных браузерах. Если поле пустое, используется этот браузер.
+              </p>
+              <div class="connection-state" id="reportIdentityState">Чек-листы сохраняются только локально в этом браузере.</div>
+            </section>
+          </div>
+        </div>
+        <footer class="modal-footer settings-footer">
+          <button class="button button-primary" id="saveJiraSettingsButton" type="button">
+            <span class="settings-save-check" id="settingsSaveCheck" aria-hidden="true" hidden>✓</span>
+            Сохранить настройки
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="versionConflictModal" hidden>
+      <section class="modal version-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="versionConflictTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Конфликт версий</div>
+            <h2 id="versionConflictTitle">Локальная и облачная версии отличаются</h2>
+          </div>
+        </header>
+        <div class="version-conflict-body">
+          <div class="version-choice-bar">
+            <button class="button button-secondary" id="selectLocalVersionButton" type="button">Выбрать локальную версию</button>
+            <button class="button button-secondary" id="saveBothVersionsButton" type="button">Сохранить обе версии</button>
+            <button class="button button-secondary" id="selectCloudVersionButton" type="button">Выбрать облачную версию</button>
+          </div>
+          <div class="version-compare-grid">
+            <section class="version-compare-panel" id="localVersionPanel">
+              <header>
+                <div>
+                  <div class="version-summary-label">Локальная версия</div>
+                  <dl id="localVersionSummary"></dl>
+                </div>
+              </header>
+              <div class="version-preview" id="localVersionPreview"></div>
+            </section>
+            <section class="version-compare-panel" id="cloudVersionPanel">
+              <header>
+                <div>
+                  <div class="version-summary-label">Облачная версия</div>
+                  <dl id="cloudVersionSummary"></dl>
+                </div>
+              </header>
+              <div class="version-preview" id="cloudVersionPreview"></div>
+            </section>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button class="button button-secondary" id="closeVersionConflictFooterButton" type="button">Закрыть</button>
+          <button class="button button-primary" id="saveVersionChoiceButton" type="button" disabled>Сохранить изменения</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop version-copy-choice-backdrop" id="versionCopyChoiceModal" hidden>
+      <section class="modal version-copy-choice-modal" role="dialog" aria-modal="true" aria-labelledby="versionCopyChoiceTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Две копии</div>
+            <h2 id="versionCopyChoiceTitle">Сохранены две копии чек-листа</h2>
+          </div>
+        </header>
+        <div class="version-copy-choice-body">
+          <p>Какую версию открыть сейчас?</p>
+          <div class="version-copy-choice-actions">
+            <button class="button button-primary" id="openLocalCopyButton" type="button">Открыть локальную версию</button>
+            <button class="button button-secondary" id="openCloudCopyButton" type="button">Открыть версию из облака</button>
+          </div>
+          <p class="settings-curl-hint">Невыбранная версия сохранится в истории как отдельный чек-лист.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <template id="sectionTemplate">
+      <section class="check-section">
+        <div class="section-sticky-block">
+          <header class="section-header">
+            <div class="drag-handle" title="Перетащить раздел" aria-label="Перетащить раздел">⋮⋮</div>
+            <input class="section-title" type="text" placeholder="Название раздела" />
+            <div class="section-actions">
+              <button class="icon-button move-section-up" type="button" title="Поднять раздел">↑</button>
+              <button class="icon-button move-section-down" type="button" title="Опустить раздел">↓</button>
+              <button class="icon-button collapse-section" type="button" title="Свернуть раздел">⌃</button>
+              <button class="icon-button delete-section danger" type="button" title="Удалить раздел">×</button>
+            </div>
+          </header>
+          <div class="section-header-scroll" aria-hidden="false">
+            <table class="section-header-table">
+              <colgroup></colgroup>
+              <thead><tr></tr></thead>
+            </table>
+          </div>
+        </div>
+        <div class="section-content">
+          <div class="table-scroll">
+            <table class="check-table">
+              <colgroup></colgroup>
+              <tbody></tbody>
+            </table>
+          </div>
+          <button class="add-row-button" type="button">＋ Добавить проверку</button>
+        </div>
+      </section>
+    </template>
+
+    <script src="/jira-markup-import.js?v=1"></script>
+    <script src="/app.js?v=60"></script>
+  </body>
+</html>

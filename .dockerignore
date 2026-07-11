@@ -1,0 +1,15 @@
+.git
+.gitignore
+.DS_Store
+.idea
+.vscode
+node_modules
+npm-debug.log*
+tests
+tmp
+output
+feedback-data
+secrets
+*.pdf
+*.png
+ПЛАН_РЕДАКТОРА_ЧЕК_ЛИСТОВ.md

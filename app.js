@@ -232,6 +232,7 @@ let floatingMenu = null;
 let jiraSecret = "";
 let jiraSettings = loadJiraSettings();
 let cloudHistoryEnabled = loadCloudHistoryEnabled();
+let objectStorageConfigured = false;
 let reportClientId = loadReportClientId();
 let reportWorkspaceKey = loadReportWorkspaceKey();
 let serverReportHashes = loadServerReportHashes();
@@ -1021,6 +1022,10 @@ async function openReportFromRoute() {
     updateChecklistUrl(draft.publicId);
     return;
   }
+  // Черновик из localStorage загружается синхронно до IndexedDB. При быстром
+  // обновлении страницы запись истории могла ещё не успеть сохраниться, но
+  // совпадающий publicId уже однозначно указывает на открытый чек-лист.
+  if (normalizePublicId(draft.publicId) === publicId) return;
   try {
     const localReport = await findLocalReportByPublicId(publicId);
     const fullReport = localReport || (cloudHistoryEnabled ? await getServerReport(publicId) : null);
@@ -3882,7 +3887,20 @@ async function checkBackendCompatibility() {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Backend приложения недоступен: HTTP ${response.status}`);
   assertCurrentBackend(result);
+  objectStorageConfigured = Boolean(result.objectStorageConfigured);
   return result;
+}
+
+async function refreshObjectStorageUi() {
+  try {
+    await checkBackendCompatibility();
+  } catch {
+    objectStorageConfigured = false;
+  }
+  enhanceImageControls(elements.introEditor);
+  enhanceImageControls(elements.sections);
+  enhanceFileControls(elements.introEditor);
+  enhanceFileControls(elements.sections);
 }
 
 const PUBLISH_STEPS = ["prepare", "attachments", "comment", "verify"];
@@ -4268,10 +4286,9 @@ async function renderHistoryList() {
     item.classList.toggle("current", report.id === draft.reportId);
     const info = document.createElement("div");
     info.className = "history-item-info";
-    const sourceIcon = report.source === "server" ? "☁" : "⌘";
-    const sourceTitle = report.source === "server" ? "Облачная версия" : "Локальная версия";
     const publicId = reportPublicId(report);
-    info.innerHTML = `<h3>${escapeHtml(report.title)}</h3><p><span class="history-source-icon" title="${sourceTitle}" aria-label="${sourceTitle}">${sourceIcon}</span> <code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")} · ${escapeHtml(report.overallStatus)}</p>`;
+    const issueLabel = report.issueKey || issueKeyFromUrl(report.issueUrl) || "Без задачи";
+    info.innerHTML = `<h3>${escapeHtml(issueLabel)}</h3><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";
     commentField.rows = 2;
@@ -5275,12 +5292,15 @@ function replaceStoredObjectWithLink(object, kind) {
 
 function showFileMenu(card, anchor = card) {
   const stored = isStoredObjectUrl(card.dataset.dataUrl);
-  showFloatingMenu(anchor, [
-    stored
+  const storageAction = stored
       ? { label: "Заменить на ссылку", icon: "link", action: () => replaceStoredObjectWithLink(card, "file") }
-      : { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(card, "file") },
+      : objectStorageConfigured
+        ? { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(card, "file") }
+        : null;
+  showFloatingMenu(anchor, [
+    storageAction,
     { label: "Скачать файл", icon: "download", action: () => downloadFileCard(card) },
-  ]);
+  ].filter(Boolean));
 }
 
 function enhanceFileControls(root = document) {
@@ -5293,7 +5313,7 @@ function enhanceFileControls(root = document) {
     const nameNode = card.querySelector(".file-card-name");
     if (nameNode) nameNode.title = name;
     const stored = isStoredObjectUrl(card.dataset.dataUrl);
-    if (stored || cloudHistoryEnabled) card.append(createStorageStatusBadge(stored));
+    if (stored || (cloudHistoryEnabled && objectStorageConfigured)) card.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel file-controls";
     controls.dataset.editorUi = "true";
@@ -5392,7 +5412,7 @@ function enhanceImageControls(root = document) {
     figure.tabIndex = 0;
     figure.setAttribute("aria-label", "Открыть изображение");
     const stored = isStoredObjectUrl(image.src);
-    if (stored || cloudHistoryEnabled) figure.append(createStorageStatusBadge(stored));
+    if (stored || (cloudHistoryEnabled && objectStorageConfigured)) figure.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel image-controls";
     controls.dataset.editorUi = "true";
@@ -5453,10 +5473,13 @@ function setImageAlignment(figure, alignment) {
 function showImageMenu(figure, anchor = figure) {
   selectImage(figure);
   const stored = isStoredObjectUrl(figure.querySelector("img")?.src);
-  showFloatingMenu(anchor, [
-    stored
+  const storageAction = stored
       ? { label: "Заменить на ссылку", icon: "link", action: () => replaceStoredObjectWithLink(figure, "image") }
-      : { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(figure, "image") },
+      : objectStorageConfigured
+        ? { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(figure, "image") }
+        : null;
+  showFloatingMenu(anchor, [
+    storageAction,
     { label: "Скачать изображение", icon: "download", action: () => downloadImage(figure.querySelector("img")) },
     { label: "Выровнять слева", icon: "align-left", action: () => setImageAlignment(figure, "left") },
     { label: "Выровнять по центру", icon: "align-center", action: () => setImageAlignment(figure, "center") },
@@ -5469,7 +5492,7 @@ function showImageMenu(figure, anchor = figure) {
         commitImageChange(figure);
       },
     },
-  ]);
+  ].filter(Boolean));
 }
 
 function enableImageObject(figure) {
@@ -7165,6 +7188,7 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 render();
+refreshObjectStorageUi();
 if (!routeChecklistPublicId()) updateChecklistUrl(draft.publicId);
 updateHistoryButtons();
 openReportFromRoute()

@@ -34,6 +34,14 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_ORIGIN =
   process.env.QA_REPORT_PUBLIC_URL || process.env.APP_PUBLIC_URL || process.env.PUBLIC_URL || "";
+const TRUST_PROXY = process.env.QA_REPORT_TRUST_PROXY === "true";
+const TRUST_PROXY_IDENTITY = process.env.QA_REPORT_TRUST_PROXY_IDENTITY === "true";
+const JIRA_ALLOWED_ORIGINS = new Set(
+  String(process.env.QA_JIRA_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((value) => normalizeOrigin(value))
+    .filter(Boolean),
+);
 function readSizeMb(name, fallback) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) * 1024 * 1024 : fallback * 1024 * 1024;
@@ -42,14 +50,12 @@ function readSizeMb(name, fallback) {
 const MAX_BODY = readSizeMb("QA_REPORT_MAX_BODY_MB", 150);
 const MAX_ATTACHMENT_FILE = readSizeMb("QA_REPORT_MAX_ATTACHMENT_MB", 50);
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
-const APP_VERSION = "0.2.2";
 const API_REVISION = 5;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
 const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1").trim();
 const CHECKLIST_IMPORT_TTL_MS = 15 * 60 * 1000;
-const checklistImports = new Map();
 const apiRateLimit = new Map();
 let reportsDb;
 
@@ -156,7 +162,7 @@ function sendJson(response, status, payload) {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
   });
-  response.end(JSON.stringify({ ...payload, appVersion: APP_VERSION, apiRevision: API_REVISION }));
+  response.end(JSON.stringify(payload));
 }
 
 function applySecurityHeaders(response) {
@@ -182,7 +188,8 @@ function enforceSameOrigin(request) {
 function enforceApiRateLimit(request, requestPath) {
   if (!requestPath.startsWith("/api/") || requestPath === "/api/health") return;
   const now = Date.now();
-  const key = request.socket.remoteAddress || "unknown";
+  const forwardedAddress = TRUST_PROXY ? firstHeaderValue(request, "x-forwarded-for").split(",")[0].trim() : "";
+  const key = forwardedAddress || request.socket.remoteAddress || "unknown";
   const recent = (apiRateLimit.get(key) || []).filter((timestamp) => now - timestamp < 60_000);
   const limit = request.method === "GET" ? 180 : 60;
   if (recent.length >= limit) {
@@ -232,10 +239,14 @@ function requestOrigin(request) {
   const configuredOrigin = normalizeOrigin(PUBLIC_ORIGIN);
   if (configuredOrigin) return configuredOrigin;
 
-  const forwarded = forwardedHeaderParts(request);
-  const proto = firstHeaderValue(request, "x-forwarded-proto") || forwarded.proto || "http";
-  let host = firstHeaderValue(request, "x-forwarded-host") || forwarded.host || firstHeaderValue(request, "host");
-  const port = firstHeaderValue(request, "x-forwarded-port");
+  const forwarded = TRUST_PROXY ? forwardedHeaderParts(request) : {};
+  const proto = TRUST_PROXY
+    ? firstHeaderValue(request, "x-forwarded-proto") || forwarded.proto || "http"
+    : request.socket.encrypted ? "https" : "http";
+  let host =
+    (TRUST_PROXY ? firstHeaderValue(request, "x-forwarded-host") || forwarded.host : "") ||
+    firstHeaderValue(request, "host");
+  const port = TRUST_PROXY ? firstHeaderValue(request, "x-forwarded-port") : "";
   if (host && port && !host.includes(":")) host = `${host}:${port}`;
   host ||= `${HOST}:${PORT}`;
   return `${String(proto).split(",")[0]}://${String(host).split(",")[0]}`;
@@ -246,17 +257,24 @@ async function readJson(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new Error("Запрос слишком большой");
+    if (size > MAX_BODY) {
+      const error = new Error("Запрос слишком большой");
+      error.status = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    const error = new Error("Некорректный JSON");
+    error.status = 400;
+    throw error;
+  }
 }
 
 function cleanupChecklistImports() {
-  const now = Date.now();
-  for (const [id, item] of checklistImports) {
-    if (item.expiresAt <= now) checklistImports.delete(id);
-  }
+  getReportsDb().prepare("DELETE FROM checklist_imports WHERE expires_at <= ?").run(Date.now());
 }
 
 function getReportsDb() {
@@ -293,6 +311,19 @@ function getReportsDb() {
       ON reports(owner_source, owner_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_reports_workspace_updated
       ON reports(workspace_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS checklist_imports (
+      id TEXT PRIMARY KEY,
+      public_id TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT '',
+      format TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      issue_key TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_checklist_imports_expires
+      ON checklist_imports(expires_at);
   `);
   const columns = reportsDb.prepare("PRAGMA table_info(reports)").all().map((column) => column.name);
   if (!columns.includes("content_hash")) {
@@ -412,15 +443,17 @@ function normalizeIdentityPart(value, fallback = "") {
 }
 
 function resolveReportOwner(request) {
-  const ssoValue = normalizeIdentityPart(
-    firstHeader(request, [
-      "x-forwarded-email",
-      "x-auth-request-email",
-      "x-forwarded-user",
-      "x-auth-request-user",
-      "remote-user",
-    ]),
-  );
+  const ssoValue = TRUST_PROXY_IDENTITY
+    ? normalizeIdentityPart(
+        firstHeader(request, [
+          "x-forwarded-email",
+          "x-auth-request-email",
+          "x-forwarded-user",
+          "x-auth-request-user",
+          "remote-user",
+        ]),
+      )
+    : "";
   if (ssoValue) {
     return {
       source: "sso",
@@ -458,6 +491,10 @@ function resolveReportOwner(request) {
     label: "Анонимный доступ",
     workspaceId: `anonymous:${anonymousId}`,
   };
+}
+
+function storageOwnerNamespace(owner) {
+  return stableHash(`${owner.source}:${owner.id}`).slice(0, 32);
 }
 
 function issueKeyFromUrl(value) {
@@ -515,6 +552,21 @@ function normalizeConnection(input) {
   if (!["http:", "https:"].includes(baseUrl.protocol)) {
     throw new Error("Поддерживаются только http:// и https:// адреса Jira");
   }
+  if (process.env.NODE_ENV === "production" && baseUrl.protocol !== "https:") {
+    const error = new Error("В production разрешены только HTTPS-адреса Jira");
+    error.status = 400;
+    throw error;
+  }
+  if (!JIRA_ALLOWED_ORIGINS.size) {
+    const error = new Error("Список разрешённых Jira не настроен на сервере");
+    error.status = 503;
+    throw error;
+  }
+  if (!JIRA_ALLOWED_ORIGINS.has(baseUrl.origin)) {
+    const error = new Error("Этот адрес Jira не разрешён корпоративной конфигурацией");
+    error.status = 403;
+    throw error;
+  }
   baseUrl.username = "";
   baseUrl.password = "";
   baseUrl.hash = "";
@@ -550,6 +602,7 @@ async function jiraFetch(connection, pathname, options = {}) {
   try {
     response = await fetch(targetUrl, {
       ...fetchOptions,
+      redirect: "manual",
       headers: {
         Accept: "application/json",
         ...authHeaders(connection),
@@ -883,9 +936,9 @@ async function handleJiraComment(request, response) {
     ]
       .filter(Boolean)
       .join("; ");
-    throw new Error(
-      `Jira не подтвердила создание комментария. ${diagnostics}`,
-    );
+    const error = new Error(`Jira не подтвердила создание комментария. ${diagnostics}`);
+    error.status = 502;
+    throw error;
   }
 
   let verifiedComment;
@@ -895,12 +948,16 @@ async function handleJiraComment(request, response) {
       `${commentPath}/${encodeURIComponent(commentId)}`,
     );
   } catch (error) {
-    throw new Error(
+    const verificationError = new Error(
       `Комментарий получил ID ${commentId}, но контрольное чтение не удалось: ${error.message}`,
     );
+    verificationError.status = 502;
+    throw verificationError;
   }
   if (!verifiedComment?.id || String(verifiedComment.id) !== commentId) {
-    throw new Error(`Jira не подтвердила чтение созданного комментария ${commentId}`);
+    const error = new Error(`Jira не подтвердила чтение созданного комментария ${commentId}`);
+    error.status = 502;
+    throw error;
   }
 
   sendJson(response, 201, {
@@ -975,17 +1032,20 @@ async function handleChecklistImport(request, response) {
   const checklistId = crypto.randomUUID();
   const publicId = generatePublicId();
   const now = new Date().toISOString();
-  checklistImports.set(checklistId, {
-    id: checklistId,
+  const expiresAt = Date.now() + CHECKLIST_IMPORT_TTL_MS;
+  getReportsDb().prepare(`
+    INSERT INTO checklist_imports (id, public_id, source, format, title, issue_key, content, created_at, expires_at)
+    VALUES (?, ?, ?, 'jira', ?, ?, ?, ?, ?)
+  `).run(
+    checklistId,
     publicId,
-    source: String(body.source || "").slice(0, 120),
-    format: "jira",
-    title: String(body.title || "").trim().slice(0, 300),
-    issueKey: String(body.issueKey || "").trim().slice(0, 2000),
-    content: body.content,
-    createdAt: now,
-    expiresAt: Date.now() + CHECKLIST_IMPORT_TTL_MS,
-  });
+    String(body.source || "").slice(0, 120),
+    String(body.title || "").trim().slice(0, 300),
+    String(body.issueKey || "").trim().slice(0, 2000),
+    body.content,
+    now,
+    expiresAt,
+  );
   cleanupChecklistImports();
 
   const url = new URL(`/report/${publicId}`, requestOrigin(request));
@@ -995,7 +1055,7 @@ async function handleChecklistImport(request, response) {
     checklistId,
     publicId,
     url: url.toString(),
-    expiresAt: checklistImports.get(checklistId).expiresAt,
+    expiresAt,
     parsed: {
       sections: parsed.sections.length,
       rows: parsed.sections.reduce((sum, section) => sum + section.rows.length, 0),
@@ -1005,7 +1065,10 @@ async function handleChecklistImport(request, response) {
 
 async function handleChecklistImportPayload(request, response, checklistId) {
   cleanupChecklistImports();
-  const item = checklistImports.get(checklistId);
+  const item = getReportsDb().prepare(`
+    SELECT id, public_id, source, format, title, issue_key, content, created_at, expires_at
+    FROM checklist_imports WHERE id = ? AND expires_at > ?
+  `).get(checklistId, Date.now());
   if (!item) {
     const error = new Error("Импорт не найден или срок действия ссылки истёк");
     error.status = 404;
@@ -1014,14 +1077,14 @@ async function handleChecklistImportPayload(request, response, checklistId) {
   sendJson(response, 200, {
     ok: true,
     checklistId: item.id,
-    publicId: item.publicId || "",
+    publicId: item.public_id || "",
     source: item.source,
     format: item.format,
     title: item.title,
-    issueKey: item.issueKey,
+    issueKey: item.issue_key,
     content: item.content,
-    createdAt: item.createdAt,
-    expiresAt: item.expiresAt,
+    createdAt: item.created_at,
+    expiresAt: item.expires_at,
   });
 }
 
@@ -1084,7 +1147,7 @@ async function handleReportSave(request, response) {
     return;
   }
   if (objectStorageConfigured()) {
-    await s3Request("PUT", `reports/${id}/report.json`, {
+    await s3Request("PUT", `reports/${storageOwnerNamespace(owner)}/${id}/report.json`, {
       body: Buffer.from(documentJson),
       contentType: "application/json; charset=utf-8",
     });
@@ -1366,17 +1429,22 @@ async function handleJiraAttachments(request, response) {
 
 function normalizeStorageReportId(value) {
   const id = String(value || "").trim();
-  if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(id)) throw new Error("Некорректный ID отчёта");
+  if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(id)) {
+    const error = new Error("Некорректный ID отчёта");
+    error.status = 400;
+    throw error;
+  }
   return id;
 }
 
 async function handleObjectStorageUpload(request, response) {
   const body = await readJson(request);
   const reportId = normalizeStorageReportId(body.reportId);
+  const owner = resolveReportOwner(request);
   const file = decodeAttachmentFile(body.file || {}, 0);
   const kind = file.kind === "image" ? "images" : "files";
   const storedName = `${crypto.randomUUID()}-${sanitizeGenericAttachmentName(file.name, 0)}`;
-  const key = `reports/${reportId}/${kind}/${storedName}`;
+  const key = `reports/${storageOwnerNamespace(owner)}/${reportId}/${kind}/${storedName}`;
   await s3Request("PUT", key, { body: file.bytes, contentType: file.type });
   const url = `/api/storage/object/${encodeURIComponent(reportId)}/${kind}/${encodeURIComponent(storedName)}`;
   sendJson(response, 201, { ok: true, reportId, kind, name: file.name, key, url });
@@ -1387,7 +1455,8 @@ async function handleObjectStorageGet(request, response, reportId, kind, storedN
   if (!['images', 'files'].includes(kind)) throw new Error("Некорректный тип объекта");
   const safeName = path.basename(decodeURIComponent(storedName));
   if (!safeName || safeName !== decodeURIComponent(storedName)) throw new Error("Некорректное имя объекта");
-  const storageResponse = await s3Request("GET", `reports/${safeReportId}/${kind}/${safeName}`);
+  const owner = resolveReportOwner(request);
+  const storageResponse = await s3Request("GET", `reports/${storageOwnerNamespace(owner)}/${safeReportId}/${kind}/${safeName}`);
   const contentLength = storageResponse.headers.get("content-length");
   response.writeHead(200, {
     "Content-Type": storageResponse.headers.get("content-type") || "application/octet-stream",
@@ -1430,7 +1499,12 @@ const server = http.createServer(async (request, response) => {
     enforceSameOrigin(request);
     enforceApiRateLimit(request, requestPath);
     if (request.method === "GET" && requestPath === "/api/health") {
-      sendJson(response, 200, { ok: true, service: "qa-report", objectStorageConfigured: objectStorageConfigured() });
+      sendJson(response, 200, {
+        ok: true,
+        service: "qa-report",
+        apiRevision: API_REVISION,
+        objectStorageConfigured: objectStorageConfigured(),
+      });
       return;
     }
     if (request.method === "GET" && requestPath === "/api/reports") {
@@ -1499,7 +1573,7 @@ const server = http.createServer(async (request, response) => {
     }
     serveStatic(request, response);
   } catch (error) {
-    const status = Number.isInteger(error.status) ? error.status : 400;
+    const status = Number.isInteger(error.status) ? error.status : 500;
     const hideDetails = process.env.NODE_ENV === "production" && status >= 500;
     if (hideDetails) console.error(`Ошибка запроса: ${error.stack || error.message}`);
     sendJson(response, status, {

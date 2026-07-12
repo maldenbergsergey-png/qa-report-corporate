@@ -106,7 +106,13 @@ async function main() {
   const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-report-test-"));
   const app = spawn(process.execPath, ["server.js"], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: "4174", REPORTS_DB_PATH: path.join(testDir, "reports.sqlite") },
+    env: {
+      ...process.env,
+      PORT: "4174",
+      REPORTS_DB_PATH: path.join(testDir, "reports.sqlite"),
+      QA_JIRA_ALLOWED_ORIGINS: "http://127.0.0.1:4199",
+      QA_REPORT_TRUST_PROXY: "true",
+    },
     stdio: "ignore",
   });
   await new Promise((resolve) => setTimeout(resolve, 250));
@@ -117,6 +123,16 @@ async function main() {
     assert.match(healthResponse.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
     assert.equal(healthResponse.headers.get("x-content-type-options"), "nosniff");
     assert.equal(healthResponse.headers.get("x-frame-options"), "DENY");
+    const healthPayload = await healthResponse.json();
+    assert.equal(healthPayload.apiRevision, 5);
+    assert.equal(Object.hasOwn(healthPayload, "appVersion"), false);
+
+    const blockedJiraResponse = await fetch("http://127.0.0.1:4174/api/jira/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "data-center", baseUrl: "http://127.0.0.1:4200", token: "test" }),
+    });
+    assert.equal(blockedJiraResponse.status, 403);
 
     const crossSiteResponse = await fetch("http://127.0.0.1:4174/api/reports", {
       method: "POST",
@@ -163,7 +179,6 @@ async function main() {
     const commentResult = await commentResponse.json();
     assert.equal(commentResult.verified, true);
     assert.equal(commentResult.commentId, "10001");
-    assert.equal(commentResult.apiRevision, 5);
     const patTestRequest = received.find((item) => item.url === "/rest/api/2/myself");
     assert.equal(patTestRequest.authorization, "Bearer secret-pat");
     const cloudCommentRequest = received.find(
@@ -237,7 +252,7 @@ async function main() {
         comment: { format: "wiki", body: "Missing comment" },
       }),
     });
-    assert.equal(diagnosticResponse.status, 400);
+    assert.equal(diagnosticResponse.status, 502);
     const diagnosticResult = await diagnosticResponse.json();
     assert.match(diagnosticResult.error, /HTTP 201/);
     assert.match(diagnosticResult.error, /комментариев до: 0/);

@@ -6,15 +6,20 @@ services:
     container_name: qa-report
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-4173}:4173"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-4173}:4173"
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 4173
       REPORTS_DB_PATH: /app/reports-data/qa-report.sqlite
+      QA_JIRA_ALLOWED_ORIGINS: ${QA_JIRA_ALLOWED_ORIGINS:-}
+      QA_REPORT_TRUST_PROXY: ${QA_REPORT_TRUST_PROXY:-false}
+      QA_REPORT_TRUST_PROXY_IDENTITY: ${QA_REPORT_TRUST_PROXY_IDENTITY:-false}
       QA_STORAGE_ENDPOINT: ${QA_STORAGE_ENDPOINT:-https://minio-buckets.adv.ru}
       QA_STORAGE_BUCKET: ${QA_STORAGE_BUCKET:-qa-tools}
       QA_STORAGE_REGION: ${QA_STORAGE_REGION:-us-east-1}
+      QA_STORAGE_ACCESS_KEY: ${QA_STORAGE_ACCESS_KEY:-}
+      QA_STORAGE_SECRET_KEY: ${QA_STORAGE_SECRET_KEY:-}
       QA_STORAGE_ACCESS_KEY_FILE: ${QA_STORAGE_ACCESS_KEY_FILE:-}
       QA_STORAGE_SECRET_KEY_FILE: ${QA_STORAGE_SECRET_KEY_FILE:-}
     volumes:

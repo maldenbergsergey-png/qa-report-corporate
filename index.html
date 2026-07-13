@@ -535,12 +535,12 @@
         <header class="modal-header">
           <div>
             <div class="eyebrow">Обратная связь</div>
-            <h2 id="feedbackTitle">Функционал в разработке</h2>
+            <h2 id="feedbackTitle">Обратная связь в личных сообщениях</h2>
           </div>
           <button class="icon-button" id="closeFeedbackButton" type="button" aria-label="Закрыть">×</button>
         </header>
         <div class="confirm-modal-body">
-          Отправка обратной связи временно недоступна. Корпоративный канал обратной связи будет добавлен после отдельного согласования.
+          Если у вас есть вопрос, предложение или вы нашли проблему, напишите мне в личные сообщения.
         </div>
         <footer class="modal-footer">
           <button class="button button-primary" id="cancelFeedbackButton" type="button">Понятно</button>
@@ -571,64 +571,15 @@
           <div class="settings-body">
             <section class="settings-section active" id="settingsJiraSection" data-settings-panel="jira">
               <div class="settings-note">
-                Токен, пароль или cookie хранятся только в памяти открытой вкладки и исчезают после перезагрузки. Остальные настройки сохраняются локально в браузере.
+                Подключите каждую Jira один раз. После подтверждения задачи, комментарии и вложения создаются от вашей Jira-учётной записи и с вашими правами.
               </div>
-              <div class="settings-tabs" role="tablist" aria-label="Способ настройки Jira">
-                <button class="settings-tab active" id="jiraManualTab" data-jira-settings-tab="manual" type="button" role="tab" aria-selected="true" aria-controls="jiraManualPane">Вручную</button>
-                <button class="settings-tab" id="jiraCurlTab" data-jira-settings-tab="curl" type="button" role="tab" aria-selected="false" aria-controls="jiraCurlPane">Из curl</button>
-              </div>
-              <div class="settings-pane" id="jiraManualPane" role="tabpanel" aria-labelledby="jiraManualTab">
-                <label class="field">
-                  <span>Тип Jira</span>
-                  <select id="jiraType">
-                    <option value="data-center">Data Center / Server</option>
-                    <option value="cloud">Cloud</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Адрес Jira</span>
-                  <input id="jiraBaseUrl" type="url" placeholder="https://jira.company.ru" />
-                </label>
-                <label class="field" id="jiraAuthMethodField">
-                  <span>Способ авторизации</span>
-                  <select id="jiraAuthMethod">
-                    <option value="pat">Personal Access Token</option>
-                    <option value="basic">Логин и пароль</option>
-                    <option value="cookie">Cookie из curl</option>
-                  </select>
-                </label>
-                <label class="field" id="jiraUserField">
-                  <span id="jiraUserLabel">Имя пользователя</span>
-                  <input id="jiraUser" type="text" autocomplete="username" placeholder="username" />
-                </label>
-                <label class="field">
-                  <span id="jiraTokenLabel">Personal Access Token</span>
-                  <input id="jiraToken" type="password" autocomplete="off" placeholder="Токен не сохраняется" />
-                </label>
-              </div>
-              <div class="settings-pane" id="jiraCurlPane" role="tabpanel" aria-labelledby="jiraCurlTab" hidden>
-                <label class="field">
-                  <span>curl-запрос из Jira</span>
-                  <textarea id="jiraCurlInput" class="settings-curl-input" spellcheck="false" placeholder="curl 'https://jira.company.ru/rest/api/2/issue/QA-123/comment' -H 'Authorization: Bearer ...'"></textarea>
-                </label>
-                <p class="settings-curl-hint">
-                  Можно вставить curl с Bearer, Basic, -u user:password или Cookie. Секрет из curl будет применён только в текущей вкладке.
-                </p>
-                <div class="settings-curl-state" id="jiraCurlState" hidden></div>
-                <button class="button button-secondary" id="parseJiraCurlButton" type="button">
-                  Разобрать и сохранить
-                </button>
-              </div>
-              <div class="settings-section-actions">
-                <button class="button button-secondary" id="testJiraButton" type="button">
-                  Проверить подключение
-                </button>
-                <div class="connection-state" id="jiraConnectionState">Соединение ещё не проверялось.</div>
+              <div class="jira-connections" id="jiraConnections">
+                <div class="connection-state">Загружаем доступные Jira…</div>
               </div>
             </section>
             <section class="settings-section" id="settingsHistorySection" data-settings-panel="history" hidden>
               <div class="settings-note">
-                Облачное хранилище позволяет открывать чек-листы в разных браузерах при одинаковом ключе пространства. Если опция выключена, данные остаются только в этом браузере.
+                Включите синхронизацию, чтобы открывать одну историю чек-листов в разных браузерах.
               </div>
               <label class="settings-toggle-card">
                 <input id="cloudHistoryEnabled" type="checkbox" />
@@ -637,7 +588,7 @@
                   <small>Если включено, чек-листы будут синхронизироваться через серверное хранилище. Если выключено, используется только локальное хранилище браузера.</small>
                 </span>
               </label>
-              <label class="field">
+              <label class="field" hidden>
                 <span>ID этого браузера</span>
                 <input id="reportClientId" type="text" readonly />
               </label>
@@ -646,13 +597,13 @@
                 <input id="reportWorkspaceKey" type="text" autocomplete="off" placeholder="Например, qa-team или project-advinta" />
               </label>
               <p class="settings-curl-hint">
-                Одинаковый ключ пространства позволяет использовать одну облачную историю в разных браузерах. Если поле пустое, используется этот браузер.
+                Введите одинаковый ключ в разных браузерах — в них появится одна общая история. Ключ действует только внутри вашей корпоративной учётной записи. Если оставить поле пустым, используется ваше основное личное пространство.
               </p>
               <div class="connection-state" id="reportIdentityState">Чек-листы сохраняются только локально в этом браузере.</div>
             </section>
           </div>
         </div>
-        <footer class="modal-footer settings-footer">
+        <footer class="modal-footer settings-footer" id="settingsFooter" hidden>
           <button class="button button-primary" id="saveJiraSettingsButton" type="button">
             <span class="settings-save-check" id="settingsSaveCheck" aria-hidden="true" hidden>✓</span>
             Сохранить настройки

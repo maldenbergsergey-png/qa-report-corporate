@@ -1,6 +1,5 @@
 const STORAGE_KEY = "qa-report-editor-draft-v2";
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
-const JIRA_SETTINGS_KEY = "qa-report-jira-settings-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
@@ -14,6 +13,19 @@ const REQUIRED_API_REVISION = 5;
 const FILE_ATTACHMENT_MAX_SIZE = 50 * 1024 * 1024;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
 const { parseJiraMarkup, normalizeStatus } = window.QaReportJiraImport;
+const nativeFetch = window.fetch.bind(window);
+let authRedirectStarted = false;
+
+window.fetch = async (...args) => {
+  const response = await nativeFetch(...args);
+  const target = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
+  if (response.status === 401 && !String(target).startsWith("/api/auth/") && !authRedirectStarted) {
+    authRedirectStarted = true;
+    const callback = `${location.pathname}${location.search}`;
+    location.assign(`/login?callbackUrl=${encodeURIComponent(callback)}`);
+  }
+  return response;
+};
 
 const STATUS_META = {
   OK: { className: "status-ok", color: "#22a06b", jiraColor: "#14892c" },
@@ -135,24 +147,8 @@ const elements = {
   settingsHistorySectionButton: document.querySelector("#settingsHistorySectionButton"),
   settingsJiraSection: document.querySelector("#settingsJiraSection"),
   settingsHistorySection: document.querySelector("#settingsHistorySection"),
-  jiraManualTab: document.querySelector("#jiraManualTab"),
-  jiraCurlTab: document.querySelector("#jiraCurlTab"),
-  jiraManualPane: document.querySelector("#jiraManualPane"),
-  jiraCurlPane: document.querySelector("#jiraCurlPane"),
-  jiraCurlInput: document.querySelector("#jiraCurlInput"),
-  jiraCurlState: document.querySelector("#jiraCurlState"),
-  parseJiraCurlButton: document.querySelector("#parseJiraCurlButton"),
-  jiraType: document.querySelector("#jiraType"),
-  jiraAuthMethod: document.querySelector("#jiraAuthMethod"),
-  jiraAuthMethodField: document.querySelector("#jiraAuthMethodField"),
-  jiraBaseUrl: document.querySelector("#jiraBaseUrl"),
-  jiraUserField: document.querySelector("#jiraUserField"),
-  jiraUser: document.querySelector("#jiraUser"),
-  jiraUserLabel: document.querySelector("#jiraUserLabel"),
-  jiraToken: document.querySelector("#jiraToken"),
-  jiraTokenLabel: document.querySelector("#jiraTokenLabel"),
-  jiraConnectionState: document.querySelector("#jiraConnectionState"),
-  testJiraButton: document.querySelector("#testJiraButton"),
+  settingsFooter: document.querySelector("#settingsFooter"),
+  jiraConnections: document.querySelector("#jiraConnections"),
   saveJiraSettingsButton: document.querySelector("#saveJiraSettingsButton"),
   settingsSaveCheck: document.querySelector("#settingsSaveCheck"),
   cloudHistoryEnabled: document.querySelector("#cloudHistoryEnabled"),
@@ -229,8 +225,6 @@ let toastTimer;
 let activeEditor = elements.introEditor;
 let savedEditorRange = null;
 let floatingMenu = null;
-let jiraSecret = "";
-let jiraSettings = loadJiraSettings();
 let cloudHistoryEnabled = loadCloudHistoryEnabled();
 let objectStorageConfigured = false;
 let reportClientId = loadReportClientId();
@@ -560,20 +554,6 @@ function loadDraft() {
   }
 }
 
-function loadJiraSettings() {
-  try {
-    return {
-      type: "data-center",
-      authMethod: "pat",
-      baseUrl: "",
-      user: "",
-      ...JSON.parse(localStorage.getItem(JIRA_SETTINGS_KEY) || "{}"),
-    };
-  } catch {
-    return { type: "data-center", authMethod: "pat", baseUrl: "", user: "" };
-  }
-}
-
 function loadCloudHistoryEnabled() {
   try {
     return localStorage.getItem(CLOUD_HISTORY_ENABLED_KEY) === "true";
@@ -665,9 +645,10 @@ function forgetKnownServerHash(reportId) {
 }
 
 function reportIdentityHeaders() {
-  const headers = { "X-QA-Report-Client-Id": reportClientId };
-  if (reportWorkspaceKey.trim()) headers["X-QA-Report-Workspace-Key"] = reportWorkspaceKey.trim();
-  return headers;
+  return {
+    "X-QA-Report-Client": reportClientId,
+    "X-QA-Report-Workspace": reportWorkspaceKey.trim(),
+  };
 }
 
 async function reportApi(path, options = {}) {
@@ -808,7 +789,7 @@ function queueServerReportSave(record) {
 async function uploadStoragePayload(reportId, file) {
   const response = await fetch("/api/storage/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...reportIdentityHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ reportId, file }),
   });
   const result = await response.json().catch(() => ({}));
@@ -2957,136 +2938,6 @@ function balanceJiraColorMarkup(value) {
   return output;
 }
 
-function adfNodeText(node) {
-  if (!node) return "";
-  if (node.type === "text") return node.text || "";
-  if (node.type === "hardBreak") return "\n";
-  return (node.content || []).map(adfNodeText).join("");
-}
-
-function adfNodeToHtml(node, attachments = []) {
-  if (!node) return "";
-  if (node.type === "text") {
-    let value = escapeHtml(node.text || "");
-    for (const mark of node.marks || []) {
-      if (mark.type === "strong") value = `<strong>${value}</strong>`;
-      if (mark.type === "em") value = `<em>${value}</em>`;
-      if (mark.type === "underline") value = `<u>${value}</u>`;
-      if (mark.type === "strike") value = `<s>${value}</s>`;
-      if (mark.type === "link") value = `<a href="${escapeHtml(mark.attrs?.href || "")}">${value}</a>`;
-    }
-    return value;
-  }
-  if (node.type === "hardBreak") return "<br>";
-  if (node.type === "codeBlock") {
-    return `<pre class="cell-code-block" data-language="${escapeHtml(node.attrs?.language || "text")}">${escapeHtml(adfNodeText(node))}</pre>`;
-  }
-  if (node.type === "bulletList" || node.type === "orderedList") {
-    const tag = node.type === "bulletList" ? "ul" : "ol";
-    return `<${tag}>${(node.content || []).map((item) => adfNodeToHtml(item, attachments)).join("")}</${tag}>`;
-  }
-  if (node.type === "listItem") {
-    return `<li>${(node.content || []).map((item) => adfNodeToHtml(item, attachments)).join("")}</li>`;
-  }
-  if (node.type === "mediaSingle" || node.type === "media") {
-    const media = node.type === "media" ? node : (node.content || []).find((item) => item.type === "media");
-    const attachment = attachments.find((item) => String(item.id) === String(media?.attrs?.id));
-    const url =
-      media?.attrs?.url ||
-      media?.attrs?.externalUrl ||
-      attachment?.thumbnail ||
-      attachment?.content ||
-      "";
-    const filename = attachment?.filename || media?.attrs?.alt || "Вложение Jira";
-    return url
-      ? `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(url)}" alt="" data-attachment-id="${escapeHtml(attachment?.id || media?.attrs?.id || "")}" data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}" data-jira-id="${escapeHtml(attachment?.id || "")}" data-jira-url="${escapeHtml(attachment?.content || url)}"></figure>`
-      : `<span>[Вложение Jira: ${escapeHtml(media?.attrs?.id || "без идентификатора")}]</span>`;
-  }
-  const content = (node.content || []).map((item) => adfNodeToHtml(item, attachments)).join("");
-  if (node.type === "paragraph") return `<p>${content || "<br>"}</p>`;
-  return content;
-}
-
-function parseAdfDocument(documentBody, attachments = []) {
-  const imported = {
-    reportId: crypto.randomUUID(),
-    publicId: createPublicId(),
-    schemaVersion: 3,
-    issueUrl: "",
-    environment: "STAGE",
-    overallStatus: "OK",
-    intro: "",
-    sections: [],
-  };
-  let pendingTitle = "";
-  let tableNumber = 0;
-  const intro = [];
-  for (const node of documentBody?.content || []) {
-    const text = adfNodeText(node).trim();
-    const environment = text.match(/(?:Проверено на|Окружение)\s*:?\s*([A-Za-zА-Яа-яЁё-]+)/i);
-    if (environment) {
-      const value = environment[1].toUpperCase();
-      imported.environment = ["DEV", "STAGE", "PROD"].includes(value) ? value : "Локально";
-      continue;
-    }
-    const overall = text.match(/(?:ТЕСТ|Статус)\s*[:—-]\s*(.+)$/i);
-    if (overall && node.type !== "table") {
-      imported.overallStatus = normalizeStatus(overall[1]);
-      continue;
-    }
-    if (node.type === "heading") {
-      pendingTitle = text;
-      continue;
-    }
-    if (node.type !== "table") {
-      if (text) intro.push(adfNodeToHtml(node, attachments));
-      continue;
-    }
-    tableNumber += 1;
-    const tableRows = (node.content || []).filter((item) => item.type === "tableRow");
-    if (!tableRows.length) continue;
-    const headerNodes = tableRows[0].content || [];
-    const rawHeaders = headerNodes.map((cell) => adfNodeText(cell).trim());
-    const hasHeader = headerNodes.some((cell) => cell.type === "tableHeader");
-    const dataRows = hasHeader ? tableRows.slice(1) : tableRows;
-    const headers = hasHeader
-      ? rawHeaders
-      : Array.from({ length: headerNodes.length }, (_, index) => `Столбец ${index + 1}`);
-    const numberIndex = headers.findIndex((header) => /^(номер|№|nº)$/i.test(header));
-    const statusIndex = headers.findIndex((header) => /статус/i.test(header));
-    const columns = headers
-      .map((title, index) => ({ title, index }))
-      .filter(({ index }) => index !== numberIndex && index !== statusIndex)
-      .map(({ title, index }) => ({
-        id: `adf-${tableNumber}-${index}-${crypto.randomUUID()}`,
-        title: title || `Столбец ${index + 1}`,
-        sourceIndex: index,
-      }));
-    const section = {
-      id: crypto.randomUUID(),
-      title: pendingTitle || `Раздел ${tableNumber}`,
-      collapsed: false,
-      columns,
-      rows: dataRows.map((tableRow) => {
-        const cells = tableRow.content || [];
-        return {
-          id: crypto.randomUUID(),
-          status: normalizeStatus(statusIndex >= 0 ? adfNodeText(cells[statusIndex]) : ""),
-          cells: Object.fromEntries(
-            columns.map((column) => [column.id, adfNodeToHtml(cells[column.sourceIndex], attachments)]),
-          ),
-        };
-      }),
-    };
-    section.columns.forEach((column) => delete column.sourceIndex);
-    imported.sections.push(section);
-    pendingTitle = "";
-  }
-  imported.intro = intro.join("");
-  if (!imported.sections.length) throw new Error("В комментарии не найдены таблицы");
-  return imported;
-}
-
 function generateMarkup() {
   collectDocumentFields();
   const blocks = [];
@@ -3251,201 +3102,6 @@ function previewEditorHtml(html) {
   return container.innerHTML;
 }
 
-function adfText(value, marks) {
-  const node = { type: "text", text: value || " " };
-  if (marks?.length) node.marks = marks;
-  return node;
-}
-
-function adfParagraph(text, marks) {
-  return { type: "paragraph", content: [adfText(text || " ", marks)] };
-}
-
-function htmlToAdfBlocks(html) {
-  const container = document.createElement("div");
-  container.innerHTML = html || "";
-  const blocks = [];
-  let paragraphText = "";
-  const flushParagraph = () => {
-    if (!paragraphText.trim()) return;
-    blocks.push(adfParagraph(paragraphText.trim()));
-    paragraphText = "";
-  };
-  const visit = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      paragraphText += node.textContent || "";
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.matches("pre.cell-code-block")) {
-      flushParagraph();
-      blocks.push({
-        type: "codeBlock",
-        attrs: { language: node.dataset.language || "text" },
-        content: [adfText(extractCodeText(node) || " ")],
-      });
-      return;
-    }
-    const image = node.matches("figure") ? node.querySelector("img") : node.matches("img") ? node : null;
-    if (image) {
-      flushParagraph();
-      const name = image.dataset.jiraName || image.dataset.fileName || image.alt || "Вложение";
-      const jiraId = image.dataset.jiraId;
-      const attachmentUrl = image.dataset.jiraUrl;
-      if (attachmentUrl) {
-        blocks.push({
-          type: "paragraph",
-          content: [
-            {
-              type: "inlineCard",
-              attrs: { url: attachmentUrl },
-            },
-          ],
-        });
-      } else {
-        blocks.push(adfParagraph(`[Изображение: ${name}]`));
-      }
-      return;
-    }
-    if (["P", "DIV", "LI"].includes(node.tagName)) {
-      for (const child of node.childNodes) visit(child);
-      paragraphText += "\n";
-      return;
-    }
-    for (const child of node.childNodes) visit(child);
-  };
-  for (const node of container.childNodes) visit(node);
-  flushParagraph();
-  return blocks.length ? blocks : [adfParagraph(" ")];
-}
-
-function generateAdfDocument() {
-  collectDocumentFields();
-  const content = [];
-  const overallColor = STATUS_META[draft.overallStatus].jiraColor;
-  content.push(
-    adfParagraph(`Проверено на ${draft.environment}`, [{ type: "strong" }]),
-    adfParagraph(`ТЕСТ — ${draft.overallStatus}`, [
-      { type: "strong" },
-      { type: "textColor", attrs: { color: overallColor } },
-    ]),
-  );
-  if (htmlToText(draft.intro) || /<img|<pre/i.test(draft.intro)) {
-    content.push(...htmlToAdfBlocks(draft.intro));
-  }
-
-  draft.sections.forEach((section) => {
-    const rows = section.rows.filter(hasRowContent);
-    if (!rows.length) return;
-    content.push({
-      type: "heading",
-      attrs: { level: 2 },
-      content: [adfText(section.title || "Раздел")],
-    });
-    const headerCells = ["Номер", ...section.columns.map((column) => column.title), "Статус"].map(
-      (title) => ({
-        type: "tableHeader",
-        content: [adfParagraph(title, [{ type: "strong" }])],
-      }),
-    );
-    const tableRows = [
-      { type: "tableRow", content: headerCells },
-      ...rows.map((row, index) => ({
-        type: "tableRow",
-        content: [
-          { type: "tableCell", content: [adfParagraph(`${index + 1}.`)] },
-          ...section.columns.map((column) => ({
-            type: "tableCell",
-            content: htmlToAdfBlocks(row.cells[column.id] || ""),
-          })),
-          {
-            type: "tableCell",
-            content: [
-              adfParagraph(row.status, [
-                { type: "strong" },
-                { type: "textColor", attrs: { color: STATUS_META[row.status].jiraColor } },
-              ]),
-            ],
-          },
-        ],
-      })),
-    ];
-    content.push({
-      type: "table",
-      attrs: { isNumberColumnEnabled: false, layout: "default" },
-      content: tableRows,
-    });
-  });
-  return { type: "doc", version: 1, content };
-}
-
-function fillJiraSettingsForm() {
-  elements.jiraType.value = jiraSettings.type;
-  elements.jiraAuthMethod.value =
-    jiraSettings.authMethod === "basic" || jiraSettings.authMethod === "cookie" ? jiraSettings.authMethod : "pat";
-  elements.jiraBaseUrl.value = jiraSettings.baseUrl;
-  elements.jiraUser.value = jiraSettings.user;
-  elements.jiraToken.value = jiraSecret;
-  updateJiraSettingsLabels();
-}
-
-function updateJiraSettingsLabels() {
-  const cloud = elements.jiraType.value === "cloud";
-  const basic = !cloud && elements.jiraAuthMethod.value === "basic";
-  const cookie = !cloud && elements.jiraAuthMethod.value === "cookie";
-  elements.jiraAuthMethodField.hidden = cloud;
-  elements.jiraUserField.hidden = !cloud && !basic;
-  elements.jiraUserLabel.textContent = cloud ? "Email Atlassian" : "Логин Jira";
-  elements.jiraTokenLabel.textContent = cloud
-    ? "API token"
-    : basic
-      ? "Пароль"
-      : cookie
-        ? "Cookie"
-        : "Personal Access Token";
-  elements.jiraToken.placeholder = cloud
-    ? "API token не сохраняется"
-    : basic
-      ? "Пароль не сохраняется"
-      : cookie
-        ? "Cookie не сохраняется"
-        : "Токен не сохраняется";
-  elements.jiraToken.autocomplete = basic ? "current-password" : "off";
-  elements.jiraUser.placeholder = cloud ? "name@company.ru" : "username";
-}
-
-function readJiraSettingsForm() {
-  return {
-    type: elements.jiraType.value,
-    authMethod: elements.jiraType.value === "cloud" ? "api-token" : elements.jiraAuthMethod.value,
-    baseUrl: elements.jiraBaseUrl.value.trim().replace(/\/+$/, ""),
-    user: elements.jiraUser.value.trim(),
-  };
-}
-
-function validateJiraSettings(settings, token) {
-  if (!/^https?:\/\//i.test(settings.baseUrl)) {
-    throw new Error("Укажите полный адрес Jira, начиная с http:// или https://");
-  }
-  if (!token) {
-    throw new Error(
-      settings.authMethod === "basic"
-        ? "Укажите пароль"
-        : settings.authMethod === "cookie"
-          ? "Укажите cookie"
-          : "Укажите токен",
-    );
-  }
-  if ((settings.type === "cloud" || settings.authMethod === "basic") && !settings.user) {
-    throw new Error(settings.type === "cloud" ? "Для Jira Cloud укажите email Atlassian" : "Укажите логин Jira");
-  }
-}
-
-function setConnectionState(message, type = "") {
-  elements.jiraConnectionState.textContent = message;
-  elements.jiraConnectionState.className = `connection-state ${type}`.trim();
-}
-
 function setReportIdentityState(message, type = "") {
   elements.reportIdentityState.textContent = message;
   elements.reportIdentityState.className = `connection-state ${type}`.trim();
@@ -3459,8 +3115,8 @@ function updateCloudHistorySettingsState() {
   const message = !enabled
     ? "Чек-листы сохраняются только локально в этом браузере."
     : workspaceKey
-      ? "Облачная история будет использовать ключ пространства."
-      : "Облачная история будет привязана к этому браузеру.";
+      ? `Синхронизация включена. Пространство: ${workspaceKey}.`
+      : "Синхронизация включена для вашей корпоративной учётной записи.";
   setReportIdentityState(message);
 }
 
@@ -3482,6 +3138,7 @@ function fillReportIdentityForm() {
 
 function saveReportIdentitySettings() {
   const wasCloudEnabled = cloudHistoryEnabled;
+  const previousWorkspaceKey = reportWorkspaceKey;
   cloudHistoryEnabled = Boolean(elements.cloudHistoryEnabled.checked);
   localStorage.setItem(CLOUD_HISTORY_ENABLED_KEY, String(cloudHistoryEnabled));
   reportWorkspaceKey = elements.reportWorkspaceKey.value.trim();
@@ -3490,14 +3147,21 @@ function saveReportIdentitySettings() {
   } else {
     localStorage.removeItem(WORKSPACE_KEY_STORAGE_KEY);
   }
+  const workspaceChanged = previousWorkspaceKey !== reportWorkspaceKey;
   if (!cloudHistoryEnabled) {
     hideSyncRecovery();
     serverReportHashes = {};
     dismissedCloudHashes = {};
     saveServerReportHashes();
     saveDismissedCloudHashes();
-  } else if (!wasCloudEnabled) {
-    saveReportSnapshot("enable-cloud-history").catch(() => {});
+  } else if (!wasCloudEnabled || workspaceChanged) {
+    if (workspaceChanged) {
+      serverReportHashes = {};
+      dismissedCloudHashes = {};
+      saveServerReportHashes();
+      saveDismissedCloudHashes();
+    }
+    saveReportSnapshot(workspaceChanged ? "change-cloud-workspace" : "enable-cloud-history").catch(() => {});
   }
   updateCloudHistorySettingsState();
   elements.reportIdentityState.classList.add("success");
@@ -3516,24 +3180,99 @@ function setSettingsSection(section) {
   elements.settingsHistorySection.hidden = !history;
   elements.settingsJiraSection.classList.toggle("active", jira);
   elements.settingsHistorySection.classList.toggle("active", history);
+  elements.settingsFooter.hidden = !history;
+}
+
+async function authCsrfToken() {
+  const response = await fetch("/api/auth/csrf", { cache: "no-store" });
+  const payload = await response.json();
+  return payload.csrfToken;
+}
+
+function renderJiraConnections(instances) {
+  elements.jiraConnections.replaceChildren();
+  if (!instances.length) {
+    elements.jiraConnections.innerHTML = `
+      <div class="jira-empty-state">
+        <strong>Нет доступных подключений</strong>
+        <span>Администратор ещё не добавил Jira для этого приложения.</span>
+      </div>`;
+    return;
+  }
+  for (const instance of instances) {
+    const card = document.createElement("div");
+    card.className = "jira-connection-card";
+    const description = instance.connected
+      ? `Подключено: ${instance.displayName || instance.jiraUsername || "ваша учётная запись"}`
+      : `Jira ${instance.version || "Data Center"} · требуется одноразовое подтверждение`;
+    card.innerHTML = `<div><strong>${escapeHtml(instance.name)}</strong><small>${escapeHtml(description)}</small></div>`;
+    const actions = document.createElement("div");
+    actions.className = "jira-connection-actions";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = instance.connected ? "button button-secondary" : "button button-primary";
+    button.textContent = instance.connected ? "Отключить" : "Подключить";
+    button.dataset.jiraConnectionAction = instance.connected ? "disconnect" : "connect";
+    button.dataset.instanceId = instance.id;
+    actions.append(button);
+    card.append(actions);
+    elements.jiraConnections.append(card);
+  }
+}
+
+async function loadJiraConnections() {
+  try {
+    const response = await fetch("/api/jira/connections", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    renderJiraConnections(payload.instances || []);
+  } catch (error) {
+    elements.jiraConnections.innerHTML = `
+      <div class="jira-empty-state">
+        <strong>Jira пока не настроена</strong>
+        <span>${escapeHtml(friendlyJiraError(error))}</span>
+      </div>`;
+  }
+}
+
+async function connectJira(instanceId) {
+  const csrfToken = await authCsrfToken();
+  const response = await fetch("/api/jira/oauth/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instanceId, csrfToken, callbackUrl: `${location.pathname}${location.search}` }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  location.assign(payload.authorizeUrl);
+}
+
+async function disconnectJira(instanceId) {
+  const csrfToken = await authCsrfToken();
+  const response = await fetch(`/api/jira/connections/${encodeURIComponent(instanceId)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrfToken }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  await loadJiraConnections();
 }
 
 function openJiraSettings() {
-  fillJiraSettingsForm();
   fillReportIdentityForm();
   setSettingsSection("jira");
-  setJiraSettingsTab("manual");
   setSettingsSavedState(false);
-  setConnectionState("Соединение ещё не проверялось.");
   setReportIdentityState(
     !cloudHistoryEnabled
       ? "Чек-листы сохраняются только локально в этом браузере."
       : reportWorkspaceKey.trim()
-        ? "Облачная история будет использовать ключ пространства."
-        : "Облачная история будет привязана к этому браузеру.",
+        ? `Синхронизация включена. Пространство: ${reportWorkspaceKey.trim()}.`
+        : "Синхронизация включена для вашей корпоративной учётной записи.",
   );
   elements.jiraSettingsModal.hidden = false;
   document.body.style.overflow = "hidden";
+  loadJiraConnections();
 }
 
 function closeJiraSettings() {
@@ -3543,229 +3282,11 @@ function closeJiraSettings() {
 
 function saveJiraSettings() {
   try {
-    const settings = readJiraSettingsForm();
-    jiraSettings = settings;
-    jiraSecret = elements.jiraToken.value;
-    localStorage.setItem(JIRA_SETTINGS_KEY, JSON.stringify(settings));
     saveReportIdentitySettings();
-    setConnectionState("Настройки сохранены. Секрет останется только до перезагрузки.", "success");
     setSettingsSavedState(true);
   } catch (error) {
     setSettingsSavedState(false);
     showToast(`Не удалось сохранить настройки: ${error.message}`, 9000);
-  }
-}
-
-function setJiraSettingsTab(tab) {
-  const curl = tab === "curl";
-  elements.jiraManualTab.classList.toggle("active", !curl);
-  elements.jiraCurlTab.classList.toggle("active", curl);
-  elements.jiraManualTab.setAttribute("aria-selected", curl ? "false" : "true");
-  elements.jiraCurlTab.setAttribute("aria-selected", curl ? "true" : "false");
-  elements.jiraManualPane.hidden = curl;
-  elements.jiraCurlPane.hidden = !curl;
-}
-
-function tokenizeCurlCommand(value) {
-  const tokens = [];
-  let current = "";
-  let quote = "";
-  let escaping = false;
-  for (const char of String(value || "")) {
-    if (escaping) {
-      if (char !== "\n" && char !== "\r") current += char;
-      escaping = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (quote) {
-      if (char === quote) quote = "";
-      else current += char;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      continue;
-    }
-    if (/\s/.test(char)) {
-      if (current) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += char;
-  }
-  if (current) tokens.push(current);
-  return tokens;
-}
-
-function splitCurlHeader(value) {
-  const index = String(value || "").indexOf(":");
-  if (index < 0) return null;
-  return {
-    name: value.slice(0, index).trim().toLowerCase(),
-    value: value.slice(index + 1).trim(),
-  };
-}
-
-function inferJiraBaseUrl(rawUrl) {
-  const url = new URL(rawUrl);
-  url.username = "";
-  url.password = "";
-  url.hash = "";
-  url.search = "";
-  const restIndex = url.pathname.search(/\/rest\/api\/(?:2|3|latest)\b/i);
-  const browseIndex = url.pathname.search(/\/browse\/[A-Z][A-Z0-9_]*-\d+\b/i);
-  const cutIndex = restIndex >= 0 ? restIndex : browseIndex;
-  url.pathname = cutIndex >= 0 ? url.pathname.slice(0, cutIndex) : "";
-  url.pathname = url.pathname.replace(/\/+$/, "");
-  return url.toString().replace(/\/$/, "");
-}
-
-function decodeBasicCredentials(value) {
-  const decoded = atob(value.trim());
-  const separator = decoded.indexOf(":");
-  if (separator < 0) throw new Error("Basic Authorization не содержит user:token");
-  return {
-    user: decoded.slice(0, separator),
-    token: decoded.slice(separator + 1),
-  };
-}
-
-function parseJiraCurl(value) {
-  const tokens = tokenizeCurlCommand(value);
-  if (!tokens.length) throw new Error("Вставьте curl-запрос");
-  const headers = new Map();
-  let url = "";
-  let userToken = "";
-  let cookie = "";
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    const next = tokens[index + 1] || "";
-    if (token === "curl") continue;
-    if (token === "-H" || token === "--header") {
-      const header = splitCurlHeader(next);
-      if (header) headers.set(header.name, header.value);
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("-H") && token.length > 2) {
-      const header = splitCurlHeader(token.slice(2));
-      if (header) headers.set(header.name, header.value);
-      continue;
-    }
-    if (token.startsWith("--header=")) {
-      const header = splitCurlHeader(token.slice("--header=".length));
-      if (header) headers.set(header.name, header.value);
-      continue;
-    }
-    if (token === "-u" || token === "--user" || token === "--user-name") {
-      userToken = next;
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("-u") && token.length > 2) {
-      userToken = token.slice(2);
-      continue;
-    }
-    if (token.startsWith("--user=")) {
-      userToken = token.slice("--user=".length);
-      continue;
-    }
-    if (token === "-b" || token === "--cookie") {
-      cookie = next;
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("--cookie=")) {
-      cookie = token.slice("--cookie=".length);
-      continue;
-    }
-    if (token === "--url") {
-      url = next;
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("--url=")) {
-      url = token.slice("--url=".length);
-      continue;
-    }
-    if (!token.startsWith("-") && /^https?:\/\//i.test(token)) {
-      url = token;
-    }
-  }
-  if (!url) throw new Error("В curl не найден URL Jira");
-  const baseUrl = inferJiraBaseUrl(url);
-  const hostname = new URL(baseUrl).hostname.toLowerCase();
-  const isCloud = hostname.endsWith(".atlassian.net");
-  const authorization = headers.get("authorization") || "";
-  const headerCookie = headers.get("cookie") || "";
-  if (/^bearer\s+/i.test(authorization)) {
-    return {
-      settings: { type: "data-center", authMethod: "pat", baseUrl, user: "" },
-      token: authorization.replace(/^bearer\s+/i, "").trim(),
-      summary: "Найден Bearer-токен",
-    };
-  }
-  if (/^basic\s+/i.test(authorization)) {
-    const credentials = decodeBasicCredentials(authorization.replace(/^basic\s+/i, ""));
-    return {
-      settings: {
-        type: isCloud ? "cloud" : "data-center",
-        authMethod: isCloud ? "api-token" : "basic",
-        baseUrl,
-        user: credentials.user,
-      },
-      token: credentials.token,
-      summary: "Найден Basic Authorization",
-    };
-  }
-  if (userToken) {
-    const separator = userToken.indexOf(":");
-    if (separator < 0) throw new Error("Параметр -u должен быть в формате user:token");
-    return {
-      settings: {
-        type: isCloud ? "cloud" : "data-center",
-        authMethod: isCloud ? "api-token" : "basic",
-        baseUrl,
-        user: userToken.slice(0, separator),
-      },
-      token: userToken.slice(separator + 1),
-      summary: "Найден параметр -u user:token",
-    };
-  }
-  if (headerCookie || cookie) {
-    return {
-      settings: { type: "data-center", authMethod: "cookie", baseUrl, user: "" },
-      token: headerCookie || cookie,
-      summary: "Найден Cookie",
-    };
-  }
-  throw new Error("В curl не найден Authorization, -u или Cookie");
-}
-
-function showJiraCurlState(message, type = "") {
-  elements.jiraCurlState.textContent = message;
-  elements.jiraCurlState.className = `settings-curl-state ${type}`.trim();
-  elements.jiraCurlState.hidden = false;
-}
-
-function applyJiraCurlSettings() {
-  try {
-    const parsed = parseJiraCurl(elements.jiraCurlInput.value);
-    jiraSettings = parsed.settings;
-    jiraSecret = parsed.token;
-    localStorage.setItem(JIRA_SETTINGS_KEY, JSON.stringify(jiraSettings));
-    fillJiraSettingsForm();
-    setConnectionState("Настройки из curl сохранены. Секрет останется только до перезагрузки.", "success");
-    showJiraCurlState(`${parsed.summary}: ${jiraSettings.baseUrl}`, "success");
-  } catch (error) {
-    showJiraCurlState(error.message, "error");
-    setConnectionState(error.message, "error");
   }
 }
 
@@ -3813,17 +3334,49 @@ function wait(ms, signal) {
 
 function friendlyJiraError(error) {
   if (error?.name === "AbortError") return "Публикация отменена";
+  const message = String(error?.message || "");
+  if (/JIRA_INSTANCES_JSON|не настроен список Jira/i.test(message)) {
+    return "На этом стенде ещё не добавлены адреса Jira. После настройки администратором здесь появятся доступные подключения.";
+  }
+  if (/не удалось определить Jira|отсутствует в серверном allowlist|другому адресу Jira/i.test(message)) {
+    return "Эта Jira пока не подключена к приложению. Обратитесь к администратору, чтобы добавить её адрес.";
+  }
+  if (/не найден идентификатор комментария/i.test(message)) {
+    return "Это ссылка на задачу, а нужна ссылка именно на комментарий. В Jira откройте меню нужного комментария, выберите «Скопировать ссылку» и вставьте её сюда.";
+  }
   if (error instanceof JiraRequestError) {
     if (error.status === 413) return "Запрос слишком большой. Уменьшите размер вложения или отчёта.";
     if (error.status === 429) return "Jira временно ограничила частоту запросов. Повторите позже.";
-    if (error.status === 401 || error.status === 403) return `Ошибка доступа Jira: ${error.message}`;
-    if (error.status >= 500) return `Jira временно недоступна: ${error.message}`;
+    if (error.code === "JIRA_AUTH_REQUIRED" || error.status === 401) {
+      return "Сначала откройте Настройки → Jira и подключите нужную Jira.";
+    }
+    if (error.status === 403) return "У вашей учётной записи Jira недостаточно прав для этого действия.";
+    if (error.status === 404) return "Комментарий или задача не найдены. Проверьте ссылку и доступ к задаче.";
+    if (error.status >= 500) return "Jira сейчас недоступна. Попробуйте ещё раз немного позже.";
   }
-  return error?.message || "Неизвестная ошибка публикации";
+  return message || "Не удалось выполнить действие в Jira. Попробуйте ещё раз.";
+}
+
+function validateJiraCommentUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value || "").trim());
+  } catch {
+    throw new Error("Вставьте полную ссылку на комментарий Jira.");
+  }
+  const commentId =
+    url.searchParams.get("focusedCommentId") ||
+    url.searchParams.get("commentId") ||
+    url.searchParams.get("selectedItem")?.match(/comment-(\d+)/i)?.[1] ||
+    url.hash.match(/comment-(\d+)/i)?.[1];
+  if (!/^\d+$/.test(String(commentId || ""))) {
+    throw new Error("Это ссылка на задачу, а нужна ссылка именно на комментарий. В Jira откройте меню нужного комментария, выберите «Скопировать ссылку» и вставьте её сюда.");
+  }
+  return url.toString();
 }
 
 function shouldOpenJiraSettings(error) {
-  if (error instanceof JiraRequestError) return error.status === 401 || error.status === 403;
+  if (error instanceof JiraRequestError) return error.code === "JIRA_AUTH_REQUIRED" || error.status === 401 || error.status === 403;
   return /настро|токен|адрес|ключ/i.test(error?.message || "");
 }
 
@@ -3832,10 +3385,12 @@ async function jiraRequest(path, body, options = {}) {
   let attempt = 0;
   while (true) {
     try {
+      const safeBody = { ...(body || {}) };
+      for (const field of ["token", "password", "cookie", "authorization", "user", "baseUrl", "authMethod"]) delete safeBody[field];
       const response = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(safeBody),
         signal,
       });
       const result = await response.json().catch(() => ({}));
@@ -3982,7 +3537,6 @@ async function uploadPendingImages(settings, issue, options = {}) {
         "/api/jira/attachments",
         {
           ...settings,
-          token: jiraSecret,
           ...issue,
           files: batch.map(({ attachmentId, name, type, dataBase64 }) => ({
             attachmentId,
@@ -4019,22 +3573,6 @@ async function uploadPendingImages(settings, issue, options = {}) {
   return uploaded;
 }
 
-async function testJiraConnection() {
-  try {
-    const settings = readJiraSettingsForm();
-    const token = elements.jiraToken.value;
-    validateJiraSettings(settings, token);
-    setConnectionState("Проверяем подключение…");
-    const result = await jiraRequest("/api/jira/test", { ...settings, token });
-    jiraSettings = settings;
-    jiraSecret = token;
-    localStorage.setItem(JIRA_SETTINGS_KEY, JSON.stringify(settings));
-    setConnectionState(`Подключено: ${result.displayName || result.name || "пользователь Jira"}`, "success");
-  } catch (error) {
-    setConnectionState(error.message, "error");
-  }
-}
-
 function splitWikiComment(comment) {
   const body = String(comment.body || "");
   const blocks = body.split(/\n\n(?=h2\. )/);
@@ -4045,37 +3583,8 @@ function splitWikiComment(comment) {
   }));
 }
 
-function splitAdfComment(comment) {
-  const content = comment.body?.content || [];
-  const prefix = content.slice(0, 2);
-  const rest = content.slice(2);
-  const groups = [];
-  let current = [];
-  for (const node of rest) {
-    if (node.type === "heading" && current.length) {
-      groups.push(current);
-      current = [];
-    }
-    current.push(node);
-  }
-  if (current.length) groups.push(current);
-  if (groups.length <= 1) return [];
-  return groups.map((group, index) => ({
-    format: "adf",
-    body: {
-      type: "doc",
-      version: 1,
-      content: [
-        adfParagraph(`Часть ${index + 1} из ${groups.length}`, [{ type: "strong" }]),
-        ...prefix,
-        ...group,
-      ],
-    },
-  }));
-}
-
 function splitJiraComment(comment) {
-  return comment.format === "adf" ? splitAdfComment(comment) : splitWikiComment(comment);
+  return splitWikiComment(comment);
 }
 
 async function postJiraComment(settings, issue, comment, signal) {
@@ -4083,7 +3592,6 @@ async function postJiraComment(settings, issue, comment, signal) {
     "/api/jira/comment",
     {
       ...settings,
-      token: jiraSecret,
       ...issue,
       comment,
     },
@@ -4124,8 +3632,7 @@ async function publishToJira() {
   try {
     collectDocumentFields();
     const issue = parseIssueUrl(draft.issueUrl);
-    const settings = { ...jiraSettings };
-    validateJiraSettings(settings, jiraSecret);
+    const settings = {};
     await checkBackendCompatibility();
     const confirmed = await askConfirmation(
       `Опубликовать отчёт комментарием в задаче ${issue.issueKey}?`,
@@ -4150,10 +3657,7 @@ async function publishToJira() {
         });
       },
     });
-    const comment =
-      settings.type === "cloud"
-        ? { format: "adf", body: generateAdfDocument() }
-        : { format: "wiki", body: generateMarkup() };
+    const comment = { format: "wiki", body: generateMarkup() };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const results = await publishCommentWithFallback(settings, issue, comment, publishAbortController.signal);
     setPublishProgress({ step: "verify", percent: 96, status: "Проверка созданного комментария" });
@@ -5233,7 +4737,7 @@ async function uploadEditorObjectToStorage(object, kind) {
     showToast("Загружаем в корпоративное хранилище…", 3500);
     const response = await fetch("/api/storage/upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...reportIdentityHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({
         reportId: draft.reportId,
         file: { name, type: blob.type || object.dataset.mimeType, dataBase64: dataUrl.split(",")[1] || "" },
@@ -5737,18 +5241,11 @@ async function prepareImport() {
     if (importSource === "markup") {
       imported = parseJiraMarkup(elements.importMarkup.value);
     } else {
-      validateJiraSettings(jiraSettings, jiraSecret);
-      const commentUrl = elements.commentImportUrl.value.trim();
-      if (!commentUrl) throw new Error("Укажите ссылку на комментарий Jira");
+      const commentUrl = validateJiraCommentUrl(elements.commentImportUrl.value);
       const result = await jiraRequest("/api/jira/import-comment", {
-        ...jiraSettings,
-        token: jiraSecret,
         commentUrl,
       });
-      imported =
-        result.format === "adf"
-          ? parseAdfDocument(result.body, result.attachments || [])
-          : parseJiraMarkup(result.body, result.attachments || []);
+      imported = parseJiraMarkup(result.body, result.attachments || []);
       imported.issueUrl = result.issueUrl || "";
     }
     pendingImportedDraft = imported;
@@ -5759,7 +5256,7 @@ async function prepareImport() {
     elements.importWarning.hidden = true;
     return imported;
   } catch (error) {
-    elements.importWarning.textContent = error.message;
+    elements.importWarning.textContent = friendlyJiraError(error);
     elements.importWarning.hidden = false;
     pendingImportedDraft = null;
     throw error;
@@ -6977,9 +6474,20 @@ elements.focusModeButton.addEventListener("click", () => {
 });
 elements.focusExitButton.addEventListener("click", () => setFocusMode(false));
 elements.settingsButton.addEventListener("click", openJiraSettings);
+elements.jiraConnections.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-jira-connection-action]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    if (button.dataset.jiraConnectionAction === "connect") await connectJira(button.dataset.instanceId);
+    else await disconnectJira(button.dataset.instanceId);
+  } catch (error) {
+    showToast(friendlyJiraError(error), 9000);
+    button.disabled = false;
+  }
+});
 elements.closeJiraSettingsButton.addEventListener("click", closeJiraSettings);
 elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
-elements.testJiraButton.addEventListener("click", testJiraConnection);
 elements.publishButton.addEventListener("click", publishToJira);
 elements.publishCancelButton.addEventListener("click", cancelPublishProgress);
 elements.cloudConflictStatus.addEventListener("click", openVersionConflictModal);
@@ -6994,17 +6502,12 @@ elements.saveVersionChoiceButton.addEventListener("click", () => {
 });
 elements.openLocalCopyButton.addEventListener("click", () => openSavedConflictCopy("local"));
 elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCopy("cloud"));
-elements.jiraType.addEventListener("change", updateJiraSettingsLabels);
-elements.jiraAuthMethod.addEventListener("change", updateJiraSettingsLabels);
 elements.settingsJiraSectionButton.addEventListener("click", () => setSettingsSection("jira"));
 elements.settingsHistorySectionButton.addEventListener("click", () => setSettingsSection("history"));
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
 elements.jiraSettingsModal.addEventListener("change", markSettingsDirty);
 elements.cloudHistoryEnabled.addEventListener("change", () => updateCloudHistorySettingsState());
 elements.reportWorkspaceKey.addEventListener("input", () => updateCloudHistorySettingsState());
-elements.jiraManualTab.addEventListener("click", () => setJiraSettingsTab("manual"));
-elements.jiraCurlTab.addEventListener("click", () => setJiraSettingsTab("curl"));
-elements.parseJiraCurlButton.addEventListener("click", applyJiraCurlSettings);
 elements.themeToggle.addEventListener("click", (e) => {
   e.stopPropagation();
   const menu = document.getElementById("themeMenu");

@@ -4,7 +4,10 @@
   "version": "0.2.2",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js && node --check jira-markup-import.js",
-    "test": "node tests/jira-integration.test.js"
+    "check": "node --check app.js && node --check server.js && node --check auth.js && node --check jira-oauth.js && node --check jira-markup-import.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "ldapjs": "^3.0.7"
   }
 }

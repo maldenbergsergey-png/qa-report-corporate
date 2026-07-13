@@ -18,5 +18,9 @@ secrets
 dist
 build
 
+# Local visual QA captures
+design-login-*.png
+design-login-*.jpg
+
 .vscode
 .idea

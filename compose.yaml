@@ -12,18 +12,39 @@ services:
       HOST: 0.0.0.0
       PORT: 4173
       REPORTS_DB_PATH: /app/reports-data/qa-report.sqlite
+      AUTH_SECRET_FILE: /run/secrets/auth_secret
+      LDAP_URL: ${LDAP_URL:?LDAP_URL must use ldaps://}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:?LDAP_BIND_DN is required}
+      LDAP_BIND_PASSWORD_FILE: /run/secrets/ldap_bind_password
+      LDAP_SEARCH_BASE: ${LDAP_SEARCH_BASE:?LDAP_SEARCH_BASE is required}
+      LDAP_TLS_SERVERNAME: ${LDAP_TLS_SERVERNAME:?LDAP_TLS_SERVERNAME is required}
+      LDAP_CA_FILE: /run/secrets/ldap_ca
+      LDAP_CA_SHA256: ${LDAP_CA_SHA256:?LDAP_CA_SHA256 is required}
+      LOGIN_MAX_FAILS_PER_ACCOUNT: ${LOGIN_MAX_FAILS_PER_ACCOUNT:-5}
+      LOGIN_MAX_FAILS_PER_IP: ${LOGIN_MAX_FAILS_PER_IP:-50}
+      LOGIN_WINDOW_MINUTES: ${LOGIN_WINDOW_MINUTES:-15}
+      JIRA_INSTANCES_JSON: ${JIRA_INSTANCES_JSON:?JIRA_INSTANCES_JSON is required}
+      JIRA_OAUTH_CONSUMER_KEY: ${JIRA_OAUTH_CONSUMER_KEY:-qa-report}
+      JIRA_OAUTH_PRIVATE_KEY_FILE: /run/secrets/jira_oauth_private_key
+      JIRA_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/jira_token_encryption_key
+      JIRA_REQUIRE_EMAIL_MATCH: ${JIRA_REQUIRE_EMAIL_MATCH:-true}
       QA_JIRA_ALLOWED_ORIGINS: ${QA_JIRA_ALLOWED_ORIGINS:-}
       QA_REPORT_TRUST_PROXY: ${QA_REPORT_TRUST_PROXY:-false}
-      QA_REPORT_TRUST_PROXY_IDENTITY: ${QA_REPORT_TRUST_PROXY_IDENTITY:-false}
       QA_STORAGE_ENDPOINT: ${QA_STORAGE_ENDPOINT:-https://minio-buckets.adv.ru}
       QA_STORAGE_BUCKET: ${QA_STORAGE_BUCKET:-qa-tools}
       QA_STORAGE_REGION: ${QA_STORAGE_REGION:-us-east-1}
-      QA_STORAGE_ACCESS_KEY: ${QA_STORAGE_ACCESS_KEY:-}
-      QA_STORAGE_SECRET_KEY: ${QA_STORAGE_SECRET_KEY:-}
-      QA_STORAGE_ACCESS_KEY_FILE: ${QA_STORAGE_ACCESS_KEY_FILE:-}
-      QA_STORAGE_SECRET_KEY_FILE: ${QA_STORAGE_SECRET_KEY_FILE:-}
+      QA_STORAGE_ACCESS_KEY_FILE: /run/secrets/storage_access_key
+      QA_STORAGE_SECRET_KEY_FILE: /run/secrets/storage_secret_key
     volumes:
       - reports_data:/app/reports-data
+    secrets:
+      - auth_secret
+      - ldap_bind_password
+      - ldap_ca
+      - jira_oauth_private_key
+      - jira_token_encryption_key
+      - storage_access_key
+      - storage_secret_key
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
@@ -33,3 +54,19 @@ services:
 
 volumes:
   reports_data:
+
+secrets:
+  auth_secret:
+    file: ${AUTH_SECRET_FILE:-./secrets/auth_secret}
+  ldap_bind_password:
+    file: ${LDAP_BIND_PASSWORD_FILE:-./secrets/ldap_bind_password}
+  ldap_ca:
+    file: ${LDAP_CA_FILE_HOST:-./secrets/ldap_ca.pem}
+  jira_oauth_private_key:
+    file: ${JIRA_OAUTH_PRIVATE_KEY_FILE:-./secrets/jira_oauth_private.pem}
+  jira_token_encryption_key:
+    file: ${JIRA_TOKEN_ENCRYPTION_KEY_FILE:-./secrets/jira_token_encryption_key}
+  storage_access_key:
+    file: ${QA_STORAGE_ACCESS_KEY_FILE_HOST:-./secrets/storage_access_key}
+  storage_secret_key:
+    file: ${QA_STORAGE_SECRET_KEY_FILE_HOST:-./secrets/storage_secret_key}

@@ -4,6 +4,22 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 const { parseJiraMarkup } = require("./jira-markup-import");
+const { oauthHeader, parseForm, loadJiraOAuthConfig, encryptToken, decryptToken } = require("./jira-oauth");
+const {
+  normalizeEmail,
+  createSessionToken,
+  sessionFromRequest,
+  sessionCookie,
+  clearSessionCookie,
+  createCsrfToken,
+  csrfCookie,
+  verifyCsrf,
+  sanitizeCallbackUrl,
+  clientIp,
+  createLoginRateLimiter,
+  authenticateDevelopmentAccount,
+  authenticateLdap,
+} = require("./auth");
 
 const ROOT = __dirname;
 
@@ -35,7 +51,6 @@ const HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_ORIGIN =
   process.env.QA_REPORT_PUBLIC_URL || process.env.APP_PUBLIC_URL || process.env.PUBLIC_URL || "";
 const TRUST_PROXY = process.env.QA_REPORT_TRUST_PROXY === "true";
-const TRUST_PROXY_IDENTITY = process.env.QA_REPORT_TRUST_PROXY_IDENTITY === "true";
 const JIRA_ALLOWED_ORIGINS = new Set(
   String(process.env.QA_JIRA_ALLOWED_ORIGINS || "")
     .split(",")
@@ -50,7 +65,7 @@ function readSizeMb(name, fallback) {
 const MAX_BODY = readSizeMb("QA_REPORT_MAX_BODY_MB", 150);
 const MAX_ATTACHMENT_FILE = readSizeMb("QA_REPORT_MAX_ATTACHMENT_MB", 50);
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
-const API_REVISION = 5;
+const API_REVISION = 6;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
@@ -58,6 +73,12 @@ const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1
 const CHECKLIST_IMPORT_TTL_MS = 15 * 60 * 1000;
 const apiRateLimit = new Map();
 let reportsDb;
+let jiraOAuthConfigCache;
+const loginRateLimiter = createLoginRateLimiter({
+  maxAccount: Number(process.env.LOGIN_MAX_FAILS_PER_ACCOUNT || 5),
+  maxIp: Number(process.env.LOGIN_MAX_FAILS_PER_IP || 50),
+  windowMs: Number(process.env.LOGIN_WINDOW_MINUTES || 15) * 60_000,
+});
 
 function readSecret(name) {
   const filePath = process.env[`${name}_FILE`];
@@ -163,6 +184,97 @@ function sendJson(response, status, payload) {
     "Cache-Control": "no-store",
   });
   response.end(JSON.stringify(payload));
+}
+
+function requestId(request, response) {
+  if (request._requestId) return request._requestId;
+  request._requestId = crypto.randomUUID();
+  response.setHeader("X-Request-Id", request._requestId);
+  return request._requestId;
+}
+
+function audit(request, response, event, details = {}) {
+  const record = {
+    timestamp: new Date().toISOString(),
+    event,
+    request_id: requestId(request, response),
+    ip: String(clientIp(request)).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 100),
+    email: normalizeEmail(details.email || request.user?.email),
+    ...(details.category ? { category: String(details.category).slice(0, 80) } : {}),
+    ...(details.adSubcode ? { ad_subcode: String(details.adSubcode).slice(0, 16) } : {}),
+  };
+  console.log(JSON.stringify(record));
+}
+
+async function handleCsrf(request, response) {
+  const token = createCsrfToken();
+  response.setHeader("Set-Cookie", csrfCookie(token));
+  sendJson(response, 200, { csrfToken: token });
+}
+
+async function handleLogin(request, response) {
+  const body = await readJson(request);
+  if (!verifyCsrf(request, body.csrfToken)) {
+    sendJson(response, 403, { error: "Недействительный защитный токен" });
+    return;
+  }
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
+  const ip = clientIp(request);
+  if (!email || !password) {
+    audit(request, response, "login_failed", { email, category: "invalid_input" });
+    sendJson(response, 401, { error: "Неверный email или пароль" });
+    return;
+  }
+  if (loginRateLimiter.isBlocked(email, ip)) {
+    audit(request, response, "login_throttled", { email, category: "rate_limited" });
+    sendJson(response, 429, { error: "Слишком много попыток входа. Попробуйте позже" });
+    return;
+  }
+  let result;
+  try {
+    result =
+      authenticateDevelopmentAccount(email, password, { host: HOST }) ||
+      await authenticateLdap(email, password);
+  } catch (error) {
+    audit(request, response, "login_failed", { email, category: "configuration_error" });
+    console.error(`Ошибка конфигурации корпоративного входа: ${error.message}`);
+    sendJson(response, 503, { error: "Сервис входа временно недоступен. Обратитесь к администратору" });
+    return;
+  } finally {
+    body.password = "";
+  }
+  if (!result.ok) {
+    loginRateLimiter.fail(email, ip);
+    audit(request, response, "login_failed", { email, category: result.category, adSubcode: result.subcode });
+    sendJson(response, 401, { error: "Неверный email или пароль" });
+    return;
+  }
+  loginRateLimiter.success(email, ip);
+  const token = createSessionToken(result.email);
+  response.setHeader("Set-Cookie", sessionCookie(token));
+  audit(request, response, "login_succeeded", { email: result.email });
+  sendJson(response, 200, { ok: true, email: result.email, callbackUrl: sanitizeCallbackUrl(body.callbackUrl) });
+}
+
+async function handleLogout(request, response) {
+  const body = await readJson(request);
+  if (!verifyCsrf(request, body.csrfToken)) {
+    sendJson(response, 403, { error: "Недействительный защитный токен" });
+    return;
+  }
+  audit(request, response, "session_logout");
+  response.setHeader("Set-Cookie", clearSessionCookie());
+  sendJson(response, 200, { ok: true });
+}
+
+function requireUser(request) {
+  if (!request.user?.email) {
+    const error = new Error("Unauthorized");
+    error.status = 401;
+    throw error;
+  }
+  return request.user.email;
 }
 
 function applySecurityHeaders(response) {
@@ -324,6 +436,25 @@ function getReportsDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_checklist_imports_expires
       ON checklist_imports(expires_at);
+    CREATE TABLE IF NOT EXISTS jira_oauth_requests (
+      request_token TEXT PRIMARY KEY,
+      owner_email TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      callback_url TEXT NOT NULL,
+      token_secret TEXT NOT NULL DEFAULT '',
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_jira_oauth_requests_expires ON jira_oauth_requests(expires_at);
+    CREATE TABLE IF NOT EXISTS jira_oauth_connections (
+      owner_email TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      encrypted_token TEXT NOT NULL,
+      jira_username TEXT NOT NULL DEFAULT '',
+      jira_display_name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_email, instance_id)
+    );
   `);
   const columns = reportsDb.prepare("PRAGMA table_info(reports)").all().map((column) => column.name);
   if (!columns.includes("content_hash")) {
@@ -443,58 +574,19 @@ function normalizeIdentityPart(value, fallback = "") {
 }
 
 function resolveReportOwner(request) {
-  const ssoValue = TRUST_PROXY_IDENTITY
-    ? normalizeIdentityPart(
-        firstHeader(request, [
-          "x-forwarded-email",
-          "x-auth-request-email",
-          "x-forwarded-user",
-          "x-auth-request-user",
-          "remote-user",
-        ]),
-      )
-    : "";
-  if (ssoValue) {
-    return {
-      source: "sso",
-      id: ssoValue.toLowerCase(),
-      label: ssoValue,
-      workspaceId: "sso",
-    };
-  }
-
-  const workspaceKey = normalizeIdentityPart(firstHeader(request, ["x-qa-report-workspace-key"]));
-  if (workspaceKey) {
-    const workspaceHash = stableHash(workspaceKey).slice(0, 32);
-    return {
-      source: "workspace-key",
-      id: workspaceHash,
-      label: "Ключ пространства",
-      workspaceId: `workspace:${workspaceHash}`,
-    };
-  }
-
-  const clientId = normalizeIdentityPart(firstHeader(request, ["x-qa-report-client-id"]));
-  if (clientId) {
-    return {
-      source: "browser",
-      id: clientId.slice(0, 120),
-      label: "Этот браузер",
-      workspaceId: `browser:${clientId.slice(0, 120)}`,
-    };
-  }
-
-  const anonymousId = stableHash(request.socket.remoteAddress || "anonymous").slice(0, 32);
+  const email = requireUser(request);
+  const workspaceKey = normalizeIdentityPart(request.headers["x-qa-report-workspace"] || "");
+  const namespace = workspaceKey ? `workspace:${stableHash(workspaceKey).slice(0, 32)}` : "";
   return {
-    source: "anonymous",
-    id: anonymousId,
-    label: "Анонимный доступ",
-    workspaceId: `anonymous:${anonymousId}`,
+    source: "corporate-email",
+    id: namespace ? `${email}:${namespace}` : email,
+    label: email,
+    workspaceId: workspaceKey ? `workspace:${workspaceKey}` : `user:${email}`,
   };
 }
 
 function storageOwnerNamespace(owner) {
-  return stableHash(`${owner.source}:${owner.id}`).slice(0, 32);
+  return stableHash(`${owner.source}:${owner.label}`).slice(0, 32);
 }
 
 function issueKeyFromUrl(value) {
@@ -546,58 +638,68 @@ function assertReportDocument(document) {
   }
 }
 
-function normalizeConnection(input) {
-  const type = input.type === "cloud" ? "cloud" : "data-center";
-  const baseUrl = new URL(input.baseUrl);
-  if (!["http:", "https:"].includes(baseUrl.protocol)) {
-    throw new Error("Поддерживаются только http:// и https:// адреса Jira");
+function jiraOAuthConfig() {
+  jiraOAuthConfigCache ||= loadJiraOAuthConfig();
+  return jiraOAuthConfigCache;
+}
+
+function jiraInstance(instanceId, urlValue = "") {
+  const config = jiraOAuthConfig();
+  let instance = instanceId ? config.instances.find((item) => item.id === instanceId) : null;
+  if (!instance && urlValue) {
+    let target;
+    try { target = new URL(String(urlValue)); } catch { target = null; }
+    if (target) instance = config.instances.find((item) => target.href.startsWith(`${item.baseUrl}/`) || target.href === item.baseUrl);
   }
-  if (process.env.NODE_ENV === "production" && baseUrl.protocol !== "https:") {
-    const error = new Error("В production разрешены только HTTPS-адреса Jira");
+  if (!instance) {
+    const error = new Error("Не удалось определить Jira для запроса");
     error.status = 400;
     throw error;
   }
-  if (!JIRA_ALLOWED_ORIGINS.size) {
-    const error = new Error("Список разрешённых Jira не настроен на сервере");
-    error.status = 503;
-    throw error;
-  }
-  if (!JIRA_ALLOWED_ORIGINS.has(baseUrl.origin)) {
-    const error = new Error("Этот адрес Jira не разрешён корпоративной конфигурацией");
+  if (JIRA_ALLOWED_ORIGINS.size && !JIRA_ALLOWED_ORIGINS.has(new URL(instance.baseUrl).origin)) {
+    const error = new Error("Jira отсутствует в серверном allowlist");
     error.status = 403;
     throw error;
   }
-  baseUrl.username = "";
-  baseUrl.password = "";
-  baseUrl.hash = "";
-  baseUrl.search = "";
-  baseUrl.pathname = baseUrl.pathname.replace(/\/+$/, "");
-  const token = String(input.token || "");
-  const user = String(input.user || "");
-  const authMethod =
-    type === "cloud" ? "api-token" : input.authMethod === "basic" || input.authMethod === "cookie" ? input.authMethod : "pat";
-  if (!token) throw new Error(authMethod === "basic" ? "Пароль не указан" : authMethod === "cookie" ? "Cookie не указан" : "Токен не указан");
-  if ((type === "cloud" || authMethod === "basic") && !user) {
-    throw new Error(type === "cloud" ? "Email Atlassian не указан" : "Логин Jira не указан");
-  }
-  return { type, authMethod, baseUrl: baseUrl.toString().replace(/\/$/, ""), token, user };
+  return instance;
 }
 
-function authHeaders(connection) {
-  if (connection.authMethod === "cookie") {
-    return { Cookie: connection.token };
+function jiraConnection(request, body = {}) {
+  const email = requireUser(request);
+  const referenceUrl = body.issueUrl || body.commentUrl || "";
+  const instance = jiraInstance(body.instanceId, referenceUrl);
+  const row = getReportsDb().prepare(
+    "SELECT encrypted_token, jira_username, jira_display_name FROM jira_oauth_connections WHERE owner_email = ? AND instance_id = ?",
+  ).get(email, instance.id);
+  if (!row) {
+    const error = new Error(`Подключите ${instance.name}, чтобы выполнить действие от своего имени`);
+    error.status = 409;
+    error.code = "JIRA_AUTH_REQUIRED";
+    error.instanceId = instance.id;
+    throw error;
   }
-  if (connection.type === "cloud" || connection.authMethod === "basic") {
-    const credentials = Buffer.from(`${connection.user}:${connection.token}`).toString("base64");
-    return { Authorization: `Basic ${credentials}` };
+  let token;
+  try { token = decryptToken(row.encrypted_token, jiraOAuthConfig().encryptionKey); }
+  catch {
+    const error = new Error(`Подключение ${instance.name} повреждено. Подключите Jira повторно`);
+    error.status = 409;
+    error.code = "JIRA_AUTH_REQUIRED";
+    error.instanceId = instance.id;
+    throw error;
   }
-  return { Authorization: `Bearer ${connection.token}` };
+  return { ...instance, type: "data-center", token: token.oauthToken, tokenSecret: token.oauthTokenSecret || "", jiraUsername: row.jira_username };
+}
+
+function authHeaders(connection, method, targetUrl) {
+  const config = jiraOAuthConfig();
+  return { Authorization: oauthHeader({ method, url: targetUrl, consumerKey: config.consumerKey, privateKey: config.privateKey, token: connection.token }) };
 }
 
 async function jiraFetch(connection, pathname, options = {}) {
   const { returnMeta = false, ...fetchOptions } = options;
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const targetUrl = `${connection.baseUrl}${pathname}`;
+  const method = String(fetchOptions.method || "GET").toUpperCase();
   let response;
   try {
     response = await fetch(targetUrl, {
@@ -605,7 +707,7 @@ async function jiraFetch(connection, pathname, options = {}) {
       redirect: "manual",
       headers: {
         Accept: "application/json",
-        ...authHeaders(connection),
+        ...authHeaders(connection, method, targetUrl),
         ...(fetchOptions.body && !isFormData ? { "Content-Type": "application/json" } : {}),
         ...(fetchOptions.headers || {}),
       },
@@ -657,6 +759,10 @@ async function jiraFetch(connection, pathname, options = {}) {
       response.statusText;
     const error = new Error(`Jira вернула ${response.status}: ${details}`);
     error.status = response.status;
+    if (response.status === 401) {
+      error.code = "JIRA_AUTH_REQUIRED";
+      error.instanceId = connection.id;
+    }
     throw error;
   }
   if (returnMeta) {
@@ -839,27 +945,134 @@ function decodeAttachmentFile(file, index) {
 
 async function handleJiraTest(request, response) {
   const body = await readJson(request);
-  const connection = normalizeConnection(body);
-  const version = connection.type === "cloud" ? "3" : "2";
-  const user = await jiraFetch(connection, `/rest/api/${version}/myself`);
+  const connection = jiraConnection(request, body);
+  const user = await jiraFetch(connection, "/rest/api/2/myself");
   sendJson(response, 200, {
     ok: true,
+    instanceId: connection.id,
     displayName: user.displayName,
     name: user.emailAddress || user.name || user.accountId,
   });
 }
 
+async function jiraOAuthTokenRequest(instance, { token = "", verifier = "", callback = "" } = {}) {
+  const config = jiraOAuthConfig();
+  const endpoint = token ? "/plugins/servlet/oauth/access-token" : "/plugins/servlet/oauth/request-token";
+  const url = `${instance.baseUrl}${endpoint}`;
+  const authorization = oauthHeader({ method: "POST", url, consumerKey: config.consumerKey, privateKey: config.privateKey, token, verifier, callback });
+  const result = await fetch(url, { method: "POST", redirect: "manual", headers: { Authorization: authorization, Accept: "application/x-www-form-urlencoded" } });
+  const text = await result.text();
+  if (!result.ok) {
+    const error = new Error(`${instance.name} отклонила OAuth-запрос: HTTP ${result.status}`);
+    error.status = 502;
+    throw error;
+  }
+  const payload = parseForm(text);
+  if (!payload.oauth_token) {
+    const error = new Error(`${instance.name} вернула некорректный OAuth-ответ`);
+    error.status = 502;
+    throw error;
+  }
+  return payload;
+}
+
+async function handleJiraConnections(request, response) {
+  const email = requireUser(request);
+  const rows = getReportsDb().prepare(
+    "SELECT instance_id, jira_username, jira_display_name, updated_at FROM jira_oauth_connections WHERE owner_email = ?",
+  ).all(email);
+  const connected = new Map(rows.map((row) => [row.instance_id, row]));
+  sendJson(response, 200, {
+    instances: jiraOAuthConfig().instances.map((instance) => ({
+      id: instance.id,
+      name: instance.name,
+      version: instance.version,
+      baseUrl: instance.baseUrl,
+      connected: connected.has(instance.id),
+      jiraUsername: connected.get(instance.id)?.jira_username || "",
+      displayName: connected.get(instance.id)?.jira_display_name || "",
+    })),
+  });
+}
+
+async function handleJiraOAuthStart(request, response) {
+  const email = requireUser(request);
+  const body = await readJson(request);
+  if (!verifyCsrf(request, body.csrfToken)) {
+    sendJson(response, 403, { error: "Недействительный защитный токен" });
+    return;
+  }
+  const instance = jiraInstance(body.instanceId);
+  const callback = `${requestOrigin(request)}/api/jira/oauth/callback`;
+  const token = await jiraOAuthTokenRequest(instance, { callback });
+  getReportsDb().prepare("DELETE FROM jira_oauth_requests WHERE expires_at <= ? OR (owner_email = ? AND instance_id = ?)").run(Date.now(), email, instance.id);
+  getReportsDb().prepare(`
+    INSERT INTO jira_oauth_requests (request_token, owner_email, instance_id, callback_url, token_secret, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(token.oauth_token, email, instance.id, sanitizeCallbackUrl(body.callbackUrl), "", Date.now() + 10 * 60_000);
+  audit(request, response, "jira_oauth_started", { email });
+  sendJson(response, 200, { authorizeUrl: `${instance.baseUrl}/plugins/servlet/oauth/authorize?oauth_token=${encodeURIComponent(token.oauth_token)}` });
+}
+
+async function handleJiraOAuthCallback(request, response) {
+  const email = requireUser(request);
+  const url = new URL(request.url, "http://localhost");
+  const requestToken = String(url.searchParams.get("oauth_token") || "");
+  const verifier = String(url.searchParams.get("oauth_verifier") || "");
+  const pending = getReportsDb().prepare(
+    "SELECT request_token, instance_id, callback_url FROM jira_oauth_requests WHERE request_token = ? AND owner_email = ? AND expires_at > ?",
+  ).get(requestToken, email, Date.now());
+  if (!pending || !verifier) {
+    const error = new Error("OAuth-подключение Jira не найдено или истекло");
+    error.status = 400;
+    throw error;
+  }
+  const instance = jiraInstance(pending.instance_id);
+  const token = await jiraOAuthTokenRequest(instance, { token: requestToken, verifier });
+  const connection = { ...instance, type: "data-center", token: token.oauth_token, tokenSecret: token.oauth_token_secret || "" };
+  const jiraUser = await jiraFetch(connection, "/rest/api/2/myself");
+  const jiraEmail = normalizeEmail(jiraUser.emailAddress);
+  if (process.env.JIRA_REQUIRE_EMAIL_MATCH !== "false" && (!jiraEmail || jiraEmail !== email)) {
+    const error = new Error("Email учётной записи Jira не совпадает с корпоративной сессией");
+    error.status = 403;
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const encrypted = encryptToken({ oauthToken: token.oauth_token, oauthTokenSecret: token.oauth_token_secret || "" }, jiraOAuthConfig().encryptionKey);
+  getReportsDb().prepare(`
+    INSERT INTO jira_oauth_connections (owner_email, instance_id, encrypted_token, jira_username, jira_display_name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(owner_email, instance_id) DO UPDATE SET encrypted_token = excluded.encrypted_token,
+      jira_username = excluded.jira_username, jira_display_name = excluded.jira_display_name, updated_at = excluded.updated_at
+  `).run(email, instance.id, encrypted, String(jiraUser.name || jiraEmail), String(jiraUser.displayName || ""), now, now);
+  getReportsDb().prepare("DELETE FROM jira_oauth_requests WHERE request_token = ?").run(requestToken);
+  audit(request, response, "jira_oauth_connected", { email });
+  const separator = pending.callback_url.includes("?") ? "&" : "?";
+  response.writeHead(302, { Location: `${pending.callback_url}${separator}jiraConnected=${encodeURIComponent(instance.id)}`, "Cache-Control": "no-store" });
+  response.end();
+}
+
+async function handleJiraDisconnect(request, response, instanceId) {
+  const email = requireUser(request);
+  const body = await readJson(request);
+  if (!verifyCsrf(request, body.csrfToken)) {
+    sendJson(response, 403, { error: "Недействительный защитный токен" });
+    return;
+  }
+  jiraInstance(instanceId);
+  getReportsDb().prepare("DELETE FROM jira_oauth_connections WHERE owner_email = ? AND instance_id = ?").run(email, instanceId);
+  audit(request, response, "jira_oauth_disconnected", { email });
+  sendJson(response, 200, { ok: true });
+}
+
 async function handleJiraComment(request, response) {
   const body = await readJson(request);
-  const connection = normalizeConnection(body);
+  const connection = jiraConnection(request, body);
   const { issueUrl, issueKey } = parseIssueReference(connection, body.issueUrl);
-  const cloud = connection.type === "cloud";
-  const expectedFormat = cloud ? "adf" : "wiki";
-  if (body.comment?.format !== expectedFormat || !body.comment?.body) {
-    throw new Error(`Для выбранной Jira требуется формат комментария ${expectedFormat}`);
+  if (body.comment?.format !== "wiki" || !body.comment?.body) {
+    throw new Error("Для Jira Data Center требуется wiki-разметка комментария");
   }
-  const version = cloud ? "3" : "2";
-  const commentPath = `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}/comment`;
+  const commentPath = `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`;
   let beforeSnapshot = { total: null, comments: [] };
   let beforeError = "";
   try {
@@ -972,20 +1185,18 @@ async function handleJiraComment(request, response) {
 
 async function handleJiraImportComment(request, response) {
   const body = await readJson(request);
-  const connection = normalizeConnection(body);
+  const connection = jiraConnection(request, body);
   const { issueUrl, issueKey } = parseIssueReference(connection, body.commentUrl);
   const commentId = parseCommentId(issueUrl);
-  const cloud = connection.type === "cloud";
-  const version = cloud ? "3" : "2";
   const comment = await jiraFetch(
     connection,
-    `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}/comment/${encodeURIComponent(commentId)}`,
+    `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment/${encodeURIComponent(commentId)}`,
   );
   let attachments = [];
   try {
     const issue = await jiraFetch(
       connection,
-      `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
     );
     attachments = (issue.fields?.attachment || []).map((item) => ({
       id: String(item.id),
@@ -999,7 +1210,7 @@ async function handleJiraImportComment(request, response) {
   }
   sendJson(response, 200, {
     ok: true,
-    format: cloud ? "adf" : "wiki",
+    format: "wiki",
     body: comment.body,
     issueUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}`,
     commentId,
@@ -1328,12 +1539,11 @@ async function handleReportsClear(request, response) {
 
 async function handleJiraAttachments(request, response) {
   const body = await readJson(request);
-  const connection = normalizeConnection(body);
+  const connection = jiraConnection(request, body);
   const { issueKey } = parseIssueReference(connection, body.issueUrl);
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) return sendJson(response, 200, { ok: true, attachments: [] });
   if (files.length > 20) throw new Error("За один раз можно загрузить не более 20 вложений");
-  const version = connection.type === "cloud" ? "3" : "2";
   const normalizedFiles = files.map(decodeAttachmentFile);
   const usedNames = new Set();
   const usedScreenshotNumbers = [];
@@ -1341,7 +1551,7 @@ async function handleJiraAttachments(request, response) {
   try {
     const issue = await jiraFetch(
       connection,
-      `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
     );
     for (const attachment of issue.fields?.attachment || []) {
       if (!attachment.filename) continue;
@@ -1400,7 +1610,7 @@ async function handleJiraAttachments(request, response) {
     try {
       uploaded = await jiraFetch(
         connection,
-        `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}/attachments`,
+        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/attachments`,
         {
           method: "POST",
           body: form,
@@ -1470,7 +1680,7 @@ async function handleObjectStorageGet(request, response, reportId, kind, storedN
 function serveStatic(request, response) {
   const requestPath = new URL(request.url, "http://localhost").pathname;
   const isReportRoute = /^\/report\/[a-f0-9]{7,8}$/i.test(requestPath);
-  const relative = requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
+  const relative = requestPath === "/login" ? "login.html" : requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
   const filePath = path.resolve(ROOT, relative);
   const pathFromRoot = path.relative(ROOT, filePath);
   if (pathFromRoot.startsWith("..") || path.isAbsolute(pathFromRoot)) {
@@ -1496,6 +1706,7 @@ const server = http.createServer(async (request, response) => {
   applySecurityHeaders(response);
   try {
     const requestPath = new URL(request.url, "http://localhost").pathname;
+    requestId(request, response);
     enforceSameOrigin(request);
     enforceApiRateLimit(request, requestPath);
     if (request.method === "GET" && requestPath === "/api/health") {
@@ -1505,6 +1716,40 @@ const server = http.createServer(async (request, response) => {
         apiRevision: API_REVISION,
         objectStorageConfigured: objectStorageConfigured(),
       });
+      return;
+    }
+    if (request.method === "GET" && requestPath === "/api/auth/csrf") {
+      await handleCsrf(request, response);
+      return;
+    }
+    if (request.method === "POST" && requestPath === "/api/auth/login") {
+      await handleLogin(request, response);
+      return;
+    }
+    request.user = sessionFromRequest(request);
+    if (request.method === "GET" && requestPath === "/api/auth/session") {
+      if (!request.user) sendJson(response, 401, { error: "Unauthorized" });
+      else sendJson(response, 200, { user: { email: request.user.email }, expires: new Date(request.user.exp * 1000).toISOString() });
+      return;
+    }
+    if (request.method === "POST" && requestPath === "/api/auth/logout") {
+      requireUser(request);
+      await handleLogout(request, response);
+      return;
+    }
+    const publicAsset = requestPath === "/login" || requestPath === "/login.js" || requestPath === "/login-theme.js" || requestPath === "/styles.css" || requestPath === "/favicon.svg";
+    if (!request.user && !publicAsset) {
+      if (requestPath.startsWith("/api/")) sendJson(response, 401, { error: "Unauthorized" });
+      else {
+        const callbackUrl = sanitizeCallbackUrl(request.url);
+        response.writeHead(302, { Location: `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`, "Cache-Control": "no-store" });
+        response.end();
+      }
+      return;
+    }
+    if (request.user && requestPath === "/login") {
+      response.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+      response.end();
       return;
     }
     if (request.method === "GET" && requestPath === "/api/reports") {
@@ -1533,15 +1778,35 @@ const server = http.createServer(async (request, response) => {
       await handleReportDelete(request, response, reportMatch[1]);
       return;
     }
+    if (request.method === "GET" && requestPath === "/api/jira/connections") {
+      await handleJiraConnections(request, response);
+      return;
+    }
+    if (request.method === "POST" && requestPath === "/api/jira/oauth/start") {
+      await handleJiraOAuthStart(request, response);
+      return;
+    }
+    if (request.method === "GET" && requestPath === "/api/jira/oauth/callback") {
+      await handleJiraOAuthCallback(request, response);
+      return;
+    }
+    const jiraDisconnectMatch = requestPath.match(/^\/api\/jira\/connections\/([a-z0-9_-]+)$/i);
+    if (request.method === "DELETE" && jiraDisconnectMatch) {
+      await handleJiraDisconnect(request, response, jiraDisconnectMatch[1]);
+      return;
+    }
     if (request.method === "POST" && requestPath === "/api/jira/test") {
+      audit(request, response, "jira_connection_test");
       await handleJiraTest(request, response);
       return;
     }
     if (request.method === "POST" && requestPath === "/api/jira/comment") {
+      audit(request, response, "jira_comment_create");
       await handleJiraComment(request, response);
       return;
     }
     if (request.method === "POST" && requestPath === "/api/jira/import-comment") {
+      audit(request, response, "jira_comment_read");
       await handleJiraImportComment(request, response);
       return;
     }
@@ -1555,6 +1820,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && requestPath === "/api/jira/attachments") {
+      audit(request, response, "jira_attachment_create");
       await handleJiraAttachments(request, response);
       return;
     }
@@ -1579,6 +1845,7 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, status, {
       error: hideDetails ? "Внутренняя ошибка сервера" : error.message || "Неизвестная ошибка",
       ...(hideDetails ? {} : { errorCode: error.code || "", jiraPath: error.pathname || "" }),
+      ...(!hideDetails && error.instanceId ? { instanceId: error.instanceId } : {}),
     });
   }
 });

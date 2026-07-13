@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7fb" />
+    <title>Вход — QA Report</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script src="/login-theme.js?v=1"></script>
+    <link rel="stylesheet" href="/styles.css?v=58" />
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <div class="login-brand" aria-label="QA Report"><span class="brand-mark">QA</span></div>
+      <form class="login-card" id="loginForm" novalidate>
+        <div class="login-fields">
+          <label class="login-field">
+            <span class="login-field-label">Корпоративный email</span>
+            <input id="loginEmail" name="email" type="email" maxlength="254" autocomplete="email" placeholder="E-mail" required autofocus />
+          </label>
+          <label class="login-field">
+            <span class="login-field-label">Пароль</span>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Пароль" required />
+          </label>
+        </div>
+        <div class="login-actions">
+          <button class="login-action" id="togglePassword" type="button" aria-label="Показать пароль" title="Показать пароль">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+          </button>
+          <button class="login-action login-submit" id="loginSubmit" type="submit" aria-label="Войти" title="Войти">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+          </button>
+        </div>
+      </form>
+      <div class="login-error" id="loginError" role="alert" hidden></div>
+    </main>
+    <script src="/login.js?v=1" defer></script>
+  </body>
+</html>

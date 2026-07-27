@@ -1175,6 +1175,7 @@ async function handleJiraComment(request, response) {
 
   sendJson(response, 201, {
     ok: true,
+    apiRevision: API_REVISION,
     verified: true,
     verificationSource,
     commentId,
@@ -1726,6 +1727,10 @@ const server = http.createServer(async (request, response) => {
       await handleLogin(request, response);
       return;
     }
+    if (request.method === "POST" && requestPath === "/api/checklists/import") {
+      await handleChecklistImport(request, response);
+      return;
+    }
     request.user = sessionFromRequest(request);
     if (request.method === "GET" && requestPath === "/api/auth/session") {
       if (!request.user) sendJson(response, 401, { error: "Unauthorized" });
@@ -1808,10 +1813,6 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && requestPath === "/api/jira/import-comment") {
       audit(request, response, "jira_comment_read");
       await handleJiraImportComment(request, response);
-      return;
-    }
-    if (request.method === "POST" && requestPath === "/api/checklists/import") {
-      await handleChecklistImport(request, response);
       return;
     }
     const checklistImportMatch = requestPath.match(/^\/api\/checklists\/import\/([0-9a-f-]+)$/i);

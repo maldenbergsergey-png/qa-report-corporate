@@ -39,7 +39,7 @@ internal JWT между BFF и backend не нужен — подтверждё�
 2. Форма получает same-origin CSRF token и отправляет email/password на `/api/auth/login`.
 3. Сервер нормализует email, проверяет лимиты по email и реальному IP, затем выполняет service bind, безопасный LDAP search и отдельный user bind по UPN.
 4. Только успешный user bind создаёт подписанную 8-часовую cookie (`HttpOnly`, `SameSite=Lax`, `Secure` в production, `Path=/`). Пароль очищается и не входит в token, БД или логи.
-5. Все API извлекают владельца только из проверенной сессии. `X-User-Email`, workspace key и browser ID не являются источником identity.
+5. Все защищённые пользовательские API извлекают владельца только из проверенной сессии. `X-User-Email`, workspace key и browser ID не являются источником identity.
 6. Единый frontend handler переводит на login при `401`, сохраняя локальный pathname/query. Logout защищён CSRF и удаляет cookie.
 
 ### LDAPS
@@ -349,6 +349,10 @@ curl -X POST http://localhost:4173/api/checklists/import \
   }'
 ```
 
+Этот запрос выполняется backend-сервисом QA Assistant без пользовательской cookie
+и без отдельного service token. Endpoint создаёт только временный payload; он не
+создаёт пользовательский отчёт и не действует от имени пользователя.
+
 Поля:
 
 | Поле | Обязательное | Описание |
@@ -383,7 +387,9 @@ https://company.atlassian.net/browse/ADVINTAUT2-117
 ```
 
 Дальше нужно открыть `url` в браузере. По этой ссылке QA Report заберёт payload
-с сервера, создаст новый чек-лист и очистит `importToken` из адресной строки.
+с сервера под AD-сессией пользователя, создаст новый чек-лист и очистит `importToken`
+из адресной строки. Если пользователь ещё не вошёл, QA Report сначала покажет форму
+входа и после успешной авторизации вернёт его на исходную ссылку.
 
 Публичный origin для `url` берётся из `QA_REPORT_PUBLIC_URL`, `APP_PUBLIC_URL`
 или `PUBLIC_URL`, если переменная задана. Если переменной нет, сервер использует
@@ -597,8 +603,8 @@ query/body поля, client ID и IP не могут изменить владе
 | `PATCH` | `/api/reports/:id/comment` | Обновление пользовательского комментария экземпляра |
 | `DELETE` | `/api/reports/:id` | Удаление отчёта текущего владельца |
 | `DELETE` | `/api/reports` | Очистка серверной истории текущего владельца |
-| `POST` | `/api/checklists/import` | Входящий импорт Jira-разметки из QA Assistant |
-| `GET` | `/api/checklists/import/:id` | Получение временного payload по import token |
+| `POST` | `/api/checklists/import` | Создание временного импорта без пользовательской сессии |
+| `GET` | `/api/checklists/import/:id` | Получение payload под AD-сессией пользователя |
 | `GET` | `/api/jira/connections` | Состояние персональных подключений двух Jira |
 | `POST` | `/api/jira/oauth/start` | Начало OAuth 1.0a подключения |
 | `GET` | `/api/jira/oauth/callback` | Callback Jira и сохранение зашифрованного access token |
@@ -737,6 +743,7 @@ npm test
 - CSRF logout и удаление session cookie;
 - LDAPS/TLS/CA/server-name проверки, LDAP escaping и закрытие соединений;
 - session expiry/secret rotation, rate limits и отсутствие auth bypass;
+- публичное создание временного импорта и обязательную AD-сессию для открытия ссылки;
 
 ## Известные Ограничения
 

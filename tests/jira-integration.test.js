@@ -119,6 +119,10 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       body: JSON.stringify({ issueUrl: "http://127.0.0.1:4199/jira7/browse/QA-1", token: "browser-token", comment: { format: "wiki", body: "Проверено" } }),
     });
     assert.equal(comment.status, 201, JSON.stringify(await comment.clone().json()));
+    const commentPayload = await comment.json();
+    assert.equal(commentPayload.apiRevision, 6);
+    assert.equal(commentPayload.verified, true);
+    assert.match(commentPayload.commentId, /^\d+$/);
     const jiraCalls = received.filter((item) => item.url.startsWith("/jira7/rest/api/2/"));
     assert.equal(jiraCalls.every((item) => item.authorization?.startsWith("OAuth ")), true);
     assert.equal(jiraCalls.some((item) => item.authorization?.includes("access-user-a")), true);

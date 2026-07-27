@@ -3597,7 +3597,6 @@ async function postJiraComment(settings, issue, comment, signal) {
     },
     { signal },
   );
-  assertCurrentBackend(result);
   if (!result.verified || !result.commentId) {
     throw new Error(
       `Backend ${result.appVersion || "неизвестной версии"} не вернул подтверждение комментария`,

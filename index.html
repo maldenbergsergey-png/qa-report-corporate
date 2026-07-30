@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f6f7fb" />
     <title>QA Report — редактор чек-листов</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=54" />
+    <link rel="stylesheet" href="/styles.css?v=55" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -391,6 +391,35 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="publishScopeModal" hidden>
+      <section class="modal publish-scope-modal" role="dialog" aria-modal="true" aria-labelledby="publishScopeTitle">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">Jira</div>
+            <h2 id="publishScopeTitle">Выберите разделы</h2>
+          </div>
+          <button class="icon-button" id="closePublishScopeButton" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="publish-scope-body">
+          <p class="publish-scope-hint">
+            В комментарий и вложения попадут только отмеченные разделы.
+          </p>
+          <label class="publish-scope-option publish-scope-option-all">
+            <input id="publishScopeSelectAll" type="checkbox" checked />
+            <span>Все разделы</span>
+          </label>
+          <div class="publish-scope-list" id="publishScopeList"></div>
+        </div>
+        <footer class="modal-footer">
+          <span id="publishScopeSummary"></span>
+          <div class="modal-actions">
+            <button class="button button-ghost" id="cancelPublishScopeButton" type="button">Отмена</button>
+            <button class="button button-primary" id="acceptPublishScopeButton" type="button">Отправить в Jira</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="importModal" hidden>
       <section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
         <header class="modal-header">
@@ -707,6 +736,6 @@
     </template>
 
     <script src="/jira-markup-import.js?v=1"></script>
-    <script src="/app.js?v=60"></script>
+    <script src="/app.js?v=61"></script>
   </body>
 </html>

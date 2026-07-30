@@ -31,6 +31,19 @@
     const cells = [];
     let current = "";
     let escaped = false;
+
+    const closingMarkerIndex = (marker, startIndex) => {
+      for (let index = startIndex; index < source.length; index += 1) {
+        if (source[index] !== marker) continue;
+        let slashCount = 0;
+        for (let previous = index - 1; previous >= 0 && source[previous] === "\\"; previous -= 1) {
+          slashCount += 1;
+        }
+        if (slashCount % 2 === 0) return index;
+      }
+      return -1;
+    };
+
     for (let index = 0; index < source.length; index += 1) {
       const character = source[index];
       if (escaped) {
@@ -38,6 +51,32 @@
         escaped = false;
       } else if (character === "\\") {
         escaped = true;
+      } else if (character === "[") {
+        const closingIndex = closingMarkerIndex("]", index + 1);
+        if (closingIndex >= 0) {
+          current += source.slice(index, closingIndex + 1);
+          index = closingIndex;
+        } else current += character;
+      } else if (
+        character === "!" &&
+        (index === 0 || /[\s|([{:]/.test(source[index - 1]))
+      ) {
+        const closingIndex = closingMarkerIndex("!", index + 1);
+        if (closingIndex >= 0) {
+          current += source.slice(index, closingIndex + 1);
+          index = closingIndex;
+        } else current += character;
+      } else if (character === "{") {
+        const macro = source.slice(index).match(/^\{(code|noformat)(?::[^}]*)?\}/i);
+        if (macro) {
+          const closing = `{${macro[1].toLowerCase()}}`;
+          const closingIndex = source.toLowerCase().indexOf(closing, index + macro[0].length);
+          if (closingIndex >= 0) {
+            const endIndex = closingIndex + closing.length;
+            current += source.slice(index, endIndex);
+            index = endIndex - 1;
+          } else current += character;
+        } else current += character;
       } else if (source.startsWith(delimiter, index)) {
         cells.push(current);
         current = "";
@@ -61,45 +100,93 @@
     return { row, index };
   }
 
-  function wikiInlineToHtml(value, attachments = []) {
-    const codeBlocks = [];
-    const linkBlocks = [];
-    let source = String(value || "").replace(
-      /\{code(?::(?:language=)?([^}]+))?\}([\s\S]*?)\{code\}/gi,
-      (_, language, code) => {
-        const token = `@@CODE${codeBlocks.length}@@`;
-        codeBlocks.push(
-          `<pre class="cell-code-block" data-language="${escapeHtml(language || "text")}"><code>${escapeHtml(code.trim())}</code></pre>`,
-        );
-        return token;
-      },
-    );
-    source = source.replace(/\[([^\]|]+)\|([^\]]+)\]/g, (_, text, href) => {
-      const token = `@@LINK${linkBlocks.length}@@`;
-      const safeHref = safeHttpUrl(href);
-      linkBlocks.push(
-        safeHref
-          ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
-          : escapeHtml(text),
-      );
-      return token;
-    });
-    const attachmentByName = new Map(attachments.map((item) => [item.filename, item]));
-    return escapeHtml(source)
+  function formatWikiText(value) {
+    let output = escapeHtml(value)
       .replace(/\\\\/g, "<br>")
-      .replace(/!([^|!\n]+)(?:\|[^!]*)?!/g, (_, filename) => {
-        const attachment = attachmentByName.get(filename);
-        if (!attachment?.content && !attachment?.thumbnail) return `<span>[Изображение: ${filename}]</span>`;
-        const src = safeHttpUrl(attachment.thumbnail || attachment.content);
-        if (!src) return `<span>[Изображение: ${escapeHtml(filename)}]</span>`;
-        return `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(src)}" alt="" data-attachment-id="${escapeHtml(attachment.id)}" data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}" data-jira-id="${escapeHtml(attachment.id)}" data-jira-url="${escapeHtml(attachment.content || "")}"></figure>`;
-      })
-      .replace(/\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}/gi, '<span style="color:$1">$2</span>')
+      .replace(/\n/g, "<br>")
       .replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>")
       .replace(/_([^_\n]+)_/g, "<em>$1</em>")
       .replace(/\+([^+\n]+)\+/g, "<u>$1</u>")
-      .replace(/@@LINK(\d+)@@/g, (_, index) => linkBlocks[Number(index)] || "")
-      .replace(/@@CODE(\d+)@@/g, (_, index) => codeBlocks[Number(index)] || "");
+      .replace(
+        /(^|[\s([{])-((?:\S|<br>)(?:[^-\n]*?(?:\S|>))?)-(?=$|[\s)\]},.!?:;])/g,
+        "$1<s>$2</s>",
+      )
+      .replace(
+        /(^|[\s([{])\^((?:\S|<br>)(?:[^^\n]*?(?:\S|>))?)\^(?=$|[\s)\]},.!?:;])/g,
+        "$1<sup>$2</sup>",
+      )
+      .replace(
+        /(^|[\s([{])~((?:\S|<br>)(?:[^~\n]*?(?:\S|>))?)~(?=$|[\s)\]},.!?:;])/g,
+        "$1<sub>$2</sub>",
+      );
+
+    output = output.replace(
+      /\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}/gi,
+      '<span style="color:$1">$2</span>',
+    );
+    return output;
+  }
+
+  function wikiInlineToHtml(value, attachments = []) {
+    const protectedBlocks = [];
+    const protect = (html) => {
+      const token = `@@JIRATOKEN${protectedBlocks.length}@@`;
+      protectedBlocks.push(html);
+      return token;
+    };
+    const attachmentByName = new Map(attachments.map((item) => [item.filename, item]));
+    let source = String(value || "").replace(
+      /\{code(?::(?:language=)?([^}]+))?\}([\s\S]*?)\{code\}/gi,
+      (_, language, code) => {
+        return protect(
+          `<pre class="cell-code-block" data-language="${escapeHtml(language || "text")}"><code>${escapeHtml(code.trim())}</code></pre>`,
+        );
+      },
+    );
+    source = source.replace(/\{noformat\}([\s\S]*?)\{noformat\}/gi, (_, content) =>
+      protect(
+        `<pre class="cell-code-block" data-language="text"><code>${escapeHtml(content.trim())}</code></pre>`,
+      ),
+    );
+    source = source.replace(/\{\{([^{}\n]+)\}\}/g, (_, content) =>
+      protect(`<code>${escapeHtml(content)}</code>`),
+    );
+    source = source.replace(/!([^|!\n]+)(?:\|([^!\n]*))?!/g, (_, rawFilename, options = "") => {
+      const filename = rawFilename.trim();
+      const attachment = attachmentByName.get(filename);
+      const attachmentUrl = safeHttpUrl(attachment?.content);
+      const thumbnailUrl = safeHttpUrl(attachment?.thumbnail);
+      const externalUrl = safeHttpUrl(filename);
+      const src = thumbnailUrl || attachmentUrl || externalUrl;
+      if (!src) {
+        return protect(
+          `<span class="jira-image-placeholder" data-jira-name="${escapeHtml(filename)}" data-jira-options="${escapeHtml(options)}">${escapeHtml(filename)}</span>`,
+        );
+      }
+      const attachmentId = attachment?.id ? ` data-attachment-id="${escapeHtml(attachment.id)}"` : "";
+      const jiraId = attachment?.id ? ` data-jira-id="${escapeHtml(attachment.id)}"` : "";
+      const jiraThumbnail = thumbnailUrl
+        ? ` data-jira-thumbnail="${escapeHtml(thumbnailUrl)}"`
+        : "";
+      const jiraOptions = options
+        ? ` data-jira-options="${escapeHtml(options)}"`
+        : "";
+      return protect(
+        `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(src)}" alt="${escapeHtml(filename)}"${attachmentId} data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}"${jiraId} data-jira-url="${escapeHtml(attachmentUrl || externalUrl)}"${jiraThumbnail}${jiraOptions}></figure>`,
+      );
+    });
+    source = source.replace(/\[([^\]|]+)\|([^\]]+)\]/g, (_, text, href) => {
+      const safeHref = safeHttpUrl(href);
+      return protect(
+        safeHref
+          ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${formatWikiText(text)}</a>`
+          : formatWikiText(text),
+      );
+    });
+    return formatWikiText(source).replace(
+      /@@JIRATOKEN(\d+)@@/g,
+      (_, index) => protectedBlocks[Number(index)] || "",
+    );
   }
 
   function normalizeStatus(value) {

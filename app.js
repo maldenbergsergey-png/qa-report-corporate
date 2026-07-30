@@ -109,6 +109,13 @@ const elements = {
   publishErrorText: document.querySelector("#publishErrorText"),
   publishProgressHint: document.querySelector("#publishProgressHint"),
   publishCancelButton: document.querySelector("#publishCancelButton"),
+  publishScopeModal: document.querySelector("#publishScopeModal"),
+  publishScopeSelectAll: document.querySelector("#publishScopeSelectAll"),
+  publishScopeList: document.querySelector("#publishScopeList"),
+  publishScopeSummary: document.querySelector("#publishScopeSummary"),
+  closePublishScopeButton: document.querySelector("#closePublishScopeButton"),
+  cancelPublishScopeButton: document.querySelector("#cancelPublishScopeButton"),
+  acceptPublishScopeButton: document.querySelector("#acceptPublishScopeButton"),
   closePreviewButton: document.querySelector("#closePreviewButton"),
   visualPreview: document.querySelector("#visualPreview"),
   markupPreview: document.querySelector("#markupPreview"),
@@ -251,6 +258,7 @@ let linkEditorRange = null;
 let editingLink = null;
 let publishAbortController = null;
 let publishInProgress = false;
+let publishScopeResolver = null;
 let confirmResolver = null;
 let hasUnsavedLocalChanges = false;
 let applyingRemoteDraft = false;
@@ -392,12 +400,12 @@ function sanitizeRichHtml(value) {
   template.innerHTML = String(value || "");
   const allowedTags = new Set([
     "A", "BR", "CODE", "DIV", "EM", "FIGURE", "H1", "H2", "H3", "IMG", "LI",
-    "OL", "P", "PRE", "S", "SPAN", "STRONG", "U", "UL",
+    "OL", "P", "PRE", "S", "SPAN", "STRONG", "SUB", "SUP", "U", "UL",
   ]);
   const allowedAttributes = new Set([
     "alt", "class", "contenteditable", "data-align", "data-attachment-id", "data-file-extension",
     "data-file-name", "data-file-size", "data-jira-id", "data-jira-name", "data-jira-thumbnail",
-    "data-jira-url", "data-language", "data-mime-type", "data-qa-code-snippet", "data-data-url",
+    "data-jira-options", "data-jira-url", "data-language", "data-mime-type", "data-qa-code-snippet", "data-data-url",
     "href", "rel", "src", "style", "target", "title",
   ]);
   const safeUrl = (raw, { image = false, fileData = false } = {}) => {
@@ -445,6 +453,9 @@ function sanitizeRichHtml(value) {
       if (color && /^(?:#[0-9a-f]{3,8}|rgb\([\d\s,.%]+\)|rgba\([\d\s,.%]+\))$/i.test(color)) node.style.color = color;
       if (width && /^(?:100|[1-9]?\d(?:\.\d+)?)%$/.test(width)) node.style.width = width;
     }
+  });
+  template.content.querySelectorAll(".jira-image-placeholder[data-jira-name]").forEach((placeholder) => {
+    placeholder.textContent = placeholder.dataset.jiraName;
   });
   return template.innerHTML;
 }
@@ -2769,6 +2780,11 @@ function htmlToWiki(html) {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent;
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     if (node.matches?.(".cell-file")) return fileCardToWiki(node);
+    if (node.matches?.(".jira-image-placeholder")) {
+      const name = node.dataset.jiraName || "image.png";
+      const options = node.dataset.jiraOptions;
+      return `!${name}${options ? `|${options}` : ""}!`;
+    }
     const tag = node.tagName.toLowerCase();
     if ((tag === "span" && node.style.color) || (tag === "font" && node.getAttribute("color"))) {
       const content = [...node.childNodes].map(walk).join("");
@@ -2782,6 +2798,9 @@ function htmlToWiki(html) {
     if (tag === "em" || tag === "i") return `_${content}_`;
     if (tag === "u") return `+${content}+`;
     if (tag === "s" || tag === "strike") return `-${content}-`;
+    if (tag === "sup") return `^${content}^`;
+    if (tag === "sub") return `~${content}~`;
+    if (tag === "code" && node.parentElement?.tagName !== "PRE") return `{{${content}}}`;
     if (tag === "a") return `[${content}|${node.getAttribute("href") || ""}]`;
     if (tag === "pre") {
       return `{code}\n${extractCodeText(node)}\n{code}`;
@@ -2789,6 +2808,8 @@ function htmlToWiki(html) {
     if (tag === "img") {
       const name = node.dataset.jiraName || node.dataset.fileName || node.alt || "image.png";
       if (isStoredObjectUrl(node.src)) return `[${name}|${node.src}]`;
+      const jiraOptions = node.dataset.jiraOptions;
+      if (jiraOptions) return `!${name}|${jiraOptions}!`;
       // Ссылка по имени вложения даёт Jira возможность открыть изображение
       // во встроенном просмотрщике, а параметр thumbnail оставляет его компактным.
       return `!${name}|thumbnail!`;
@@ -2938,7 +2959,14 @@ function balanceJiraColorMarkup(value) {
   return output;
 }
 
-function generateMarkup() {
+function sectionsForPublication(sectionIds = null, sourceDraft = draft) {
+  if (sectionIds === null || sectionIds === undefined) return sourceDraft.sections;
+  const selectedIds = sectionIds instanceof Set ? sectionIds : new Set(sectionIds);
+  return sourceDraft.sections.filter((section) => selectedIds.has(section.id));
+}
+
+function generateMarkup(options = {}) {
+  const { sectionIds = null } = options;
   collectDocumentFields();
   const blocks = [];
   const heading = [];
@@ -2951,7 +2979,7 @@ function generateMarkup() {
   const intro = htmlToWiki(draft.intro);
   if (intro) blocks.push(intro);
 
-  draft.sections.forEach((section) => {
+  sectionsForPublication(sectionIds).forEach((section) => {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length) return;
     const lines = [`h2. ${section.title || "Раздел"}`];
@@ -3523,8 +3551,11 @@ function cancelPublishProgress() {
 }
 
 async function uploadPendingImages(settings, issue, options = {}) {
-  const { signal, onProgress = () => {} } = options;
-  const files = [...collectLocalImages(), ...collectLocalFiles()];
+  const { signal, onProgress = () => {}, sectionIds = null } = options;
+  const files = [
+    ...collectLocalImages({ sectionIds }),
+    ...collectLocalFiles({ sectionIds }),
+  ];
   if (!files.length) return [];
   const uploaded = [];
   let index = 0;
@@ -3625,19 +3656,93 @@ async function publishCommentWithFallback(settings, issue, comment, signal) {
   }
 }
 
+function updatePublishScopeState() {
+  const checkboxes = [...elements.publishScopeList.querySelectorAll("input[type='checkbox']")];
+  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+  const allSelected = selectedCount === checkboxes.length;
+  elements.publishScopeSelectAll.checked = allSelected;
+  elements.publishScopeSelectAll.indeterminate = selectedCount > 0 && !allSelected;
+  elements.publishScopeSummary.textContent = `Выбрано: ${selectedCount} из ${checkboxes.length}`;
+  elements.acceptPublishScopeButton.disabled = selectedCount === 0;
+}
+
+function askPublishScope() {
+  if (publishScopeResolver) publishScopeResolver(null);
+  elements.publishScopeList.replaceChildren();
+  draft.sections.forEach((section, index) => {
+    const label = document.createElement("label");
+    label.className = "publish-scope-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.value = section.id;
+    checkbox.dataset.sectionId = section.id;
+    checkbox.addEventListener("change", updatePublishScopeState);
+    const title = document.createElement("span");
+    title.textContent = section.title.trim() || `Раздел ${index + 1}`;
+    label.append(checkbox, title);
+    elements.publishScopeList.append(label);
+  });
+  elements.publishScopeSelectAll.checked = true;
+  elements.publishScopeSelectAll.indeterminate = false;
+  updatePublishScopeState();
+  elements.publishScopeModal.hidden = false;
+  document.body.style.overflow = "hidden";
+  elements.publishScopeSelectAll.focus();
+  return new Promise((resolve) => {
+    publishScopeResolver = resolve;
+  });
+}
+
+function resolvePublishScope(accepted) {
+  if (!publishScopeResolver) return;
+  const resolve = publishScopeResolver;
+  publishScopeResolver = null;
+  const sectionIds = accepted
+    ? new Set(
+        [...elements.publishScopeList.querySelectorAll("input[type='checkbox']:checked")]
+          .map((checkbox) => checkbox.dataset.sectionId),
+      )
+    : null;
+  elements.publishScopeModal.hidden = true;
+  document.body.style.overflow =
+    elements.codeEditorModal.hidden &&
+    elements.previewModal.hidden &&
+    elements.publishProgressModal.hidden &&
+    elements.importModal.hidden &&
+    elements.jiraSettingsModal.hidden &&
+    elements.historyModal.hidden &&
+    elements.mediaViewerModal.hidden &&
+    elements.confirmModal.hidden &&
+    elements.feedbackModal.hidden &&
+    elements.versionConflictModal.hidden &&
+    elements.versionCopyChoiceModal.hidden
+      ? ""
+      : "hidden";
+  resolve(sectionIds);
+}
+
 async function publishToJira() {
   const publishButtonHtml = elements.publishButton.innerHTML;
   if (publishInProgress) return;
   try {
+    closeHeaderDropdowns();
     collectDocumentFields();
+    let sectionIds = null;
+    if (draft.sections.length > 1) {
+      sectionIds = await askPublishScope();
+      if (!sectionIds) return;
+    }
     const issue = parseIssueUrl(draft.issueUrl);
     const settings = {};
     await checkBackendCompatibility();
-    const confirmed = await askConfirmation(
-      `Опубликовать отчёт комментарием в задаче ${issue.issueKey}?`,
-      { title: "Отправка в Jira", confirmText: "Отправить" },
-    );
-    if (!confirmed) return;
+    if (draft.sections.length <= 1) {
+      const confirmed = await askConfirmation(
+        `Опубликовать отчёт комментарием в задаче ${issue.issueKey}?`,
+        { title: "Отправка в Jira", confirmText: "Отправить" },
+      );
+      if (!confirmed) return;
+    }
     publishAbortController = new AbortController();
     publishInProgress = true;
     openPublishProgress();
@@ -3647,6 +3752,7 @@ async function publishToJira() {
       '<span class="primary-action-icon">…</span><span class="primary-action-label">Отправляем…</span>';
     await uploadPendingImages(settings, issue, {
       signal: publishAbortController.signal,
+      sectionIds,
       onProgress: ({ done, total }) => {
         const percent = total ? 15 + Math.round((done / total) * 45) : 55;
         setPublishProgress({
@@ -3656,7 +3762,7 @@ async function publishToJira() {
         });
       },
     });
-    const comment = { format: "wiki", body: generateMarkup() };
+    const comment = { format: "wiki", body: generateMarkup({ sectionIds }) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const results = await publishCommentWithFallback(settings, issue, comment, publishAbortController.signal);
     setPublishProgress({ step: "verify", percent: 96, status: "Проверка созданного комментария" });
@@ -5057,7 +5163,8 @@ function startImageResize(event, figure) {
   document.addEventListener("pointercancel", onEnd);
 }
 
-function collectLocalImages() {
+function collectLocalImages(options = {}) {
+  const { sectionIds = null } = options;
   const images = [];
   const container = document.createElement("div");
   const usedNumbers = [];
@@ -5103,7 +5210,7 @@ function collectLocalImages() {
     });
   };
   collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of draft.sections) {
+  for (const section of sectionsForPublication(sectionIds)) {
     for (const row of section.rows) {
       for (const [columnId, html] of Object.entries(row.cells)) {
         collectFromHtml(html, {
@@ -5118,7 +5225,8 @@ function collectLocalImages() {
   return images;
 }
 
-function collectLocalFiles() {
+function collectLocalFiles(options = {}) {
+  const { sectionIds = null } = options;
   const files = [];
   const collectFromHtml = (html, location) => {
     const container = document.createElement("div");
@@ -5139,7 +5247,7 @@ function collectLocalFiles() {
     });
   };
   collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of draft.sections) {
+  for (const section of sectionsForPublication(sectionIds)) {
     for (const row of section.rows) {
       for (const [columnId, html] of Object.entries(row.cells)) {
         collectFromHtml(html, {
@@ -6489,6 +6597,15 @@ elements.closeJiraSettingsButton.addEventListener("click", closeJiraSettings);
 elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
 elements.publishButton.addEventListener("click", publishToJira);
 elements.publishCancelButton.addEventListener("click", cancelPublishProgress);
+elements.publishScopeSelectAll.addEventListener("change", () => {
+  elements.publishScopeList.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.checked = elements.publishScopeSelectAll.checked;
+  });
+  updatePublishScopeState();
+});
+elements.closePublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
+elements.cancelPublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
+elements.acceptPublishScopeButton.addEventListener("click", () => resolvePublishScope(true));
 elements.cloudConflictStatus.addEventListener("click", openVersionConflictModal);
 elements.closeVersionConflictFooterButton.addEventListener("click", closeVersionConflictModal);
 elements.selectLocalVersionButton.addEventListener("click", () => setVersionConflictChoice("local"));
@@ -6639,6 +6756,10 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape") {
+    if (!elements.publishScopeModal.hidden) {
+      resolvePublishScope(false);
+      return;
+    }
     if (!elements.confirmModal.hidden) {
       resolveConfirmation(false);
       return;

@@ -69,6 +69,7 @@
       } else if (character === "{") {
         const macro = source.slice(index).match(/^\{(code|noformat)(?::[^}]*)?\}/i);
         if (macro) {
+          // Jira uses the next identical marker as the closing delimiter; these macros are not nestable.
           const closing = `{${macro[1].toLowerCase()}}`;
           const closingIndex = source.toLowerCase().indexOf(closing, index + macro[0].length);
           if (closingIndex >= 0) {
@@ -136,6 +137,10 @@
     };
     const attachmentByName = new Map(attachments.map((item) => [item.filename, item]));
     let source = String(value || "").replace(
+      /\\([!{}\[\]|*_+\-^~])/g,
+      (_, character) => protect(escapeHtml(character)),
+    );
+    source = source.replace(
       /\{code(?::(?:language=)?([^}]+))?\}([\s\S]*?)\{code\}/gi,
       (_, language, code) => {
         return protect(

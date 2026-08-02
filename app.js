@@ -270,6 +270,12 @@ let pendingCopyChoice = null;
 let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
 
+function syncBodyModalOverflow() {
+  document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden])")
+    ? "hidden"
+    : "";
+}
+
 applyTheme(localStorage.getItem("qa-report-theme") || "light");
 historyCurrent = serializeDraft();
 
@@ -1380,30 +1386,18 @@ function openVersionConflictModal() {
   if (!syncRecovery) return;
   renderVersionConflictModal();
   elements.versionConflictModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
 }
 
 function closeVersionConflictModal() {
   elements.versionConflictModal.hidden = true;
-  if (
-    elements.previewModal.hidden &&
-    elements.importModal.hidden &&
-    elements.historyModal.hidden &&
-    elements.mediaViewerModal.hidden &&
-    elements.codeEditorModal.hidden &&
-    elements.confirmModal.hidden &&
-    elements.feedbackModal.hidden &&
-    elements.jiraSettingsModal.hidden &&
-    elements.versionCopyChoiceModal.hidden
-  ) {
-    document.body.style.overflow = "";
-  }
+  syncBodyModalOverflow();
 }
 
 function closeVersionCopyChoiceModal() {
   elements.versionCopyChoiceModal.hidden = true;
   pendingCopyChoice = null;
-  if (elements.versionConflictModal.hidden) document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 function applyDraftLocally(nextDraft, { status = "Сохранено" } = {}) {
@@ -1586,7 +1580,7 @@ async function saveBothVersionsFromConflict() {
     },
   };
   elements.versionCopyChoiceModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   showToast("Локальная версия сохранена отдельной копией");
 }
 
@@ -3299,13 +3293,13 @@ function openJiraSettings() {
         : "Синхронизация включена для вашей корпоративной учётной записи.",
   );
   elements.jiraSettingsModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   loadJiraConnections();
 }
 
 function closeJiraSettings() {
   elements.jiraSettingsModal.hidden = true;
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 function saveJiraSettings() {
@@ -3495,19 +3489,12 @@ function openPublishProgress() {
   elements.publishErrorText.hidden = true;
   elements.publishErrorText.textContent = "";
   elements.publishProgressHint.textContent = "Не закрывайте страницу до завершения публикации.";
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
 }
 
 function closePublishProgress() {
   elements.publishProgressModal.hidden = true;
-  if (
-    elements.previewModal.hidden &&
-    elements.importModal.hidden &&
-    elements.jiraSettingsModal.hidden &&
-    elements.feedbackModal.hidden
-  ) {
-    document.body.style.overflow = "";
-  }
+  syncBodyModalOverflow();
 }
 
 function setPublishProgress({ step = "prepare", percent = 0, status = "", error = "" } = {}) {
@@ -3667,7 +3654,7 @@ function updatePublishScopeState() {
 }
 
 function askPublishScope() {
-  if (publishScopeResolver) publishScopeResolver(null);
+  if (publishScopeResolver) return Promise.resolve(null);
   elements.publishScopeList.replaceChildren();
   draft.sections.forEach((section, index) => {
     const label = document.createElement("label");
@@ -3687,7 +3674,7 @@ function askPublishScope() {
   elements.publishScopeSelectAll.indeterminate = false;
   updatePublishScopeState();
   elements.publishScopeModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   elements.publishScopeSelectAll.focus();
   return new Promise((resolve) => {
     publishScopeResolver = resolve;
@@ -3705,26 +3692,14 @@ function resolvePublishScope(accepted) {
       )
     : null;
   elements.publishScopeModal.hidden = true;
-  document.body.style.overflow =
-    elements.codeEditorModal.hidden &&
-    elements.previewModal.hidden &&
-    elements.publishProgressModal.hidden &&
-    elements.importModal.hidden &&
-    elements.jiraSettingsModal.hidden &&
-    elements.historyModal.hidden &&
-    elements.mediaViewerModal.hidden &&
-    elements.confirmModal.hidden &&
-    elements.feedbackModal.hidden &&
-    elements.versionConflictModal.hidden &&
-    elements.versionCopyChoiceModal.hidden
-      ? ""
-      : "hidden";
+  syncBodyModalOverflow();
   resolve(sectionIds);
 }
 
 async function publishToJira() {
   const publishButtonHtml = elements.publishButton.innerHTML;
   if (publishInProgress) return;
+  publishInProgress = true;
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
@@ -3744,7 +3719,6 @@ async function publishToJira() {
       if (!confirmed) return;
     }
     publishAbortController = new AbortController();
-    publishInProgress = true;
     openPublishProgress();
     setPublishProgress({ step: "prepare", percent: 8, status: "Подготовка отчёта" });
     elements.publishButton.disabled = true;
@@ -3802,12 +3776,12 @@ function openPreview() {
   elements.markupPreview.value = generateMarkup();
   elements.visualPreview.innerHTML = generateVisualPreview();
   elements.previewModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
 }
 
 function closePreview() {
   elements.previewModal.hidden = true;
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 function openImport() {
@@ -3817,13 +3791,13 @@ function openImport() {
   elements.importSummary.hidden = true;
   pendingImportedDraft = null;
   elements.importModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   if (importSource === "markup") elements.importMarkup.focus();
 }
 
 function closeImport() {
   elements.importModal.hidden = true;
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 function setFocusMode(enabled) {
@@ -3837,7 +3811,7 @@ function setFocusMode(enabled) {
 async function openHistory() {
   await saveReportSnapshot("open-history").catch(() => {});
   elements.historyModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   await renderHistoryList();
 }
 
@@ -3867,7 +3841,7 @@ async function flushVisibleHistoryComments() {
 function closeHistory() {
   flushVisibleHistoryComments().catch(() => setSaveStatus("Ошибка комментария"));
   elements.historyModal.hidden = true;
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 async function renderHistoryList() {
@@ -4470,7 +4444,7 @@ function openCodeEditor(block) {
   elements.saveCodeButton.disabled = true;
   elements.codeEditorModal.hidden = false;
   setCodeEditorBackgroundInert(true);
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   requestAnimationFrame(() => elements.codeEditorTextarea.focus());
 }
 
@@ -4523,7 +4497,7 @@ async function closeCodeEditor(force = false) {
   }
   elements.codeEditorModal.hidden = true;
   setCodeEditorBackgroundInert(false);
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
   editingCodeBlock = null;
   codeEditorInitialValue = "";
   return true;
@@ -4533,13 +4507,13 @@ function openMediaViewer(image) {
   elements.mediaViewerImage.src = image.src;
   elements.mediaViewerImage.alt = image.dataset.fileName || "Вложение";
   elements.mediaViewerModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
 }
 
 function closeMediaViewer() {
   elements.mediaViewerModal.hidden = true;
   elements.mediaViewerImage.removeAttribute("src");
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 function detectCodeLanguage(code) {
@@ -4670,13 +4644,13 @@ function readFileAsDataUrl(file) {
 
 function openFeedback() {
   elements.feedbackModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   requestAnimationFrame(() => elements.cancelFeedbackButton.focus());
 }
 
 function closeFeedback() {
   elements.feedbackModal.hidden = true;
-  document.body.style.overflow = "";
+  syncBodyModalOverflow();
 }
 
 async function insertImages(files) {
@@ -5933,7 +5907,7 @@ function askConfirmation(message, options = {}) {
   elements.acceptConfirmButton.className =
     `button ${options.danger ? "button-danger" : "button-primary"}`;
   elements.confirmModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyModalOverflow();
   elements.acceptConfirmButton.focus();
   return new Promise((resolve) => {
     confirmResolver = resolve;
@@ -5945,14 +5919,7 @@ function resolveConfirmation(value) {
   const resolve = confirmResolver;
   confirmResolver = null;
   elements.confirmModal.hidden = true;
-  document.body.style.overflow =
-    elements.codeEditorModal.hidden &&
-    elements.previewModal.hidden &&
-    elements.importModal.hidden &&
-    elements.jiraSettingsModal.hidden &&
-    elements.historyModal.hidden
-      ? ""
-      : "hidden";
+  syncBodyModalOverflow();
   resolve(value);
 }
 

@@ -74,3 +74,84 @@ test("Jira rich text formatting is preserved in imported cells", () => {
   assert.match(result, /<span style="color:#de350b">красный<\/span>/);
   assert.match(result, /<a href="https:\/\/example\.com\/docs"/);
 });
+
+test("code and noformat macros containing table delimiters stay in their source cell", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Код||Комментарий||Статус||",
+      "|1|{code:javascript}const first = a | b;{code} и {code}const second = c | d;{code}|{noformat}alpha | beta{noformat}|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(section.columns.length, 2);
+  assert.equal(row.status, "OK");
+  assert.equal((row.cells[section.columns[0].id].match(/class="cell-code-block"/g) || []).length, 2);
+  assert.match(row.cells[section.columns[0].id], /a \| b/);
+  assert.match(row.cells[section.columns[0].id], /c \| d/);
+  assert.match(row.cells[section.columns[1].id], /alpha \| beta/);
+});
+
+test("repeated code markers preserve all text as consecutive Jira code blocks", () => {
+  const { section, row } = onlyRow(
+    [
+      "||Код||Статус||",
+      "|{code}внешний {code}внутренний{code} ещё внешний{code}|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    row.cells[section.columns[0].id],
+    '<pre class="cell-code-block" data-language="text"><code>внешний</code></pre>'
+      + 'внутренний'
+      + '<pre class="cell-code-block" data-language="text"><code>ещё внешний</code></pre>',
+  );
+});
+
+test("escaped Jira markers remain literal and an escaped pipe does not split the row", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Текст||Комментарий||Статус||",
+      "|1|текст с \\| трубкой и \\! знаком|\\[не ссылка\\] и \\-не зачёркнуто\\-|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(section.columns.length, 2);
+  assert.equal(row.cells[section.columns[0].id], "текст с | трубкой и ! знаком");
+  assert.equal(row.cells[section.columns[1].id], "[не ссылка] и -не зачёркнуто-");
+});
+
+test("empty and whitespace-only cells do not shift adjacent values", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Пусто||Пробелы||Комментарий||Статус||",
+      "|1||   |после пустых ячеек|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(row.cells[section.columns[0].id], "");
+  assert.equal(row.cells[section.columns[1].id], "   ");
+  assert.equal(row.cells[section.columns[2].id], "после пустых ячеек");
+});
+
+test("long table cells are imported without truncation", () => {
+  const longText = "длинный текст ".repeat(5_000);
+  const { section, row } = onlyRow(
+    ["||№||Текст||Статус||", `|1|${longText}|OK|`].join("\n"),
+  );
+
+  assert.equal(row.cells[section.columns[0].id], longText);
+});
+
+test("strikethrough markers require non-whitespace content at both boundaries", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Текст||Статус||",
+      "|1|- -зачёркнутый-, но - это дефисы -|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    row.cells[section.columns[0].id],
+    "- <s>зачёркнутый</s>, но - это дефисы -",
+  );
+});

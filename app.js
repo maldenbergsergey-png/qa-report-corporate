@@ -3062,9 +3062,10 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
 function generatePortableHtml() {
   const container = document.createElement("div");
   container.innerHTML = generateVisualPreview();
-  container.style.fontFamily = "Arial, sans-serif";
-  container.style.color = "#172b4d";
+  container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+  container.style.color = "#202124";
   container.style.background = "#ffffff";
+  container.style.lineHeight = "1.5";
   container.querySelectorAll("h1").forEach((item) => {
     item.style.fontSize = "24px";
     item.style.margin = "0 0 16px";
@@ -3076,23 +3077,32 @@ function generatePortableHtml() {
   container.querySelectorAll("table").forEach((table) => {
     table.style.width = "100%";
     table.style.borderCollapse = "collapse";
+    table.style.background = "#ffffff";
+    table.style.fontSize = "14px";
   });
   container.querySelectorAll("th, td").forEach((cell) => {
-    cell.style.padding = "8px";
-    cell.style.border = "1px solid #c7cdd4";
+    cell.style.padding = "10px";
+    cell.style.border = "1px solid #cfd6dd";
     cell.style.verticalAlign = "top";
     cell.style.textAlign = "left";
+    cell.style.overflowWrap = "anywhere";
   });
   container.querySelectorAll("th").forEach((cell) => {
-    cell.style.background = "#f1f2f4";
+    cell.style.background = "#e9edf2";
     cell.style.fontWeight = "700";
+  });
+  container.querySelectorAll("tbody tr:nth-child(even)").forEach((row) => {
+    row.style.background = "#fafbfc";
+  });
+  container.querySelectorAll("p").forEach((paragraph) => {
+    paragraph.style.margin = "0";
   });
   container.querySelectorAll("figure").forEach((figure) => {
     figure.style.margin = "6px 0";
   });
   container.querySelectorAll("img").forEach((image) => {
     image.style.display = "block";
-    image.style.maxWidth = image.style.width || "320px";
+    image.style.maxWidth = "100%";
     image.style.height = "auto";
   });
   container.querySelectorAll("pre").forEach((block) => {
@@ -5476,9 +5486,6 @@ async function copyVisualReport() {
     return;
   }
   const html = generatePortableHtml();
-  const textContainer = document.createElement("div");
-  textContainer.innerHTML = html;
-  const plainText = textContainer.innerText;
   try {
     if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
       throw new Error("Расширенный буфер обмена недоступен");
@@ -5486,26 +5493,20 @@ async function copyVisualReport() {
     await navigator.clipboard.write([
       new ClipboardItem({
         "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([plainText], { type: "text/plain" }),
+        "text/plain": new Blob([html], { type: "text/plain" }),
       }),
     ]);
   } catch {
-    const holder = document.createElement("div");
-    holder.contentEditable = "true";
-    holder.style.position = "fixed";
-    holder.style.left = "-9999px";
-    holder.innerHTML = html;
-    document.body.append(holder);
-    const range = document.createRange();
-    range.selectNodeContents(holder);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+    const textarea = document.createElement("textarea");
+    textarea.value = html;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.append(textarea);
+    textarea.select();
     document.execCommand("copy");
-    selection.removeAllRanges();
-    holder.remove();
+    textarea.remove();
   }
-  showToast("Визуальная таблица скопирована");
+  showToast("HTML-разметка скопирована");
 }
 
 const XLSX_STATUS_STYLES = {

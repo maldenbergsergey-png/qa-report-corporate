@@ -155,3 +155,78 @@ test("strikethrough markers require non-whitespace content at both boundaries", 
     "- <s>зачёркнутый</s>, но - это дефисы -",
   );
 });
+
+test("color formatting inside links is rendered once and keeps HTML escaped", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Текст||Статус||",
+      "|1|[проверить {color:red}критичный <script>alert(1)</script>{color}|https://example.com/docs]|OK|",
+    ].join("\n"),
+  );
+
+  const html = row.cells[section.columns[0].id];
+  assert.match(html, /<a href="https:\/\/example\.com\/docs"/);
+  assert.match(html, /<span style="color:red">критичный &lt;script&gt;alert\(1\)&lt;\/script&gt;<\/span>/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /&lt;span/);
+});
+
+test("unsafe link protocols and color attribute payloads do not create active HTML", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Ссылка||Цвет||Статус||",
+      "|1|[кликни|javascript:alert(1)]|{color:red\" onmouseover=\"alert(1)}опасно{color}|OK|",
+    ].join("\n"),
+  );
+
+  const link = row.cells[section.columns[0].id];
+  const color = row.cells[section.columns[1].id];
+  assert.equal(link, "кликни");
+  assert.doesNotMatch(link, /href=|javascript:/i);
+  assert.doesNotMatch(color, /<span/i);
+  assert.match(color, /red&quot; onmouseover=&quot;alert\(1\)/);
+});
+
+test("attachment names containing HTML are escaped in placeholders", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Изображение||Статус||",
+      "|1|!<img src=x onerror=alert(1)>!|OK|",
+    ].join("\n"),
+  );
+
+  const html = row.cells[section.columns[0].id];
+  assert.match(html, /class="jira-image-placeholder"/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<img\s/i);
+});
+
+test("nested and escaped brackets stay inside a Jira link and its table cell", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Вложенная ссылка||Экранированная ссылка||Комментарий||Статус||",
+      "|1|[outer [inner] text|https://example.com]|[RFC \\] *важный*|https://example.com/a\\]b]|после|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(section.columns.length, 3);
+  assert.match(row.cells[section.columns[0].id], />outer \[inner\] text<\/a>/);
+  assert.match(row.cells[section.columns[1].id], /href="https:\/\/example\.com\/a\]b"/);
+  assert.match(row.cells[section.columns[1].id], />RFC \] <strong>важный<\/strong><\/a>/);
+  assert.equal(row.cells[section.columns[2].id], "после");
+  assert.doesNotMatch(row.cells[section.columns[1].id], /@@JIRATOKEN/);
+});
+
+test("comparison operators and Jira line breaks remain inside strikethrough text", () => {
+  const { section, row } = onlyRow(
+    [
+      "||№||Текст||Статус||",
+      "|1|-проверка > 5 значений- и -строка\\\\продолжение-|OK|",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    row.cells[section.columns[0].id],
+    "<s>проверка &gt; 5 значений</s> и <s>строка<br>продолжение</s>",
+  );
+});

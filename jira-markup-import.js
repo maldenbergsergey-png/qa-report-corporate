@@ -32,14 +32,20 @@
     let current = "";
     let escaped = false;
 
-    const closingMarkerIndex = (marker, startIndex) => {
+    const closingMarkerIndex = (marker, startIndex, openMarker = "") => {
+      let depth = 1;
       for (let index = startIndex; index < source.length; index += 1) {
-        if (source[index] !== marker) continue;
         let slashCount = 0;
         for (let previous = index - 1; previous >= 0 && source[previous] === "\\"; previous -= 1) {
           slashCount += 1;
         }
-        if (slashCount % 2 === 0) return index;
+        if (slashCount % 2 !== 0) continue;
+        if (openMarker && source[index] === openMarker) {
+          depth += 1;
+        } else if (source[index] === marker) {
+          depth -= 1;
+          if (depth === 0) return index;
+        }
       }
       return -1;
     };
@@ -52,7 +58,7 @@
       } else if (character === "\\") {
         escaped = true;
       } else if (character === "[") {
-        const closingIndex = closingMarkerIndex("]", index + 1);
+        const closingIndex = closingMarkerIndex("]", index + 1, "[");
         if (closingIndex >= 0) {
           current += source.slice(index, closingIndex + 1);
           index = closingIndex;
@@ -121,24 +127,64 @@
         "$1<sub>$2</sub>",
       );
 
-    output = output.replace(
-      /\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}/gi,
-      '<span style="color:$1">$2</span>',
-    );
+    const jiraNamedColors = new Set([
+      "aqua", "black", "blue", "fuchsia", "gray", "green", "lime", "maroon", "navy",
+      "olive", "orange", "purple", "red", "silver", "teal", "white", "yellow",
+    ]);
+    output = output.replace(/\{color:([^}]+)\}([\s\S]*?)\{color\}/gi, (match, rawColor, content) => {
+      const color = rawColor.trim().toLowerCase();
+      return /^#[0-9a-f]{3,8}$/i.test(color) || jiraNamedColors.has(color)
+        ? `<span style="color:${color}">${content}</span>`
+        : match;
+    });
     return output;
   }
 
   function wikiInlineToHtml(value, attachments = []) {
     const protectedBlocks = [];
+    const escapedTokenIndexes = new Set();
+    const tokenPattern = /@@JIRATOKEN(\d+)@@/g;
     const protect = (html) => {
       const token = `@@JIRATOKEN${protectedBlocks.length}@@`;
       protectedBlocks.push(html);
       return token;
     };
+    const restoreProtectedBlocks = (value) => {
+      let restored = String(value || "");
+      for (let depth = 0; depth <= protectedBlocks.length; depth += 1) {
+        let replaced = false;
+        const next = restored.replace(tokenPattern, (_, index) => {
+          const block = protectedBlocks[Number(index)];
+          if (block === undefined) return "";
+          replaced = true;
+          return block;
+        });
+        restored = next;
+        if (!replaced) break;
+      }
+      return restored;
+    };
+    const restoreEscapedUrlTokens = (value) => {
+      let valid = true;
+      const restored = String(value || "").replace(tokenPattern, (_, index) => {
+        const tokenIndex = Number(index);
+        if (!escapedTokenIndexes.has(tokenIndex)) {
+          valid = false;
+          return "";
+        }
+        return protectedBlocks[tokenIndex];
+      });
+      return valid ? restored : "";
+    };
     const attachmentByName = new Map(attachments.map((item) => [item.filename, item]));
     let source = String(value || "").replace(
       /\\([!{}\[\]|*_+\-^~])/g,
-      (_, character) => protect(escapeHtml(character)),
+      (_, character) => {
+        const tokenIndex = protectedBlocks.length;
+        const token = protect(escapeHtml(character));
+        escapedTokenIndexes.add(tokenIndex);
+        return token;
+      },
     );
     source = source.replace(
       /\{code(?::(?:language=)?([^}]+))?\}([\s\S]*?)\{code\}/gi,
@@ -180,18 +226,55 @@
         `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(src)}" alt="${escapeHtml(filename)}"${attachmentId} data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}"${jiraId} data-jira-url="${escapeHtml(attachmentUrl || externalUrl)}"${jiraThumbnail}${jiraOptions}></figure>`,
       );
     });
-    source = source.replace(/\[([^\]|]+)\|([^\]]+)\]/g, (_, text, href) => {
-      const safeHref = safeHttpUrl(href);
-      return protect(
-        safeHref
-          ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${formatWikiText(text)}</a>`
-          : formatWikiText(text),
-      );
-    });
-    return formatWikiText(source).replace(
-      /@@JIRATOKEN(\d+)@@/g,
-      (_, index) => protectedBlocks[Number(index)] || "",
-    );
+    const replaceWikiLinks = (input) => {
+      let output = "";
+      let cursor = 0;
+      while (cursor < input.length) {
+        const startIndex = input.indexOf("[", cursor);
+        if (startIndex < 0) {
+          output += input.slice(cursor);
+          break;
+        }
+        output += input.slice(cursor, startIndex);
+        let depth = 1;
+        let separatorIndex = -1;
+        let closingIndex = -1;
+        for (let index = startIndex + 1; index < input.length; index += 1) {
+          if (input[index] === "[") depth += 1;
+          else if (input[index] === "]") {
+            depth -= 1;
+            if (depth === 0) {
+              closingIndex = index;
+              break;
+            }
+          } else if (input[index] === "|" && depth === 1 && separatorIndex < 0) {
+            separatorIndex = index;
+          }
+        }
+        if (closingIndex < 0) {
+          output += input.slice(startIndex);
+          break;
+        }
+        if (separatorIndex < 0) {
+          output += input.slice(startIndex, closingIndex + 1);
+          cursor = closingIndex + 1;
+          continue;
+        }
+        const text = input.slice(startIndex + 1, separatorIndex);
+        const href = restoreEscapedUrlTokens(input.slice(separatorIndex + 1, closingIndex));
+        const safeHref = safeHttpUrl(href);
+        const formattedText = restoreProtectedBlocks(formatWikiText(text));
+        output += protect(
+          safeHref
+            ? `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${formattedText}</a>`
+            : formattedText,
+        );
+        cursor = closingIndex + 1;
+      }
+      return output;
+    };
+    source = replaceWikiLinks(source);
+    return restoreProtectedBlocks(formatWikiText(source));
   }
 
   function normalizeStatus(value) {

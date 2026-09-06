@@ -1,8 +1,8 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v7';
+const CACHE_NAME = 'qa-report-corporate-assets-v8';
 const SHELL = [
-  "/icons/icon-192.png?v=2",
+  "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
   '/styles.css?v=81', '/app.js?v=85', '/pwa.js?v=3',
   '/jira-markup-import.js?v=1', '/checklist-selection.js?v=2',

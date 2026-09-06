@@ -1,5 +1,6 @@
 const STORAGE_KEY = "qa-report-editor-draft-v2";
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
+const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
@@ -83,6 +84,7 @@ const DEFAULT_DRAFT = {
   environment: "STAGE",
   overallStatus: "OK",
   intro: "",
+  numberingMode: "section",
   sections: [createSection("Основные проверки", DEFAULT_COLUMNS, 2)],
 };
 
@@ -150,6 +152,7 @@ const elements = {
   publishButton: document.querySelector("#publishButton"),
   jiraSettingsModal: document.querySelector("#jiraSettingsModal"),
   closeJiraSettingsButton: document.querySelector("#closeJiraSettingsButton"),
+  settingsChecklistSectionButton: document.querySelector("#settingsChecklistSectionButton"),
   settingsJiraSectionButton: document.querySelector("#settingsJiraSectionButton"),
   settingsHistorySectionButton: document.querySelector("#settingsHistorySectionButton"),
   settingsJiraSection: document.querySelector("#settingsJiraSection"),
@@ -254,6 +257,14 @@ const suppressObjectOpenUntil = new WeakMap();
 let editingCodeBlock = null;
 let codeEditorInitialValue = "";
 let stickyUpdateFrame = 0;
+let pinnedColumns = loadPinnedColumns();
+let selectionMode = false;
+let selectedRowIds = new Set();
+let selectionDraftId = null;
+const selectionUi = Object.fromEntries([
+  "Toggle", "Toolbar", "All", "Count", "StatusButton", "StatusMenu", "StatusOptions", "StatusCount", "StatusApply",
+  "MoveButton", "MoveMenu", "Search", "Destinations", "NewSection", "CreateForm", "NewTitle", "Delete", "Exit",
+].map((name) => [name, document.getElementById(`selection${name}`)]));
 let linkEditorRange = null;
 let editingLink = null;
 let publishAbortController = null;
@@ -388,6 +399,7 @@ function normalizeDraft(value) {
     lastSavedBy: parsed.lastSavedBy || "",
     lastSavedClientId: parsed.lastSavedClientId || "",
     issueUrl: parsed.issueUrl || "",
+    numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
     sections,
   };
   normalized.intro = sanitizeRichHtml(normalized.intro);
@@ -1800,7 +1812,191 @@ function render() {
   renderSummary();
 }
 
+function createSelectionCheckbox(label) {
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = "selection-checkbox";
+  input.setAttribute("aria-label", label);
+  return input;
+}
+
+function closeSelectionMenus() {
+  for (const name of ["Status", "Move"]) {
+    selectionUi[`${name}Menu`].hidden = true;
+    selectionUi[`${name}Button`].setAttribute("aria-expanded", "false");
+  }
+}
+
+function setSelectionMode(enabled) {
+  flushDraftFromDom();
+  selectionMode = enabled;
+  selectedRowIds.clear();
+  closeSelectionMenus();
+  selectionUi.Toolbar.hidden = !enabled;
+  selectionUi.Toggle.setAttribute("aria-pressed", String(enabled));
+  document.body.classList.toggle("selection-mode", enabled);
+  renderSections();
+  if (!enabled) selectionUi.Toggle.focus();
+}
+
+function updateSelectionUi() {
+  const rows = draft.sections.flatMap((section) => section.rows);
+  const currentIds = new Set(rows.map((row) => row.id));
+  selectedRowIds = new Set([...selectedRowIds].filter((id) => currentIds.has(id)));
+  const count = selectedRowIds.size;
+  selectionUi.Count.textContent = `Выбрано: ${count}`;
+  selectionUi.All.checked = count > 0 && count === rows.length;
+  selectionUi.All.indeterminate = count > 0 && count < rows.length;
+  selectionUi.Delete.disabled = count === 0;
+  selectionUi.MoveButton.disabled = count === 0;
+  if (!count && !selectionUi.MoveMenu.hidden) closeSelectionMenus();
+  elements.sections.querySelectorAll("[data-selection-row]").forEach((checkbox) => {
+    checkbox.checked = selectedRowIds.has(checkbox.dataset.selectionRow);
+    checkbox.closest("tr").classList.toggle("row-selected", checkbox.checked);
+  });
+  const sectionsById = new Map(draft.sections.map((section) => [section.id, section]));
+  elements.sections.querySelectorAll("[data-selection-section]").forEach((checkbox) => {
+    const section = sectionsById.get(checkbox.dataset.selectionSection);
+    const selected = section.rows.filter((row) => selectedRowIds.has(row.id)).length;
+    checkbox.checked = selected > 0 && selected === section.rows.length;
+    checkbox.indeterminate = selected > 0 && selected < section.rows.length;
+  });
+  if (!selectionUi.MoveMenu.hidden) renderSelectionDestinations();
+}
+
+function openSelectionMenu(name) {
+  const opening = selectionUi[`${name}Menu`].hidden;
+  closeSelectionMenus();
+  if (!opening) return;
+  selectionUi[`${name}Menu`].hidden = false;
+  selectionUi[`${name}Button`].setAttribute("aria-expanded", "true");
+  if (name === "Move") {
+    flushDraftFromDom();
+    selectionUi.Search.value = "";
+    setSelectionCreateExpanded(false);
+    renderSelectionDestinations();
+    selectionUi.Search.focus();
+  } else {
+    selectionUi.StatusOptions.querySelector("input")?.focus();
+  }
+  scheduleStickySectionUpdate();
+}
+
+function renderSelectionDestinations() {
+  selectionUi.Destinations.replaceChildren();
+  const search = normalizeColumnTitle(selectionUi.Search.value);
+  const matching = draft.sections.filter((section) => normalizeColumnTitle(section.title).includes(search));
+  for (const section of matching) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = section.title;
+    button.title = section.title;
+    button.disabled = !draft.sections.some((source) => source.id !== section.id && source.rows.some((row) => selectedRowIds.has(row.id)));
+    if (button.disabled) button.title = "Все выбранные строки уже в этом разделе";
+    button.addEventListener("click", () => moveSelectedRows(section.id));
+    selectionUi.Destinations.append(button);
+  }
+  scheduleStickySectionUpdate();
+  if (!matching.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "Разделы не найдены";
+    selectionUi.Destinations.append(empty);
+  }
+}
+
+// Record a bulk operation as its own undo step, including when text was just edited.
+function commitSelectionMutation(mutate) {
+  clearTimeout(historyTimer);
+  const before = serializeDraft();
+  if (historyCurrent !== before) undoStack.push(historyCurrent);
+  mutate();
+  renderSections();
+  renderSummary();
+  saveLocalMutationNow();
+  clearTimeout(historyTimer);
+  undoStack.push(before);
+  if (undoStack.length > 100) undoStack.splice(0, undoStack.length - 100);
+  historyCurrent = serializeDraft();
+  redoStack = [];
+  updateHistoryButtons();
+}
+
+async function moveSelectedRows(targetId, newTitle = "") {
+  flushDraftFromDom();
+  const ids = new Set(selectedRowIds);
+  const documentId = draft.draftId;
+  const target = draft.sections.find((section) => section.id === targetId);
+  const count = draft.sections.filter((section) => section.id !== targetId)
+    .reduce((sum, section) => sum + section.rows.filter((row) => ids.has(row.id)).length, 0);
+  if (!count || (!target && !newTitle)) return;
+  closeSelectionMenus();
+  const rowWord = count % 10 === 1 && count % 100 !== 11 ? "строку"
+    : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? "строки" : "строк";
+  const message = newTitle
+    ? `Создать раздел «${newTitle}» и перенести в него ${count} ${rowWord}?`
+    : `Перенести ${count} ${rowWord} в раздел «${target.title}»?`;
+  const confirmed = await askConfirmation(message, {
+    title: "Перенос строк", confirmText: "Перенести",
+  });
+  if (!confirmed) { selectionUi.MoveButton.focus(); return; }
+  if (draft.draftId !== documentId) { showToast("Отчёт изменился. Выберите строки заново."); return; }
+  flushDraftFromDom();
+  if (targetId && !draft.sections.some((section) => section.id === targetId)) {
+    showToast("Раздел больше не существует. Выберите другой раздел.");
+    return;
+  }
+  if (!draft.sections.some((section) => section.id !== targetId && section.rows.some((row) => ids.has(row.id)))) return;
+  let destinationId = targetId;
+  let movedCount = 0;
+  commitSelectionMutation(() => {
+    if (newTitle) {
+      const source = draft.sections.find((section) => section.rows.some((row) => ids.has(row.id)));
+      const section = createSection(newTitle, source.columns, 0);
+      draft.sections.push(section);
+      destinationId = section.id;
+    }
+    movedCount = window.QaReportSelection.moveRows(draft.sections, ids, destinationId, () => crypto.randomUUID(), createRow);
+    selectedRowIds.clear();
+  });
+  const destination = [...elements.sections.children].find((section) => section.dataset.sectionId === destinationId);
+  destination?.scrollIntoView({ behavior: "smooth", block: "start" });
+  showToast(`Перенесено строк: ${movedCount}`);
+}
+
+async function deleteSelectedRows() {
+  flushDraftFromDom();
+  const ids = new Set(selectedRowIds);
+  if (!ids.size) return;
+  const documentId = draft.draftId;
+  const allSelected = draft.sections.every((section) => section.rows.every((row) => ids.has(row.id)));
+  closeSelectionMenus();
+  const confirmed = await askConfirmation(
+    `Удалить выбранные строки (${ids.size})?${allSelected ? " Останется раздел «Основные проверки» с двумя пустыми строками." : " Опустевшие разделы сохранят одну пустую строку."}`,
+    { title: "Удаление строк", confirmText: "Удалить", danger: true },
+  );
+  if (!confirmed) { selectionUi.Delete.focus(); return; }
+  if (draft.draftId !== documentId) { showToast("Отчёт изменился. Выберите строки заново."); return; }
+  flushDraftFromDom();
+  if (!draft.sections.some((section) => section.rows.some((row) => ids.has(row.id)))) return;
+  let deletedCount = 0;
+  commitSelectionMutation(() => {
+    const result = window.QaReportSelection.deleteRows(draft.sections, ids, createRow,
+      () => createSection("Основные проверки", DEFAULT_COLUMNS, 2));
+    draft.sections = result.sections;
+    deletedCount = result.count;
+    selectedRowIds.clear();
+  });
+  showToast(`Удалено строк: ${deletedCount}`);
+  selectionUi.All.focus();
+}
+
 function renderSections() {
+  if (selectionDraftId !== draft.draftId) {
+    selectedRowIds.clear();
+    selectionDraftId = draft.draftId;
+    closeSelectionMenus();
+  }
+  const rowNumbers = ChecklistNumbering.rowNumbers(draft);
   elements.sections.innerHTML = "";
   draft.sections.forEach((section) => {
     const fragment = elements.sectionTemplate.content.cloneNode(true);
@@ -1809,6 +2005,7 @@ function renderSections() {
     sectionElement.draggable = true;
     sectionElement.classList.toggle("collapsed", Boolean(section.collapsed));
 
+    fragment.querySelector(".section-number").textContent = `${draft.sections.indexOf(section) + 1}.`;
     const title = fragment.querySelector(".section-title");
     title.value = section.title;
     title.addEventListener("input", () => {
@@ -1833,29 +2030,50 @@ function renderSections() {
       renderSections();
       saveLocalMutationNow();
     });
-    renderTable(fragment, section);
+    renderTable(fragment, section, rowNumbers);
     enableSectionDragging(sectionElement, section.id);
     elements.sections.append(fragment);
     highlightCodeBlocks(sectionElement);
     enhanceImageControls(sectionElement);
     enhanceFileControls(sectionElement);
   });
+  updateSelectionUi();
+  applyPinnedColumns();
   scheduleStickySectionUpdate();
 }
 
-function renderTable(fragment, section) {
+function renderTable(fragment, section, rowNumbers) {
   const table = fragment.querySelector(".check-table");
   const tableScroll = fragment.querySelector(".table-scroll");
+  tableScroll.tabIndex = 0;
+  tableScroll.setAttribute("role", "region");
+  tableScroll.setAttribute("aria-label", `Таблица раздела «${section.title}»`);
   const headerTable = fragment.querySelector(".section-header-table");
   const headerScroll = fragment.querySelector(".section-header-scroll");
   const bodyColgroup = table.querySelector("colgroup");
   const headerColgroup = headerTable.querySelector("colgroup");
   const header = headerTable.querySelector("thead tr");
-  bodyColgroup.append(createColumnElement("number-col"));
-  headerColgroup.append(createColumnElement("number-col"));
-  header.append(createHeader("№"));
+  if (selectionMode) {
+    bodyColgroup.append(createColumnElement("selection-col", 44));
+    headerColgroup.append(createColumnElement("selection-col", 44));
+    const cell = document.createElement("th");
+    cell.className = "selection-cell";
+    const checkbox = createSelectionCheckbox(`Выбрать все строки раздела «${section.title}»`);
+    checkbox.dataset.selectionSection = section.id;
+    checkbox.addEventListener("change", () => {
+      section.rows.forEach((row) => checkbox.checked ? selectedRowIds.add(row.id) : selectedRowIds.delete(row.id));
+      updateSelectionUi();
+    });
+    cell.append(checkbox);
+    header.append(cell);
+  }
+  bodyColgroup.append(createColumnElement("number-col", ChecklistNumbering.columnWidth(draft)));
+  headerColgroup.append(createColumnElement("number-col", ChecklistNumbering.columnWidth(draft)));
+  const numberHeader = createHeader("№");
+  numberHeader.className = "number-header";
+  header.append(numberHeader);
 
-  let totalWidth = 52 + 164 + 46;
+  let totalWidth = ChecklistNumbering.columnWidth(draft) + 164 + 40 + (selectionMode ? 44 : 0);
   section.columns.forEach((column, index) => {
     column.width = Math.max(140, Number(column.width) || 240);
     bodyColgroup.append(createColumnElement("dynamic-col", column.width));
@@ -1868,14 +2086,16 @@ function renderTable(fragment, section) {
 
   bodyColgroup.append(createColumnElement("status-col"), createColumnElement("actions-col"));
   headerColgroup.append(createColumnElement("status-col"), createColumnElement("actions-col"));
-  header.append(createStatusHeader(section), createHeader(""));
+  const actionsHeader = createHeader("");
+  actionsHeader.className = "actions-header";
+  header.append(createStatusHeader(section), actionsHeader);
   table.style.width = `${totalWidth}px`;
   table.style.minWidth = "100%";
   headerTable.style.width = `${totalWidth}px`;
   headerTable.style.minWidth = "100%";
 
   const tbody = fragment.querySelector("tbody");
-  section.rows.forEach((row, index) => tbody.append(createRowElement(section, row, index)));
+  section.rows.forEach((row) => tbody.append(createRowElement(section, row, rowNumbers.get(row.id))));
   tbody.addEventListener("dragover", (event) => {
     if (!hasDragType(event, "text/row-id")) return;
     event.preventDefault();
@@ -1929,17 +2149,49 @@ function createColumnElement(className, width = null) {
 }
 
 function getSectionTableWidth(section) {
-  return 52 + 164 + 46 + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
+  return ChecklistNumbering.columnWidth(draft) + 164 + 40 + (selectionMode ? 44 : 0) + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
 }
 
 function getStickyOffset() {
-  const toolbarRect = document.querySelector(".editor-toolbar")?.getBoundingClientRect();
+  const toolbar = document.querySelector(".editor-toolbar");
+  if (selectionMode && toolbar) {
+    const top = parseFloat(getComputedStyle(toolbar).top) || 0;
+    selectionUi.Toolbar.style.top = `${top + toolbar.getBoundingClientRect().height + 8}px`;
+  }
+  const toolbarRect = (selectionMode ? selectionUi.Toolbar : toolbar)?.getBoundingClientRect();
   return Math.max(0, toolbarRect?.bottom || 0) + 8;
 }
 
+function updateSelectionMenuLayout() {
+  for (const [menu, list] of [[selectionUi.StatusMenu, selectionUi.StatusOptions], [selectionUi.MoveMenu, selectionUi.Destinations]]) {
+    if (menu.hidden) continue;
+    const scrollTop = list.scrollTop;
+    // Only the options list scrolls. Keep search, the creation form and actions visible.
+    menu.style.transform = "";
+    menu.style.maxHeight = `${Math.max(0, Math.min(520, window.innerHeight - 24))}px`;
+    const rect = menu.getBoundingClientRect();
+    const fixedHeight = rect.height - list.getBoundingClientRect().height;
+    const minimumHeight = fixedHeight + Math.min(72, list.scrollHeight);
+    const availableBelow = window.innerHeight - rect.top - 12;
+    const shift = Math.min(Math.max(0, rect.top - 12), Math.max(0, minimumHeight - availableBelow));
+    if (shift) menu.style.transform = `translateY(-${shift}px)`;
+    menu.style.maxHeight = `${Math.max(0, Math.min(520, availableBelow + shift))}px`;
+    // Temporary expansion during measurement must not clamp the user's position.
+    list.scrollTop = scrollTop;
+  }
+}
+
 function updateStickyOffsets() {
+  updatePinnedColumnOffsets();
   const stickyTop = getStickyOffset();
+  // Gap covers follow their own panels, including while section headers change.
+  for (const panel of [document.querySelector(".editor-toolbar"), selectionUi.Toolbar]) {
+    if (!panel) continue;
+    const top = parseFloat(getComputedStyle(panel).top) || 0;
+    panel.classList.toggle("is-stuck", !panel.hidden && panel.getBoundingClientRect().top <= top + 1);
+  }
   document.documentElement.style.setProperty("--section-sticky-top", `${stickyTop}px`);
+  updateSelectionMenuLayout();
   let hasStuckSection = false;
   elements.sections?.querySelectorAll(".section-sticky-block").forEach((stickyBlock) => {
     const rect = stickyBlock.getBoundingClientRect();
@@ -2102,7 +2354,7 @@ function startColumnResize(event, section, column) {
     const col = sectionElement?.querySelector(`th[data-column-id="${column.id}"]`);
     if (!col) return;
     const colIndex = [...col.parentElement.children].indexOf(col);
-    const total = 52 + 164 + 46 + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
+    const total = getSectionTableWidth(section);
     updateSectionColumnLayout(sectionElement, colIndex, column.width, total);
   };
   const onUp = () => {
@@ -2148,9 +2400,21 @@ function createStatusHeader(section) {
   return th;
 }
 
-function createRowElement(section, row, index) {
+function createRowElement(section, row, number) {
   const tr = document.createElement("tr");
   tr.dataset.rowId = row.id;
+  if (selectionMode) {
+    const cell = document.createElement("td");
+    cell.className = "selection-cell";
+    const checkbox = createSelectionCheckbox(`Выбрать строку ${number.replace(/\.$/, "")} раздела «${section.title}»`);
+    checkbox.dataset.selectionRow = row.id;
+    checkbox.addEventListener("change", () => {
+      checkbox.checked ? selectedRowIds.add(row.id) : selectedRowIds.delete(row.id);
+      updateSelectionUi();
+    });
+    cell.append(checkbox);
+    tr.append(cell);
+  }
 
   const numberCell = document.createElement("td");
   numberCell.className = "row-number";
@@ -2161,7 +2425,7 @@ function createRowElement(section, row, index) {
   rowDragHandle.draggable = true;
   const rowNumber = document.createElement("span");
   rowNumber.className = "row-number-text";
-  rowNumber.textContent = `${index + 1}.`;
+  rowNumber.textContent = number;
   numberCell.append(rowDragHandle, rowNumber);
   tr.append(numberCell);
 
@@ -2196,20 +2460,23 @@ function createRowElement(section, row, index) {
     row.cells[column.id] = editor.innerHTML;
     editor.addEventListener("input", () => {
       row.cells[column.id] = cleanEditorHtml(editor);
-      renderSummary();
+      // Saving normalizes draft objects; sync the live table before counting.
       scheduleSave();
+      renderSummary();
     });
     td.append(editor);
     tr.append(td);
   });
 
   const statusCell = document.createElement("td");
+  statusCell.className = "status-cell";
   const statusSelect = createStatusSelect(row.status);
   statusSelect.addEventListener("change", () => {
     row.status = statusSelect.value;
     setStatusClass(statusSelect, row.status);
-    renderSummary();
+    // The captured row may predate autosave. scheduleSave synchronizes the current draft.
     scheduleSave();
+    renderSummary();
   });
   statusCell.append(statusSelect);
   tr.append(statusCell);
@@ -2953,15 +3220,21 @@ function balanceJiraColorMarkup(value) {
   return output;
 }
 
-function sectionsForPublication(sectionIds = null, sourceDraft = draft) {
-  if (sectionIds === null || sectionIds === undefined) return sourceDraft.sections;
-  const selectedIds = sectionIds instanceof Set ? sectionIds : new Set(sectionIds);
-  return sourceDraft.sections.filter((section) => selectedIds.has(section.id));
+function sectionsForPublication(sectionIds = null, sourceDraft = draft, statuses = null) {
+  const selectedIds = sectionIds == null ? null : new Set(sectionIds);
+  const selectedStatuses = statuses == null ? null : new Set(statuses);
+  const sections = sourceDraft.sections.filter((section) => !selectedIds || selectedIds.has(section.id));
+  if (!selectedStatuses) return sections;
+  return sections.map((section) => ({
+    ...section,
+    rows: section.rows.filter((row) => selectedStatuses.has(row.status) && hasRowContent(row)),
+  })).filter((section) => section.rows.length > 0);
 }
 
 function generateMarkup(options = {}) {
-  const { sectionIds = null } = options;
+  const { sectionIds = null, statuses = null } = options;
   collectDocumentFields();
+  const rowNumbers = ChecklistNumbering.rowNumbers(draft);
   const blocks = [];
   const heading = [];
   const overallColor = STATUS_META[draft.overallStatus].jiraColor;
@@ -2973,17 +3246,17 @@ function generateMarkup(options = {}) {
   const intro = htmlToWiki(draft.intro);
   if (intro) blocks.push(intro);
 
-  sectionsForPublication(sectionIds).forEach((section) => {
+  sectionsForPublication(sectionIds, draft, statuses).forEach((section) => {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length) return;
-    const lines = [`h2. ${section.title || "Раздел"}`];
+    const lines = [`h2. ${ChecklistNumbering.sectionTitle(draft, section)}`];
     lines.push(
       `||${["Номер", ...section.columns.map((column) => column.title || "Без названия"), "Статус"].join("||")}||`,
     );
-    rows.forEach((row, index) => {
+    rows.forEach((row) => {
       const values = section.columns.map((column) => jiraCell(row.cells[column.id] || ""));
       const status = `{color:${STATUS_META[row.status].jiraColor}}*${row.status}*{color}`;
-      lines.push(`|${[`${index + 1}.`, ...values, status].join("|")}|`);
+      lines.push(`|${[rowNumbers.get(row.id), ...values, status].join("|")}|`);
     });
     blocks.push(lines.join("\n"));
   });
@@ -2997,6 +3270,7 @@ function byId(items = []) {
 function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
   if (sourceDraft === draft) collectDocumentFields();
   const previewDraft = normalizeDraft(sourceDraft);
+  const rowNumbers = ChecklistNumbering.rowNumbers(previewDraft);
   const oppositeDraft = compareDraft ? normalizeDraft(compareDraft) : null;
   const oppositeSections = byId(oppositeDraft?.sections || []);
   const wrapper = document.createElement("div");
@@ -3019,7 +3293,7 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length && !sectionOnlyHere) return;
     const heading = document.createElement("h2");
-    heading.textContent = section.title || "Раздел";
+    heading.textContent = ChecklistNumbering.sectionTitle(previewDraft, section);
     if (sectionOnlyHere || (oppositeSection && (section.title || "") !== (oppositeSection.title || ""))) {
       heading.className = "version-diff-changed";
     }
@@ -3034,12 +3308,12 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
       })
       .join("")}<th>Статус</th></tr>`;
     const tbody = document.createElement("tbody");
-    rows.forEach((row, index) => {
+    rows.forEach((row) => {
       const tr = document.createElement("tr");
       const oppositeRow = oppositeRows.get(row.id);
       const rowOnlyHere = Boolean(oppositeDraft && !oppositeRow);
       if (sectionOnlyHere || rowOnlyHere) tr.classList.add("version-diff-row");
-      tr.innerHTML = `<td>${index + 1}.</td>${section.columns
+      tr.innerHTML = `<td>${rowNumbers.get(row.id)}</td>${section.columns
         .map((column) => {
           const oppositeColumn = oppositeColumns.get(column.id);
           const columnOnlyHere = Boolean(oppositeDraft && !oppositeColumn);
@@ -3155,6 +3429,7 @@ function updateCloudHistorySettingsState() {
 function setSettingsSavedState(saved) {
   elements.saveJiraSettingsButton.classList.toggle("is-saved", saved);
   elements.settingsSaveCheck.hidden = !saved;
+  elements.saveJiraSettingsButton.querySelector(".settings-save-label").textContent = saved ? "Сохранено" : "Сохранить настройки";
 }
 
 function markSettingsDirty() {
@@ -3204,15 +3479,80 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const history = section === "history";
-  const jira = !history;
-  elements.settingsJiraSectionButton.classList.toggle("active", jira);
-  elements.settingsHistorySectionButton.classList.toggle("active", history);
-  elements.settingsJiraSection.hidden = !jira;
-  elements.settingsHistorySection.hidden = !history;
-  elements.settingsJiraSection.classList.toggle("active", jira);
-  elements.settingsHistorySection.classList.toggle("active", history);
-  elements.settingsFooter.hidden = !history;
+  const selected = ["checklist", "pinning", "jira", "history"].includes(section) ? section : "checklist";
+  elements.settingsChecklistSectionButton.classList.toggle("group-active", ["checklist", "pinning"].includes(selected));
+  elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
+    const active = button.dataset.settingsSection === selected;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  elements.jiraSettingsModal.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== selected;
+    panel.classList.toggle("active", !panel.hidden);
+  });
+  elements.settingsFooter.hidden = selected === "jira";
+}
+
+function loadPinnedColumns() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PINNED_COLUMNS_KEY) || "{}");
+    return { number: saved?.number === true, status: saved?.status === true };
+  } catch {
+    return { number: false, status: false };
+  }
+}
+
+function fillPinnedColumnsForm() {
+  document.getElementById("pinNumberColumn").checked = pinnedColumns.number;
+  document.getElementById("pinStatusColumn").checked = pinnedColumns.status;
+}
+
+function savePinnedColumns() {
+  const next = {
+    number: document.getElementById("pinNumberColumn").checked,
+    status: document.getElementById("pinStatusColumn").checked,
+  };
+  localStorage.setItem(PINNED_COLUMNS_KEY, JSON.stringify(next));
+  pinnedColumns = next;
+  applyPinnedColumns();
+}
+
+function applyPinnedColumns() {
+  document.body.classList.toggle("pin-number-columns", pinnedColumns.number);
+  document.body.classList.toggle("pin-status-columns", pinnedColumns.status);
+  scheduleStickySectionUpdate();
+}
+
+function updatePinnedColumnOffsets() {
+  elements.sections.querySelectorAll(".check-section").forEach((section) => {
+    const actionsWidth = section.querySelector(".section-header-table .actions-header")?.getBoundingClientRect().width || 40;
+    const actionsOffset = `${actionsWidth}px`;
+    if (section.style.getPropertyValue("--pinned-status-right") !== actionsOffset) {
+      section.style.setProperty("--pinned-status-right", actionsOffset);
+    }
+    const checkboxCell = section.querySelector(".section-header-table .selection-cell");
+    const offset = checkboxCell?.getBoundingClientRect().width || 0;
+    const value = `${offset}px`;
+    if (section.style.getPropertyValue("--pinned-number-left") !== value) {
+      section.style.setProperty("--pinned-number-left", value);
+    }
+  });
+}
+
+function fillChecklistSettingsForm() {
+  elements.jiraSettingsModal.querySelectorAll('[name="numberingMode"]').forEach((input) => {
+    input.checked = input.value === ChecklistNumbering.normalizeMode(draft.numberingMode);
+  });
+}
+
+function saveChecklistSettings() {
+  const mode = ChecklistNumbering.normalizeMode(elements.jiraSettingsModal.querySelector('[name="numberingMode"]:checked')?.value);
+  if (draft.numberingMode === mode) return;
+  flushDraftFromDom();
+  draft.numberingMode = mode;
+  renderSections();
+  saveLocalMutationNow();
 }
 
 async function authCsrfToken() {
@@ -3293,7 +3633,9 @@ async function disconnectJira(instanceId) {
 
 function openJiraSettings() {
   fillReportIdentityForm();
-  setSettingsSection("jira");
+  fillChecklistSettingsForm();
+  fillPinnedColumnsForm();
+  setSettingsSection("checklist");
   setSettingsSavedState(false);
   setReportIdentityState(
     !cloudHistoryEnabled
@@ -3315,6 +3657,8 @@ function closeJiraSettings() {
 function saveJiraSettings() {
   try {
     saveReportIdentitySettings();
+    saveChecklistSettings();
+    savePinnedColumns();
     setSettingsSavedState(true);
   } catch (error) {
     setSettingsSavedState(false);
@@ -3548,10 +3892,10 @@ function cancelPublishProgress() {
 }
 
 async function uploadPendingImages(settings, issue, options = {}) {
-  const { signal, onProgress = () => {}, sectionIds = null } = options;
+  const { signal, onProgress = () => {}, sectionIds = null, statuses = null } = options;
   const files = [
-    ...collectLocalImages({ sectionIds }),
-    ...collectLocalFiles({ sectionIds }),
+    ...collectLocalImages({ sectionIds, statuses }),
+    ...collectLocalFiles({ sectionIds, statuses }),
   ];
   if (!files.length) return [];
   const uploaded = [];
@@ -3659,13 +4003,35 @@ function updatePublishScopeState() {
   const allSelected = selectedCount === checkboxes.length;
   elements.publishScopeSelectAll.checked = allSelected;
   elements.publishScopeSelectAll.indeterminate = selectedCount > 0 && !allSelected;
-  elements.publishScopeSummary.textContent = `Выбрано: ${selectedCount} из ${checkboxes.length}`;
-  elements.acceptPublishScopeButton.disabled = selectedCount === 0;
+  const statuses = [...document.querySelectorAll('#publishStatusList input')];
+  const selectedStatuses = statuses.filter((input) => input.checked).map((input) => input.value);
+  const allStatuses = document.getElementById("publishStatusSelectAll");
+  allStatuses.checked = selectedStatuses.length === statuses.length;
+  allStatuses.indeterminate = selectedStatuses.length > 0 && !allStatuses.checked;
+  const sections = sectionsForPublication(checkboxes.filter((input) => input.checked).map((input) => input.value), draft, selectedStatuses);
+  const rowCount = sections.reduce((sum, section) => sum + section.rows.length, 0);
+  elements.publishScopeSummary.textContent = `К отправке: разделов — ${sections.length}, строк — ${rowCount}`;
+  elements.acceptPublishScopeButton.disabled = rowCount === 0;
 }
 
 function askPublishScope() {
   if (publishScopeResolver) return Promise.resolve(null);
   elements.publishScopeList.replaceChildren();
+  const statusList = document.getElementById("publishStatusList");
+  statusList.replaceChildren();
+  Object.keys(STATUS_META).forEach((status) => {
+    const label = document.createElement("label");
+    label.className = "publish-scope-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.value = status;
+    checkbox.addEventListener("change", updatePublishScopeState);
+    const text = document.createElement("span");
+    text.textContent = status;
+    label.append(checkbox, text);
+    statusList.append(label);
+  });
   draft.sections.forEach((section, index) => {
     const label = document.createElement("label");
     label.className = "publish-scope-option";
@@ -3703,7 +4069,10 @@ function resolvePublishScope(accepted) {
     : null;
   elements.publishScopeModal.hidden = true;
   syncBodyModalOverflow();
-  resolve(sectionIds);
+  resolve(accepted ? {
+    sectionIds,
+    statuses: new Set([...document.querySelectorAll('#publishStatusList input:checked')].map((input) => input.value)),
+  } : null);
 }
 
 async function publishToJira() {
@@ -3713,21 +4082,12 @@ async function publishToJira() {
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
-    let sectionIds = null;
-    if (draft.sections.length > 1) {
-      sectionIds = await askPublishScope();
-      if (!sectionIds) return;
-    }
+    const scope = await askPublishScope();
+    if (!scope) return;
+    const { sectionIds, statuses } = scope;
     const issue = parseIssueUrl(draft.issueUrl);
     const settings = {};
     await checkBackendCompatibility();
-    if (draft.sections.length <= 1) {
-      const confirmed = await askConfirmation(
-        `Опубликовать отчёт комментарием в задаче ${issue.issueKey}?`,
-        { title: "Отправка в Jira", confirmText: "Отправить" },
-      );
-      if (!confirmed) return;
-    }
     publishAbortController = new AbortController();
     openPublishProgress();
     setPublishProgress({ step: "prepare", percent: 8, status: "Подготовка отчёта" });
@@ -3737,6 +4097,7 @@ async function publishToJira() {
     await uploadPendingImages(settings, issue, {
       signal: publishAbortController.signal,
       sectionIds,
+      statuses,
       onProgress: ({ done, total }) => {
         const percent = total ? 15 + Math.round((done / total) * 45) : 55;
         setPublishProgress({
@@ -3746,7 +4107,7 @@ async function publishToJira() {
         });
       },
     });
-    const comment = { format: "wiki", body: generateMarkup({ sectionIds }) };
+    const comment = { format: "wiki", body: generateMarkup({ sectionIds, statuses }) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const results = await publishCommentWithFallback(settings, issue, comment, publishAbortController.signal);
     setPublishProgress({ step: "verify", percent: 96, status: "Проверка созданного комментария" });
@@ -3773,7 +4134,7 @@ async function publishToJira() {
       error: message,
     });
     showToast(message, 9000);
-    if (shouldOpenJiraSettings(error)) openJiraSettings();
+    if (shouldOpenJiraSettings(error)) { openJiraSettings(); setSettingsSection("jira"); }
   } finally {
     publishInProgress = false;
     publishAbortController = null;
@@ -4237,7 +4598,7 @@ function applyColumnWidth(context, width) {
     context.sectionElement,
     context.columnIndex,
     context.column.width,
-    52 + 164 + 46 + context.section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0),
+    getSectionTableWidth(context.section),
   );
   scheduleSave();
 }
@@ -4664,6 +5025,12 @@ function closeFeedback() {
 }
 
 async function insertImages(files) {
+  pwaPendingOperations++;
+  try { return await insertImagesForPwa(files); }
+  finally { pwaPendingOperations--; }
+}
+
+async function insertImagesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
   for (const file of [...files]) {
     if (!isImageLikeFile(file)) continue;
@@ -4719,6 +5086,12 @@ function createFileCardHtml({ id, name, type, size, dataUrl }) {
 }
 
 async function insertFiles(files) {
+  pwaPendingOperations++;
+  try { return await insertFilesForPwa(files); }
+  finally { pwaPendingOperations--; }
+}
+
+async function insertFilesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
   for (const file of [...files]) {
     if (isImageLikeFile(file)) continue;
@@ -4811,6 +5184,12 @@ async function copyFileLink(card) {
 }
 
 async function uploadEditorObjectToStorage(object, kind) {
+  pwaPendingOperations++;
+  try { return await uploadEditorObjectToStorageForPwa(object, kind); }
+  finally { pwaPendingOperations--; }
+}
+
+async function uploadEditorObjectToStorageForPwa(object, kind) {
   const isImage = kind === "image";
   const source = isImage ? object.querySelector("img")?.src : object.dataset.dataUrl;
   if (!source) return showToast("У объекта нет данных для загрузки");
@@ -5148,7 +5527,7 @@ function startImageResize(event, figure) {
 }
 
 function collectLocalImages(options = {}) {
-  const { sectionIds = null } = options;
+  const { sectionIds = null, statuses = null } = options;
   const images = [];
   const container = document.createElement("div");
   const usedNumbers = [];
@@ -5194,7 +5573,7 @@ function collectLocalImages(options = {}) {
     });
   };
   collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of sectionsForPublication(sectionIds)) {
+  for (const section of sectionsForPublication(sectionIds, draft, statuses)) {
     for (const row of section.rows) {
       for (const [columnId, html] of Object.entries(row.cells)) {
         collectFromHtml(html, {
@@ -5210,7 +5589,7 @@ function collectLocalImages(options = {}) {
 }
 
 function collectLocalFiles(options = {}) {
-  const { sectionIds = null } = options;
+  const { sectionIds = null, statuses = null } = options;
   const files = [];
   const collectFromHtml = (html, location) => {
     const container = document.createElement("div");
@@ -5231,7 +5610,7 @@ function collectLocalFiles(options = {}) {
     });
   };
   collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of sectionsForPublication(sectionIds)) {
+  for (const section of sectionsForPublication(sectionIds, draft, statuses)) {
     for (const row of section.rows) {
       for (const [columnId, html] of Object.entries(row.cells)) {
         collectFromHtml(html, {
@@ -5594,7 +5973,7 @@ function buildXlsxWorksheet() {
   const totalColumns = exportDynamicColumns + 2;
   const lastColumn = columnName(totalColumns);
   const bodyColumns = [
-    { width: 7 },
+    { width: Math.max(7, Math.ceil(ChecklistNumbering.columnWidth(draft) / 7)) },
     ...Array.from({ length: exportDynamicColumns }, (_, index) => {
       const widths = draft.sections
         .map((section) => Number(section.columns[index]?.width) || 240)
@@ -5643,11 +6022,12 @@ function buildXlsxWorksheet() {
     rowIndex += 1;
   }
 
+  const rowNumbers = ChecklistNumbering.rowNumbers(draft);
   draft.sections.forEach((section) => {
     const contentRows = section.rows.filter(hasRowContent);
     if (!contentRows.length) return;
     rowIndex += 2;
-    rows.push(xlsxRow(rowIndex, [xlsxCell(`A${rowIndex}`, section.title || "Раздел", 4, sharedStrings)], { height: 24 }));
+    rows.push(xlsxRow(rowIndex, [xlsxCell(`A${rowIndex}`, ChecklistNumbering.sectionTitle(draft, section), 4, sharedStrings)], { height: 24 }));
     merges.push(`A${rowIndex}:${lastColumn}${rowIndex}`);
     rowIndex += 1;
 
@@ -5665,7 +6045,7 @@ function buildXlsxWorksheet() {
     );
     rowIndex += 1;
 
-    contentRows.forEach((row, index) => {
+    contentRows.forEach((row) => {
       const cellContent = Array.from({ length: exportDynamicColumns }, (_, columnIndex) => {
         const column = section.columns[columnIndex];
         const html = column ? row.cells[column.id] || "" : "";
@@ -5675,7 +6055,7 @@ function buildXlsxWorksheet() {
         };
       });
       const values = [
-        `${index + 1}.`,
+        rowNumbers.get(row.id),
         ...cellContent.map((cell) => cell.value),
         row.status || "НЕ ПРОВЕРЕНО",
       ];
@@ -5948,6 +6328,76 @@ async function resetDraft() {
   saveDraft();
   showToast("Создан новый отчёт");
 }
+
+selectionUi.Toggle.addEventListener("click", () => setSelectionMode(!selectionMode));
+selectionUi.Exit.addEventListener("click", () => setSelectionMode(false));
+selectionUi.All.addEventListener("change", () => {
+  selectedRowIds = selectionUi.All.checked ? new Set(draft.sections.flatMap((section) => section.rows.map((row) => row.id))) : new Set();
+  updateSelectionUi();
+});
+for (const status of Object.keys(STATUS_META)) {
+  const label = document.createElement("label");
+  const checkbox = createSelectionCheckbox(status);
+  checkbox.value = status;
+  checkbox.checked = false;
+  checkbox.addEventListener("change", updateSelectionStatusCount);
+  label.append(checkbox, document.createTextNode(status));
+  selectionUi.StatusOptions.append(label);
+}
+function updateSelectionStatusCount() {
+  selectionUi.StatusCount.textContent = `Статусов: ${selectionUi.StatusOptions.querySelectorAll("input:checked").length}`;
+}
+updateSelectionStatusCount();
+selectionUi.StatusButton.addEventListener("click", () => openSelectionMenu("Status"));
+selectionUi.MoveButton.addEventListener("click", () => openSelectionMenu("Move"));
+selectionUi.StatusApply.addEventListener("click", () => {
+  flushDraftFromDom();
+  const statuses = new Set([...selectionUi.StatusOptions.querySelectorAll("input:checked")].map((input) => input.value));
+  selectedRowIds = window.QaReportSelection.selectByStatus(draft.sections, statuses);
+  updateSelectionUi();
+  closeSelectionMenus();
+  selectionUi.StatusButton.focus();
+});
+selectionUi.Search.addEventListener("input", renderSelectionDestinations);
+function setSelectionCreateExpanded(expanded) {
+  selectionUi.CreateForm.hidden = !expanded;
+  selectionUi.NewSection.setAttribute("aria-expanded", String(expanded));
+  selectionUi.NewSection.textContent = `${expanded ? "−" : "＋"} Создать новый раздел`;
+  scheduleStickySectionUpdate();
+}
+selectionUi.NewSection.addEventListener("click", () => {
+  const expanded = selectionUi.CreateForm.hidden;
+  setSelectionCreateExpanded(expanded);
+  if (!expanded) return;
+  if (!selectionUi.NewTitle.value) {
+    selectionUi.NewTitle.value = selectionUi.Search.value.trim() || `Новый раздел ${draft.sections.length + 1}`;
+  }
+  selectionUi.NewTitle.focus({ preventScroll: true });
+  selectionUi.NewTitle.select();
+});
+selectionUi.CreateForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const title = selectionUi.NewTitle.value.trim();
+  if (title) moveSelectedRows(null, title);
+  else selectionUi.NewTitle.focus();
+});
+selectionUi.Delete.addEventListener("click", deleteSelectedRows);
+// Dismiss on the start of an outside interaction, not the click produced when
+// a text-selection gesture starts inside an input and ends outside the popover.
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest(".selection-menu-wrap")) closeSelectionMenus();
+});
+selectionUi.Toolbar.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  const openName = ["Status", "Move"].find((name) => !selectionUi[`${name}Menu`].hidden);
+  if (openName) {
+    closeSelectionMenus();
+    selectionUi[`${openName}Button`].focus();
+  } else setSelectionMode(false);
+});
+new ResizeObserver(scheduleStickySectionUpdate).observe(selectionUi.Toolbar);
+new ResizeObserver(scheduleStickySectionUpdate).observe(document.querySelector(".editor-toolbar"));
 
 elements.addSectionButton.addEventListener("click", () => {
   flushDraftFromDom();
@@ -6565,6 +7015,10 @@ elements.closeJiraSettingsButton.addEventListener("click", closeJiraSettings);
 elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
 elements.publishButton.addEventListener("click", publishToJira);
 elements.publishCancelButton.addEventListener("click", cancelPublishProgress);
+document.getElementById("publishStatusSelectAll").addEventListener("change", (event) => {
+  document.querySelectorAll('#publishStatusList input').forEach((input) => { input.checked = event.target.checked; });
+  updatePublishScopeState();
+});
 elements.publishScopeSelectAll.addEventListener("change", () => {
   elements.publishScopeList.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
     checkbox.checked = elements.publishScopeSelectAll.checked;
@@ -6586,6 +7040,10 @@ elements.saveVersionChoiceButton.addEventListener("click", () => {
 });
 elements.openLocalCopyButton.addEventListener("click", () => openSavedConflictCopy("local"));
 elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCopy("cloud"));
+document.querySelectorAll('.settings-subnav [data-settings-section]').forEach((button) => {
+  button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
+});
+elements.settingsChecklistSectionButton.addEventListener("click", () => setSettingsSection("checklist"));
 elements.settingsJiraSectionButton.addEventListener("click", () => setSettingsSection("jira"));
 elements.settingsHistorySectionButton.addEventListener("click", () => setSettingsSection("history"));
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
@@ -6674,6 +7132,12 @@ draftSyncChannel?.addEventListener("message", (event) => {
   handleRemoteDraftUpdate(event.data.draft);
 });
 window.addEventListener("storage", (event) => {
+  if (event.key === PINNED_COLUMNS_KEY || event.key === null) {
+    pinnedColumns = loadPinnedColumns();
+    applyPinnedColumns();
+    // Keep an open settings form in sync with the shared browser preference.
+    fillPinnedColumnsForm();
+  }
   if (event.key !== STORAGE_KEY || !event.newValue) return;
   try {
     handleRemoteDraftUpdate(JSON.parse(event.newValue));
@@ -6693,7 +7157,9 @@ document.addEventListener("visibilitychange", () => {
     flushPendingDraftSave();
   }
 });
-window.addEventListener("scroll", () => {
+window.addEventListener("scroll", (event) => {
+  // Scrolling an options list does not move its anchor or change the sticky stack.
+  if (event.target === selectionUi.Destinations || event.target === selectionUi.StatusOptions) return;
   closeFloatingMenu();
   scheduleStickySectionUpdate();
 }, true);
@@ -6786,3 +7252,108 @@ openReportFromRoute()
   .catch(() => {})
   .finally(() => checkStoredDraftFreshness());
 handleInboundChecklistImport();
+
+
+// Release notes are presentation data, independent of report documents.
+const whatsNewButton = document.getElementById("whatsNewButton");
+const whatsNewModal = document.getElementById("whatsNewModal");
+const whatsNewClose = document.getElementById("closeWhatsNewButton");
+const RELEASE_SEEN_KEY = "qa-report-release-seen-v1";
+let seenRelease = "";
+try { seenRelease = localStorage.getItem(RELEASE_SEEN_KEY) || ""; } catch {}
+
+function updateReleaseIndicator() {
+  const latest = window.QaReportReleases?.[0];
+  const unread = Boolean(latest && seenRelease !== latest.version);
+  document.getElementById("whatsNewDot").hidden = !unread;
+  whatsNewButton.setAttribute("aria-label", unread ? "Что нового — есть непросмотренные изменения" : "Что нового");
+}
+
+function renderReleaseNotes() {
+  const content = document.getElementById("whatsNewContent");
+  content.replaceChildren();
+  (window.QaReportReleases || []).forEach((release, index) => {
+    const container = document.createElement(index === 0 ? "article" : "details");
+    container.className = "release-entry";
+    const heading = document.createElement(index === 0 ? "h3" : "summary");
+    const version = document.createElement("span");
+    version.textContent = `Версия ${release.version}`;
+    const date = document.createElement("time");
+    date.dateTime = release.date;
+    date.textContent = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${release.date}T00:00:00Z`));
+    heading.append(version, date);
+    container.append(heading);
+    for (const [key, label] of [["new", "Новое"], ["improvements", "Улучшения"], ["fixes", "Исправления"]]) {
+      const changes = release.changes[key] || [];
+      if (!changes.length) continue;
+      const title = document.createElement("h4");
+      title.textContent = label;
+      const list = document.createElement("ul");
+      changes.forEach((change) => {
+        const item = document.createElement("li");
+        item.textContent = change;
+        list.append(item);
+      });
+      container.append(title, list);
+    }
+    content.append(container);
+  });
+}
+
+function closeWhatsNew() {
+  whatsNewModal.hidden = true;
+  syncBodyModalOverflow();
+  whatsNewButton.focus();
+}
+
+whatsNewButton.addEventListener("click", () => {
+  closeHeaderDropdowns();
+  renderReleaseNotes();
+  whatsNewModal.hidden = false;
+  document.getElementById("whatsNewContent").scrollTop = 0;
+  syncBodyModalOverflow();
+  whatsNewClose.focus();
+  seenRelease = window.QaReportReleases?.[0]?.version || "";
+  try { localStorage.setItem(RELEASE_SEEN_KEY, seenRelease); } catch {}
+  updateReleaseIndicator();
+});
+whatsNewClose.addEventListener("click", closeWhatsNew);
+whatsNewModal.addEventListener("click", (event) => {
+  if (event.target === whatsNewModal) closeWhatsNew();
+});
+whatsNewModal.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key === "Escape") { event.preventDefault(); closeWhatsNew(); }
+  if (event.key === "Tab") {
+    const targets = [...whatsNewModal.querySelectorAll("button, summary")];
+    const first = targets[0];
+    const last = targets.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
+window.addEventListener("storage", (event) => {
+  if (event.key === RELEASE_SEEN_KEY || event.key === null) {
+    seenRelease = event.newValue || "";
+    updateReleaseIndicator();
+  }
+});
+updateReleaseIndicator();
+
+// PWA reload is allowed only after a durable local snapshot succeeds.
+let pwaPendingOperations = 0;
+window.preparePwaUpdate = async function () {
+  if (publishInProgress || pwaPendingOperations || codeEditorIsDirty() ||
+      document.querySelector('.modal-backdrop:not([hidden])')) {
+    throw new Error('Завершите текущую операцию и закройте диалог перед обновлением.');
+  }
+  clearTimeout(saveTimer);
+  if (await saveDraft() === false) throw new Error('Сначала разрешите конфликт версий чек-листа.');
+  await saveReportSnapshot('before-update');
+};
+
+document.getElementById('openJiraConnectionsButton').addEventListener('click', () => {
+  closeHeaderDropdowns();
+  openJiraSettings();
+  setSettingsSection('jira');
+});

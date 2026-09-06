@@ -172,6 +172,7 @@ const MIME_TYPES = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".png": "image/png",
   ".gif": "image/gif",
   ".svg": "image/svg+xml",

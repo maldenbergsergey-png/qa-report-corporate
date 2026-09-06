@@ -8,6 +8,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { createSessionToken } = require("../auth");
 
+const { freePort, waitForStartup } = require("./server-fixture");
 const SECRET = "integration-session-secret-that-is-at-least-32-bytes";
 function sessionCookie(email = "user-a@example.com") {
   return `query-port-session=${encodeURIComponent(createSessionToken(email, { env: { AUTH_SECRET: SECRET } }))}`;
@@ -53,8 +54,11 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     res.statusCode = 404;
     res.end(JSON.stringify({ error: "not found" }));
   });
-  await new Promise((resolve) => jira.listen(4199, "127.0.0.1", resolve));
+  await new Promise((resolve) => jira.listen(0, "127.0.0.1", resolve));
 
+  const jiraOrigin = `http://127.0.0.1:${jira.address().port}`;
+  const appPort = await freePort();
+  const appOrigin = `http://127.0.0.1:${appPort}`;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-oauth-"));
   const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
   const privateKeyFile = path.join(dir, "jira-private.pem");
@@ -62,35 +66,35 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
   fs.writeFileSync(privateKeyFile, privateKey);
   fs.writeFileSync(encryptionFile, "integration-jira-token-encryption-key-32-bytes-minimum");
   const instances = [
-    { id: "jira7", name: "Jira Legacy", version: "7.3.2", baseUrl: "http://127.0.0.1:4199/jira7" },
-    { id: "jira8", name: "Jira Main", version: "8.11.1", baseUrl: "http://127.0.0.1:4199/jira8" },
+    { id: "jira7", name: "Jira Legacy", version: "7.3.2", baseUrl: `${jiraOrigin}/jira7` },
+    { id: "jira8", name: "Jira Main", version: "8.11.1", baseUrl: `${jiraOrigin}/jira8` },
   ];
   const app = spawn(process.execPath, ["server.js"], {
     cwd: path.join(__dirname, ".."),
     env: {
-      ...process.env, NODE_ENV: "test", PORT: "4174", AUTH_SECRET: SECRET,
+      ...process.env, NODE_ENV: "test", HOST: "127.0.0.1", PORT: String(appPort), AUTH_SECRET: SECRET, AUTH_SECRET_FILE: "", QA_REPORT_PUBLIC_URL: appOrigin,
       REPORTS_DB_PATH: path.join(dir, "reports.sqlite"),
       JIRA_INSTANCES_JSON: JSON.stringify(instances), JIRA_OAUTH_CONSUMER_KEY: "qa-report",
       JIRA_OAUTH_PRIVATE_KEY_FILE: privateKeyFile, JIRA_TOKEN_ENCRYPTION_KEY_FILE: encryptionFile,
-      QA_JIRA_ALLOWED_ORIGINS: "http://127.0.0.1:4199", QA_REPORT_TRUST_PROXY: "true",
+      QA_JIRA_ALLOWED_ORIGINS: `${jiraOrigin}`, QA_REPORT_TRUST_PROXY: "true",
       QA_STORAGE_ACCESS_KEY: "", QA_STORAGE_SECRET_KEY: "", QA_STORAGE_ACCESS_KEY_FILE: "", QA_STORAGE_SECRET_KEY_FILE: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
   try {
-    await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 500); app.once("exit", (code) => { clearTimeout(timer); reject(new Error(`server exited ${code}`)); }); });
-    assert.equal((await fetch("http://127.0.0.1:4174/api/health")).status, 200);
-    assert.equal((await fetch("http://127.0.0.1:4174/", { redirect: "manual" })).status, 302);
-    assert.equal((await fetch("http://127.0.0.1:4174/api/reports", { headers: { "X-User-Email": "admin@example.com" } })).status, 401);
+    await waitForStartup(app, appOrigin);
+    assert.equal((await fetch(`${appOrigin}/api/health`)).status, 200);
+    assert.equal((await fetch(`${appOrigin}/`, { redirect: "manual" })).status, 302);
+    assert.equal((await fetch(`${appOrigin}/api/reports`, { headers: { "X-User-Email": "admin@example.com" } })).status, 401);
 
-    const before = await request("http://127.0.0.1:4174/api/jira/connections");
+    const before = await request(`${appOrigin}/api/jira/connections`);
     const beforePayload = await before.json();
     assert.deepEqual(beforePayload.instances.map((item) => item.connected), [false, false]);
 
-    const csrfResponse = await request("http://127.0.0.1:4174/api/auth/csrf");
+    const csrfResponse = await request(`${appOrigin}/api/auth/csrf`);
     const csrfCookie = csrfResponse.headers.get("set-cookie").split(";")[0];
     const { csrfToken } = await csrfResponse.json();
-    const start = await fetch("http://127.0.0.1:4174/api/jira/oauth/start", {
+    const start = await fetch(`${appOrigin}/api/jira/oauth/start`, {
       method: "POST",
       headers: { Cookie: `${sessionCookie()}; ${csrfCookie}`, "Content-Type": "application/json" },
       body: JSON.stringify({ instanceId: "jira7", csrfToken, callbackUrl: "/" }),
@@ -98,25 +102,25 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal(start.status, 200);
     assert.match((await start.json()).authorizeUrl, /\/jira7\/plugins\/servlet\/oauth\/authorize\?oauth_token=request-7/);
 
-    const callback = await request("http://127.0.0.1:4174/api/jira/oauth/callback?oauth_token=request-7&oauth_verifier=verified", { redirect: "manual" });
+    const callback = await request(`${appOrigin}/api/jira/oauth/callback?oauth_token=request-7&oauth_verifier=verified`, { redirect: "manual" });
     assert.equal(callback.status, 302);
     assert.equal(callback.headers.get("location"), "/?jiraConnected=jira7");
 
-    const after = await request("http://127.0.0.1:4174/api/jira/connections");
+    const after = await request(`${appOrigin}/api/jira/connections`);
     const afterPayload = await after.json();
     assert.equal(afterPayload.instances[0].connected, true);
     assert.equal(afterPayload.instances[0].jiraUsername, "user-a");
     assert.equal(afterPayload.instances[1].connected, false);
 
-    const disconnectedAction = await request("http://127.0.0.1:4174/api/jira/test", {
+    const disconnectedAction = await request(`${appOrigin}/api/jira/test`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instanceId: "jira8" }),
     });
     assert.equal(disconnectedAction.status, 409);
     assert.equal((await disconnectedAction.json()).errorCode, "JIRA_AUTH_REQUIRED");
 
-    const comment = await request("http://127.0.0.1:4174/api/jira/comment", {
+    const comment = await request(`${appOrigin}/api/jira/comment`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ issueUrl: "http://127.0.0.1:4199/jira7/browse/QA-1", token: "browser-token", comment: { format: "wiki", body: "Проверено" } }),
+      body: JSON.stringify({ issueUrl: `${jiraOrigin}/jira7/browse/QA-1`, token: "browser-token", comment: { format: "wiki", body: "Проверено" } }),
     });
     assert.equal(comment.status, 201, JSON.stringify(await comment.clone().json()));
     const commentPayload = await comment.json();
@@ -128,7 +132,7 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal(jiraCalls.some((item) => item.authorization?.includes("access-user-a")), true);
     assert.equal(jiraCalls.some((item) => item.body.includes("browser-token")), false);
 
-    const otherUser = await request("http://127.0.0.1:4174/api/jira/test", {
+    const otherUser = await request(`${appOrigin}/api/jira/test`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instanceId: "jira7" }),
     }, "user-b@example.com");
     assert.equal(otherUser.status, 409);

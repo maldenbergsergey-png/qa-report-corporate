@@ -3,10 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f7fb" />
+    <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1f2329" media="(prefers-color-scheme: dark)" />
     <title>QA Report — редактор чек-листов</title>
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=55" />
+    <link rel="stylesheet" href="/styles.css?v=77" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -18,10 +22,23 @@
       <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
       <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></symbol>
-      <symbol id="icon-import" viewBox="0 0 24 24"><path d="M12 3v10m0 0 4-4m-4 4-4-4" /><path d="M5 15v4h14v-4" /></symbol>
-      <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 21V9m0 0 5 5m-5-5-5 5M5 3h14" /></symbol>
+      <symbol id="icon-device" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></symbol>
+      <symbol id="icon-import" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></symbol>
       <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
+      <!-- Jira logomark: https://atlassian.design/foundations/logos -->
+      <symbol id="icon-jira" viewBox="0 0 48 48">
+        <path d="M0 12C0 5.37258 5.37258 0 12 0H36C42.6274 0 48 5.37258 48 12V36C48 42.6274 42.6274 48 36 48H12C5.37258 48 0 42.6274 0 36V12Z" fill="#1868DB"/>
+        <g clip-path="url(#jira-logo-clip)">
+        <path d="M17.9475 31.0469H15.2429C11.1638 31.0469 8.23755 28.5484 8.23755 24.8899H22.7804C23.5341 24.8899 24.0218 25.4252 24.0218 26.1837V40.8178C20.3861 40.8178 17.9475 37.8731 17.9475 33.7684V31.0469ZM25.1303 23.7745H22.4257C18.3466 23.7745 15.4203 21.3206 15.4203 17.6621H29.9631C30.7168 17.6621 31.2489 18.1528 31.2489 18.9113V33.5454C27.6132 33.5454 25.1303 30.6007 25.1303 26.496V23.7745ZM32.3573 16.5467H29.6527C25.5736 16.5467 22.6473 14.0482 22.6473 10.3896H37.1902C37.9439 10.3896 38.4316 10.925 38.4316 11.6389V26.273C34.7959 26.273 32.3573 23.3283 32.3573 19.2236V16.5467Z" fill="white"/>
+        </g>
+        <defs>
+        <clipPath id="jira-logo-clip">
+        <rect width="30.1941" height="30.4281" fill="white" transform="translate(8.23755 10.3901)"/>
+        </clipPath>
+        </defs>
+      </symbol>
       <symbol id="icon-ticket" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2Z" /><path d="M9 9h6M9 13h4" /></symbol>
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
       <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></symbol>
@@ -125,8 +142,8 @@
 
         <div class="header-integrations">
           <div class="header-dropdown">
-            <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu">
-              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg>
+            <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu" aria-label="Jira" title="Jira">
+              <svg class="ui-icon dropdown-leading-icon jira-logo" aria-hidden="true"><use href="#icon-jira"></use></svg>
               <span>Jira</span>
               <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
@@ -138,6 +155,11 @@
               <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
                 <svg class="ui-icon primary-action-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
                 <span class="primary-action-label">Отправить в Jira</span>
+              </button>
+              <div class="header-dropdown-divider" role="separator"></div>
+              <button class="header-dropdown-item" id="openJiraConnectionsButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
+                <span>Настройки подключения</span>
               </button>
             </div>
           </div>
@@ -163,6 +185,17 @@
               </button>
             </div>
           </div>
+          <button class="header-icon-button" id="installAppButton" type="button" title="Установить QA Report" aria-label="Установить QA Report" hidden>
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
+          </button>
+          <button class="pwa-update-button" id="updateAppButton" type="button" title="Новая версия готова. Сохранить чек-лист и обновить приложение" hidden>
+            <span class="pwa-update-dot" aria-hidden="true"></span><span id="updateAppLabel">Обновить</span>
+          </button>
+          <span id="updateAppAnnouncement" class="pwa-sr-only" role="status" aria-live="polite"></span>
+          <button class="header-icon-button whats-new-button" id="whatsNewButton" type="button" title="Что нового" aria-label="Что нового" aria-haspopup="dialog" aria-controls="whatsNewModal">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/></svg>
+            <span class="whats-new-dot" id="whatsNewDot" hidden aria-hidden="true"></span>
+          </button>
           <button class="header-icon-button" id="settingsButton" type="button" title="Настройки" aria-label="Настройки">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
           </button>
@@ -218,6 +251,10 @@
           </div>
 
           <div class="editor-toolbar" role="toolbar" aria-label="Форматирование текста">
+            <button type="button" id="selectionToggle" class="toolbar-icon-button" title="Выделение строк" aria-label="Выделение строк" aria-pressed="false" aria-controls="selectionToolbar">
+              <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 12 3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
+            <span class="toolbar-divider"></span>
             <select id="blockFormat" title="Стиль текста" aria-label="Стиль текста">
               <option value="p">Обычный текст</option>
               <option value="h2">Заголовок 2</option>
@@ -266,6 +303,35 @@
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
             </button>
             <input id="imageInput" type="file" multiple hidden />
+          </div>
+          <div id="selectionToolbar" class="selection-toolbar" role="region" aria-label="Выделение строк" hidden>
+            <label class="selection-all"><input id="selectionAll" type="checkbox" /> Выбрать всё</label>
+            <span id="selectionCount" class="selection-count" role="status" aria-live="polite">Выбрано: 0</span>
+            <div class="selection-menu-wrap">
+              <button id="selectionStatusButton" type="button" aria-expanded="false" aria-controls="selectionStatusMenu">По статусу <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+              <div id="selectionStatusMenu" class="selection-menu" hidden>
+                <strong>Выбрать строки по статусу</strong>
+                <div id="selectionStatusOptions"></div>
+                <div class="selection-menu-footer"><span id="selectionStatusCount"></span><button id="selectionStatusApply" type="button" class="button button-primary">Применить</button></div>
+              </div>
+            </div>
+            <div class="selection-menu-wrap">
+              <button id="selectionMoveButton" type="button" aria-expanded="false" aria-controls="selectionMoveMenu" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-section-split"></use></svg> Перенести в раздел <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+              <div id="selectionMoveMenu" class="selection-menu selection-move-menu" hidden>
+                <label class="selection-search-label" for="selectionSearch">Найти раздел</label>
+                <input id="selectionSearch" type="search" placeholder="Поиск раздела…" autocomplete="off" />
+                <div id="selectionDestinations" class="selection-destinations"></div>
+                <button id="selectionNewSection" type="button" aria-expanded="false" aria-controls="selectionCreateForm">＋ Создать новый раздел</button>
+                <form id="selectionCreateForm" hidden>
+                  <label for="selectionNewTitle">Название нового раздела</label>
+                  <input id="selectionNewTitle" type="text" placeholder="Название раздела" required maxlength="200" />
+                  <small>Новый раздел появится в конце списка разделов после подтверждения.</small>
+                  <button type="submit" class="button button-primary">Перенести в новый раздел</button>
+                </form>
+              </div>
+            </div>
+            <button id="selectionDelete" type="button" class="selection-delete" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-trash"></use></svg> Удалить</button>
+            <button id="selectionExit" type="button" class="selection-exit">× <span>Выйти из режима выделения</span></button>
           </div>
           <div class="link-popover" id="linkPopover" hidden>
             <div class="link-popover-heading">
@@ -391,19 +457,37 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="whatsNewModal" hidden>
+      <section class="modal whats-new-modal" role="dialog" aria-modal="true" aria-labelledby="whatsNewTitle">
+        <header class="modal-header">
+          <h2 id="whatsNewTitle">Что нового</h2>
+          <button class="icon-button" id="closeWhatsNewButton" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="whats-new-body" id="whatsNewContent"></div>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="publishScopeModal" hidden>
       <section class="modal publish-scope-modal" role="dialog" aria-modal="true" aria-labelledby="publishScopeTitle">
         <header class="modal-header">
           <div>
             <div class="eyebrow">Jira</div>
-            <h2 id="publishScopeTitle">Выберите разделы</h2>
+            <h2 id="publishScopeTitle">Что отправить в Jira</h2>
           </div>
           <button class="icon-button" id="closePublishScopeButton" type="button" aria-label="Закрыть">×</button>
         </header>
         <div class="publish-scope-body">
           <p class="publish-scope-hint">
-            В комментарий и вложения попадут только отмеченные разделы.
+            В комментарий и вложения попадут строки с выбранными статусами из отмеченных разделов.
           </p>
+          <h3 class="publish-scope-heading">Статусы строк</h3>
+          <label class="publish-scope-option publish-scope-option-all">
+            <input id="publishStatusSelectAll" type="checkbox" checked />
+            <span>Все статусы</span>
+          </label>
+          <div id="publishStatusList" class="publish-status-list"></div>
+          <p class="publish-scope-hint">Разделы без подходящих строк не будут отправлены.</p>
+          <h3 class="publish-scope-heading">Разделы</h3>
           <label class="publish-scope-option publish-scope-option-all">
             <input id="publishScopeSelectAll" type="checkbox" checked />
             <span>Все разделы</span>
@@ -411,7 +495,7 @@
           <div class="publish-scope-list" id="publishScopeList"></div>
         </div>
         <footer class="modal-footer">
-          <span id="publishScopeSummary"></span>
+          <span id="publishScopeSummary" aria-live="polite"></span>
           <div class="modal-actions">
             <button class="button button-ghost" id="cancelPublishScopeButton" type="button">Отмена</button>
             <button class="button button-primary" id="acceptPublishScopeButton" type="button">Отправить в Jira</button>
@@ -582,13 +666,21 @@
         <header class="modal-header">
           <div>
             <div class="eyebrow">Настройки</div>
-            <h2 id="jiraSettingsTitle">Интеграции</h2>
+            <h2 id="jiraSettingsTitle">Настройки приложения</h2>
           </div>
           <button class="icon-button" id="closeJiraSettingsButton" type="button" aria-label="Закрыть настройки">×</button>
         </header>
         <div class="settings-layout">
           <nav class="settings-sidebar" aria-label="Разделы настроек">
-            <button class="settings-nav-item active" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
+            <button class="settings-nav-item settings-nav-parent" id="settingsChecklistSectionButton" type="button">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-list-ordered"></use></svg>
+              <span>Чек-лист</span>
+            </button>
+            <div class="settings-subnav" aria-label="Настройки чек-листа">
+              <button class="settings-nav-item active" type="button" data-settings-section="checklist">Нумерация</button>
+              <button class="settings-nav-item" type="button" data-settings-section="pinning">Закрепление столбцов</button>
+            </div>
+            <button class="settings-nav-item" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-send"></use></svg>
               <span>Jira</span>
             </button>
@@ -598,7 +690,40 @@
             </button>
           </nav>
           <div class="settings-body">
-            <section class="settings-section active" id="settingsJiraSection" data-settings-panel="jira">
+            <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
+              <fieldset class="numbering-settings">
+                <legend>Нумерация пунктов</legend>
+                <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. Номера автоматически обновляются при изменении порядка разделов и строк.</p>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="numberingMode" value="section" checked />
+                  <span><strong>В каждом разделе с 1</strong><small>Каждый раздел начинается заново.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 1, 2, 3</span></span>
+                </label>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="numberingMode" value="continuous" />
+                  <span><strong>Сквозная по всему чек-листу</strong><small>Нумерация продолжается между разделами.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 4, 5, 6</span></span>
+                </label>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="numberingMode" value="hierarchical" />
+                  <span><strong>По номеру раздела и пункта</strong><small>Сначала номер раздела, затем номер пункта через точку.</small><span class="numbering-example">Раздел 1: 1.1, 1.2, 1.3 · Раздел 2: 2.1, 2.2, 2.3</span></span>
+                </label>
+              </fieldset>
+            </section>
+            <section class="settings-section" id="settingsPinningSection" data-settings-panel="pinning" hidden>
+              <fieldset class="numbering-settings">
+                <legend>Закрепление столбцов</legend>
+                <p class="settings-note">Для всех чек-листов в этом браузере, включая новые. Закреплённые столбцы остаются видимыми при горизонтальной прокрутке.</p>
+                <label class="settings-toggle-card pinning-option">
+                  <input id="pinNumberColumn" type="checkbox" />
+                  <span><strong>Закрепить номер слева</strong><small>Номер пункта всегда остаётся у левого края таблицы.</small></span>
+                </label>
+                <label class="settings-toggle-card pinning-option">
+                  <input id="pinStatusColumn" type="checkbox" />
+                  <span><strong>Закрепить статус справа</strong><small>Статус всегда остаётся у правого края таблицы.</small></span>
+                </label>
+                <p class="pinning-hint">Можно включить оба варианта: остальные столбцы будут прокручиваться между номером и статусом.</p>
+              </fieldset>
+            </section>
+            <section class="settings-section" id="settingsJiraSection" data-settings-panel="jira" hidden>
               <div class="settings-note">
                 Подключите каждую Jira один раз. После подтверждения задачи, комментарии и вложения создаются от вашей Jira-учётной записи и с вашими правами.
               </div>
@@ -635,7 +760,7 @@
         <footer class="modal-footer settings-footer" id="settingsFooter" hidden>
           <button class="button button-primary" id="saveJiraSettingsButton" type="button">
             <span class="settings-save-check" id="settingsSaveCheck" aria-hidden="true" hidden>✓</span>
-            Сохранить настройки
+            <span class="settings-save-label">Сохранить настройки</span>
           </button>
         </footer>
       </section>
@@ -708,7 +833,10 @@
         <div class="section-sticky-block">
           <header class="section-header">
             <div class="drag-handle" title="Перетащить раздел" aria-label="Перетащить раздел">⋮⋮</div>
-            <input class="section-title" type="text" placeholder="Название раздела" />
+            <div class="section-title-group">
+              <span class="section-number"></span>
+              <input class="section-title" type="text" placeholder="Название раздела" />
+            </div>
             <div class="section-actions">
               <button class="icon-button move-section-up" type="button" title="Поднять раздел">↑</button>
               <button class="icon-button move-section-down" type="button" title="Опустить раздел">↓</button>
@@ -736,6 +864,9 @@
     </template>
 
     <script src="/jira-markup-import.js?v=1"></script>
-    <script src="/app.js?v=61"></script>
+    <script src="/checklist-selection.js?v=2"></script>
+    <script src="/checklist-numbering.js?v=2"></script>
+    <script src="/release-notes.js?v=1"></script>
+    <script src="/app.js?v=85"></script>
   </body>
 </html>

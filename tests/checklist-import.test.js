@@ -7,8 +7,9 @@ const path = require("node:path");
 const { createSessionToken } = require("../auth");
 
 const SESSION_SECRET = "checklist-import-session-secret-at-least-32-bytes";
-const PORT = 4175;
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+const { freePort, waitForStartup } = require("./server-fixture");
+let PORT;
+let ORIGIN;
 
 function sessionCookie() {
   const token = createSessionToken("user@example.com", {
@@ -17,21 +18,10 @@ function sessionCookie() {
   return `query-port-session=${encodeURIComponent(token)}`;
 }
 
-async function waitForServer(app) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (app.exitCode !== null) throw new Error(`server exited ${app.exitCode}`);
-    try {
-      const response = await fetch(`${ORIGIN}/api/health`);
-      if (response.ok) return;
-    } catch {
-      // Server startup can take a few polling attempts.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("server did not start");
-}
 
 test("QA Assistant creates a public import and the user opens it under an AD session", async () => {
+  PORT = await freePort();
+  ORIGIN = `http://127.0.0.1:${PORT}`;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-checklist-import-"));
   const app = spawn(process.execPath, ["server.js"], {
     cwd: path.join(__dirname, ".."),
@@ -40,7 +30,7 @@ test("QA Assistant creates a public import and the user opens it under an AD ses
       NODE_ENV: "test",
       HOST: "127.0.0.1",
       PORT: String(PORT),
-      AUTH_SECRET: SESSION_SECRET,
+      AUTH_SECRET: SESSION_SECRET, AUTH_SECRET_FILE: "",
       QA_REPORT_PUBLIC_URL: "https://qa-report.example.com",
       REPORTS_DB_PATH: path.join(dir, "reports.sqlite"),
       QA_STORAGE_ACCESS_KEY: "",
@@ -60,7 +50,7 @@ test("QA Assistant creates a public import and the user opens it under an AD ses
   });
 
   try {
-    await waitForServer(app);
+    await waitForStartup(app, ORIGIN);
 
     const created = await fetch(`${ORIGIN}/api/checklists/import`, {
       method: "POST",

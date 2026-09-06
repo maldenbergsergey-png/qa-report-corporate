@@ -7,10 +7,10 @@
     <meta name="theme-color" content="#1f2329" media="(prefers-color-scheme: dark)" />
     <title>QA Report — редактор чек-листов</title>
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=77" />
+    <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=81" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -76,12 +76,10 @@
       <header class="topbar">
         <div class="header-brand-group">
           <a class="brand" href="#" aria-label="QA Report">
-            <span class="brand-mark">
-              QA
-            </span>
+            <span class="brand-mark" aria-hidden="true"></span>
             <span class="brand-copy">
-              <strong>QA Report</strong>
-              <small>Редактор чек-листов</small>
+              <strong>Report</strong>
+              <small>редактор чек-листов</small>
             </span>
           </a>
           <div class="save-state" id="saveState">
@@ -189,7 +187,8 @@
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
           </button>
           <button class="pwa-update-button" id="updateAppButton" type="button" title="Новая версия готова. Сохранить чек-лист и обновить приложение" hidden>
-            <span class="pwa-update-dot" aria-hidden="true"></span><span id="updateAppLabel">Обновить</span>
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg>
+            <span class="pwa-update-dot" aria-hidden="true"></span><span id="updateAppLabel" class="pwa-sr-only">Обновить</span>
           </button>
           <span id="updateAppAnnouncement" class="pwa-sr-only" role="status" aria-live="polite"></span>
           <button class="header-icon-button whats-new-button" id="whatsNewButton" type="button" title="Что нового" aria-label="Что нового" aria-haspopup="dialog" aria-controls="whatsNewModal">

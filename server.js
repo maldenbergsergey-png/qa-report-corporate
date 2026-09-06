@@ -1743,7 +1743,7 @@ const server = http.createServer(async (request, response) => {
       await handleLogout(request, response);
       return;
     }
-    const publicAsset = requestPath === "/login" || requestPath === "/login.js" || requestPath === "/login-theme.js" || requestPath === "/styles.css" || requestPath === "/favicon.svg";
+    const publicAsset = requestPath === "/icons/brand-light.png" || requestPath === "/icons/brand-dark.png" || requestPath === "/login" || requestPath === "/login.js" || requestPath === "/login-theme.js" || requestPath === "/styles.css" || requestPath === "/favicon.svg";
     if (!request.user && !publicAsset) {
       if (requestPath.startsWith("/api/")) sendJson(response, 401, { error: "Unauthorized" });
       else {

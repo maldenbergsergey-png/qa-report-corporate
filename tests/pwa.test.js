@@ -33,6 +33,14 @@ test('corporate cache never contains editor HTML, API or login responses', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   for (const [, url] of html.matchAll(/(?:src|href)="(\/[^"#]+\.(?:js|css)(?:\?[^"#]*)?)"/g)) assert.ok(w.stored.has(url), url);
 });
+test('Docker image includes every script referenced by the editor', () => {
+  const root = path.resolve(__dirname, '..');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+  for (const match of html.matchAll(/<script[^>]+src="\/([^"?]+\.js)(?:\?[^"#]*)?"/g)) {
+    assert.match(dockerfile, new RegExp(`(?:^|\\s)${match[1].replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(?:\\s|$)`, 'm'), match[1]);
+  }
+});
 test('navigation preserves server authorization redirect even with a cached editor', async () => {
   const response = new Response(null, { status: 302, headers: { Location: '/login' } });
   const w = worker(async () => response); w.stored.set('/', new Response('PRIVATE EDITOR'));

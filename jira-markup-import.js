@@ -204,7 +204,7 @@
     );
     source = source.replace(/!([^|!\n]+)(?:\|([^!\n]*))?!/g, (_, rawFilename, options = "") => {
       const filename = rawFilename.trim();
-      const attachment = attachmentByName.get(filename);
+      const attachment = attachments.filter(item => item.filename === filename).length === 1 ? attachmentByName.get(filename) : null;
       const attachmentUrl = safeHttpUrl(attachment?.content);
       const thumbnailUrl = safeHttpUrl(attachment?.thumbnail);
       const externalUrl = safeHttpUrl(filename);
@@ -225,6 +225,12 @@
       return protect(
         `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${escapeHtml(src)}" alt="${escapeHtml(filename)}"${attachmentId} data-file-name="${escapeHtml(filename)}" data-jira-name="${escapeHtml(filename)}"${jiraId} data-jira-url="${escapeHtml(attachmentUrl || externalUrl)}"${jiraThumbnail}${jiraOptions}></figure>`,
       );
+    });
+    source = source.replace(/\[\^([^\]\r\n]+)\]/g, (_, rawName) => {
+      const name = rawName.trim();
+      const matches = attachments.filter(item => item.filename === name);
+      const attachment = matches.length === 1 ? matches[0] : null;
+      return protect(`<span class="jira-file-placeholder" data-jira-name="${escapeHtml(name)}"${attachment?.id ? ` data-jira-id="${escapeHtml(attachment.id)}"` : ""}>${escapeHtml(name)}</span>`);
     });
     const replaceWikiLinks = (input) => {
       let output = "";

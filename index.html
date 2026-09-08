@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=88" />
+    <link rel="stylesheet" href="/styles.css?v=89" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -129,6 +129,7 @@
             </button>
           </div>
           <div class="header-action-group">
+            <button class="header-action" id="localImportButton" type="button" title="Приём от ИИ" aria-label="Приём от ИИ"><svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg><span>Приём от ИИ</span></button>
             <button class="header-action" id="focusModeButton" type="button">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-focus"></use></svg>
               <span>Фокус</span>
@@ -539,6 +540,7 @@
               Вставьте прямую ссылку на комментарий Jira. Подключение берётся из настроек Jira.
             </p>
           </div>
+          <label class="local-import-option"><input id="importWithAttachments" type="checkbox" checked /> Импортировать с вложениями в этот браузер</label>
           <div class="import-warning" id="importWarning" hidden></div>
           <div class="import-summary" id="importSummary" hidden></div>
         </div>
@@ -548,6 +550,23 @@
             <button class="button button-primary" id="applyImportButton" type="button">Импортировать в чек-лист</button>
           </div>
         </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="localImportModal" hidden>
+      <section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="localImportTitle">
+        <header class="modal-header"><div><div class="eyebrow">Автоматизация</div><h2 id="localImportTitle">Приём результатов от ИИ</h2></div><button class="icon-button" id="closeLocalImport" type="button" aria-label="Закрыть приём результатов">×</button></header>
+        <div class="import-body">
+          <p>Агент сможет заполнить этот отчёт и прикрепить скриншоты, логи и другие файлы. Результаты сохранятся в браузере. Включать облачное хранилище не требуется.</p>
+          <p>Оставьте отчёт открытым. Подключение действует 30 минут и прекращается при смене отчёта или нажатии «Остановить».</p>
+          <p>Изменённые вами ячейки защищены от перезаписи устаревшими результатами агента.</p>
+          <div class="import-summary" id="localImportStatus" role="status" aria-live="polite">Приём выключен</div>
+        </div>
+        <footer class="modal-footer"><div class="modal-actions">
+          <button class="button" id="stopLocalImport" type="button" disabled>Остановить</button>
+          <button class="button" id="copyLocalImport" type="button" disabled>Скопировать для агента</button>
+          <button class="button button-primary" id="startLocalImport" type="button">Включить приём</button>
+        </div></footer>
       </section>
     </div>
 
@@ -881,11 +900,13 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=2"></script>
+    <script src="/jira-markup-import.js?v=3"></script>
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=3"></script>
-    <script src="/app.js?v=91"></script>
+    <script src="/release-notes.js?v=4"></script>
+    <script src="/attachment-import.js?v=1"></script>
+    <script src="/app.js?v=92"></script>
+    <script src="/local-import-client.js?v=1"></script>
   </body>
 </html>

@@ -33,7 +33,13 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       res.end("oauth_token=access-user-a&oauth_token_secret=access-secret");
       return;
     }
+    if (req.url === "/jira7/secure/attachment/42/screen.png") {
+      res.setHeader("Content-Type", "image/png"); res.end(Buffer.from("iVBORw0KGgo=", "base64")); return;
+    }
     res.setHeader("Content-Type", "application/json");
+    if (req.url === "/jira7/rest/api/2/issue/QA-1?fields=attachment") {
+      res.end(JSON.stringify({ fields: { attachment: [{ id: "42", filename: "screen.png", mimeType: "image/png", content: `http://${req.headers.host}/jira7/secure/attachment/42/screen.png` }] } })); return;
+    }
     if (req.url === "/jira7/rest/api/2/myself") {
       res.end(JSON.stringify({ name: "user-a", emailAddress: "user-a@example.com", displayName: "User A", active: true }));
       return;
@@ -124,7 +130,7 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     });
     assert.equal(comment.status, 201, JSON.stringify(await comment.clone().json()));
     const commentPayload = await comment.json();
-    assert.equal(commentPayload.apiRevision, 6);
+    assert.equal(commentPayload.apiRevision, 7);
     assert.equal(commentPayload.verified, true);
     assert.match(commentPayload.commentId, /^\d+$/);
     const jiraCalls = received.filter((item) => item.url.startsWith("/jira7/rest/api/2/"));
@@ -132,6 +138,28 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal(jiraCalls.some((item) => item.authorization?.includes("access-user-a")), true);
     assert.equal(jiraCalls.some((item) => item.body.includes("browser-token")), false);
 
+    const fileBody = JSON.stringify({ commentUrl: `${jiraOrigin}/jira7/browse/QA-1?focusedCommentId=10001`, attachmentId: "42" });
+    const downloaded = await request(`${appOrigin}/api/jira/import-attachment`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: fileBody,
+    });
+    assert.equal(downloaded.status, 200);
+    assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), Buffer.from("iVBORw0KGgo=", "base64"));
+    assert.match(received.find(item => item.url.includes("/secure/attachment/")).authorization, /^OAuth /);
+    assert.equal((await request(`${appOrigin}/api/jira/import-attachment`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: fileBody,
+    }, "user-b@example.com")).status, 409);
+
+    const createBody = { reportId: "local-report", context: { sections: [] }, csrfToken };
+    assert.equal((await fetch(`${appOrigin}/api/local-import/sessions`, { method: "POST", headers: { "X-QA-Import-Request": "1" }, body: JSON.stringify(createBody) })).status, 401);
+    assert.equal((await request(`${appOrigin}/api/local-import/sessions`, { method: "POST", headers: { "X-QA-Import-Request": "1" }, body: JSON.stringify(createBody) })).status, 403);
+    const localSessionResponse = await fetch(`${appOrigin}/api/local-import/sessions`, {
+      method: "POST", headers: { Cookie: `${sessionCookie()}; ${csrfCookie}`, "Content-Type": "application/json", "X-QA-Import-Request": "1" }, body: JSON.stringify(createBody),
+    });
+    assert.equal(localSessionResponse.status, 201);
+    const localSession = await localSessionResponse.json();
+    assert.equal((await fetch(`${localSession.connection.url}/context`, { headers: { "X-QA-Import-Token": localSession.connection.token } })).status, 200);
+    assert.equal((await fetch(`${appOrigin}/api/local-import/sessions/${localSession.id}/next`, { headers: { "X-QA-Import-Request": "1", "X-QA-Import-Reader": localSession.consumerToken } })).status, 401);
+    assert.equal((await request(`${appOrigin}/api/local-import/sessions/${localSession.id}/next`, { headers: { "X-QA-Import-Request": "1", "X-QA-Import-Reader": localSession.consumerToken } }, "user-b@example.com")).status, 404);
     const otherUser = await request(`${appOrigin}/api/jira/test`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instanceId: "jira7" }),
     }, "user-b@example.com");

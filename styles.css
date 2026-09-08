@@ -4906,3 +4906,14 @@ body.pin-number-columns .section-header-table .number-header::before,
   cursor: not-allowed;
 }
 .row-drag-handle[hidden] { display:none !important; }
+
+.local-import-option { display: flex; align-items: center; gap: 10px; margin: 16px 0; font-size: 14px; }
+.local-import-active { color: var(--accent, #22a06b); }
+.attachment-import-error { color: var(--danger, #c9372c); }
+#localImportModal .modal-actions { flex-wrap: wrap; }
+#localImportStatus { overflow-wrap: anywhere; }
+
+#localImportModal .import-modal { width: min(680px, calc(100vw - 32px)); height: auto; min-height: 0; }
+#localImportModal .import-body { display: block; min-height: 0; }
+#localImportModal .import-body p { margin: 0 0 14px; }
+#localImportModal .button:disabled { opacity: .5; cursor: default; }

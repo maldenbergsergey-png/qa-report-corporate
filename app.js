@@ -10,7 +10,7 @@ const DB_NAME = "qa-report-editor";
 const DB_VERSION = 1;
 const REPORT_STORE = "reports";
 const HISTORY_LIMIT = 50;
-const REQUIRED_API_REVISION = 5;
+const REQUIRED_API_REVISION = 7;
 const FILE_ATTACHMENT_MAX_SIZE = 50 * 1024 * 1024;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
 const { parseJiraMarkup, normalizeStatus, stripSectionNumber } = window.QaReportJiraImport;
@@ -875,25 +875,26 @@ function issueKeyFromUrl(value) {
   }
 }
 
-async function saveReportSnapshot(reason = "manual") {
-  flushDraftFromDom();
+async function saveReportSnapshot(reason = "manual", candidate = null) {
+  if (!candidate) flushDraftFromDom();
+  const snapshot = candidate || draft;
   const now = new Date().toISOString();
-  const existing = await getReportRecord(draft.reportId);
-  const issueKey = issueKeyFromUrl(draft.issueUrl);
+  const existing = await getReportRecord(snapshot.reportId);
+  const issueKey = issueKeyFromUrl(snapshot.issueUrl);
   const record = {
-    id: draft.reportId,
-    publicId: draft.publicId,
-    title: `${issueKey || "Без задачи"} — ${draft.environment}`,
-    issueUrl: draft.issueUrl,
+    id: snapshot.reportId,
+    publicId: snapshot.publicId,
+    title: `${issueKey || "Без задачи"} — ${snapshot.environment}`,
+    issueUrl: snapshot.issueUrl,
     issueKey,
-    environment: draft.environment,
-    overallStatus: draft.overallStatus,
+    environment: snapshot.environment,
+    overallStatus: snapshot.overallStatus,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastOpenedAt: now,
     reason,
     historyComment: existing?.historyComment || "",
-    document: clone(draft),
+    document: clone(snapshot),
     schemaVersion: 3,
   };
   await dbTransaction("readwrite", (store) => store.put(record));
@@ -902,7 +903,8 @@ async function saveReportSnapshot(reason = "manual") {
   } else if (!["before-import", "before-inbound-import"].includes(reason)) {
     queueServerReportSave(record);
   }
-  await trimReportHistory();
+  if (candidate) trimReportHistory().catch(() => {});
+  else await trimReportHistory();
   return record;
 }
 
@@ -3948,7 +3950,7 @@ function shouldOpenJiraSettings(error) {
 }
 
 async function jiraRequest(path, body, options = {}) {
-  const { signal, retries = 0 } = options;
+  const { signal, retries = 0, binary = false } = options;
   let attempt = 0;
   while (true) {
     try {
@@ -3960,6 +3962,7 @@ async function jiraRequest(path, body, options = {}) {
         body: JSON.stringify(safeBody),
         signal,
       });
+      if (binary && response.ok) return response.blob();
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const retryAfter = Number(response.headers.get("Retry-After") || 0);
@@ -5905,23 +5908,38 @@ function applyUploadedAttachments(uploaded) {
 
 async function prepareImport() {
   try {
+    const includeAttachments = document.getElementById("importWithAttachments").checked;
+    let attachmentRequest = {};
     let imported;
+    let importFiles = [];
+    let attachmentErrors = [];
+    let loadedAttachments = 0;
     if (importSource === "markup") {
       imported = parseJiraMarkup(elements.importMarkup.value);
     } else {
       const commentUrl = validateJiraCommentUrl(elements.commentImportUrl.value);
-      const result = await jiraRequest("/api/jira/import-comment", {
-        commentUrl,
-      });
+      attachmentRequest = { commentUrl };
+      const result = await jiraRequest("/api/jira/import-comment", attachmentRequest);
       imported = parseJiraMarkup(result.body, result.attachments || []);
       imported.issueUrl = result.issueUrl || "";
+      importFiles = result.attachments || [];
     }
+    const localized = await window.QaReportAttachments.localize(imported, {
+      attachments: importFiles, include: includeAttachments,
+      load: attachment => jiraRequest("/api/jira/import-attachment", {
+        ...attachmentRequest, attachmentId: attachment.id,
+      }, { binary: true }),
+      onProgress: message => { elements.importSummary.hidden = false; elements.importSummary.textContent = message; },
+    });
+    imported = localized.document; attachmentErrors = localized.errors; loadedAttachments = localized.loaded;
     pendingImportedDraft = imported;
     const rows = imported.sections.reduce((sum, section) => sum + section.rows.length, 0);
     const columns = imported.sections.reduce((sum, section) => sum + section.columns.length, 0);
     elements.importSummary.textContent = `Найдено: ${imported.sections.length} таблиц, ${rows} строк, ${columns} пользовательских колонок. Окружение: ${imported.environment}; итог: ${imported.overallStatus}.`;
     elements.importSummary.hidden = false;
-    elements.importWarning.hidden = true;
+    elements.importSummary.textContent += ` Вложений сохранено: ${loadedAttachments}.`;
+    elements.importWarning.hidden = !attachmentErrors.length;
+    elements.importWarning.textContent = attachmentErrors.join("\n");
     return imported;
   } catch (error) {
     elements.importWarning.textContent = friendlyJiraError(error);
@@ -5968,9 +5986,17 @@ function importedDraftInCurrentReport(imported) {
 }
 
 async function applyImport(mode = "replace") {
+  if (elements.applyImportButton.disabled) return;
+  const reportIdAtStart = draft.reportId;
+  elements.applyImportButton.disabled = true;
+  pwaPendingOperations++;
   try {
     const imported = pendingImportedDraft || (await prepareImport());
+    if (!elements.importWarning.hidden && !await askConfirmation(
+      elements.importWarning.textContent + "\nПродолжить импорт с доступными файлами?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
+    )) return;
     if (mode !== "append" && !await confirmImportReplacement()) return;
+    if (draft.reportId !== reportIdAtStart) throw new Error("Открыт другой отчёт. Повторите импорт в нужном отчёте");
     await saveReportSnapshot("before-import");
     if (mode === "append") {
       draft.sections.push(...clone(imported.sections));
@@ -5981,12 +6007,16 @@ async function applyImport(mode = "replace") {
     render();
     scheduleHistoryCommit();
     if (await saveDraft() === false) return;
+    await saveReportSnapshot("import-complete");
     renderEnvironmentOptions(draft.environment);
     updateChecklistUrl(draft.publicId);
     closeImport();
     showToast(`Импортировано таблиц: ${imported.sections.length}`);
   } catch (error) {
     showToast(`Не удалось импортировать: ${error.message}`, 9000);
+  } finally {
+    elements.applyImportButton.disabled = false;
+    pwaPendingOperations--;
   }
 }
 
@@ -7627,3 +7657,7 @@ document.getElementById("resetDefaultColumns").addEventListener("click", () => {
   defaultColumnsDraft = DEFAULT_COLUMNS.map(column => ({ ...column }));
   renderDefaultColumnsSettings(); setSettingsSavedState(false);
 });
+
+for (const input of [elements.importMarkup, elements.commentImportUrl, document.getElementById("importWithAttachments")]) {
+  input.addEventListener("input", () => { pendingImportedDraft = null; });
+}

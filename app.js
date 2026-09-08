@@ -3226,59 +3226,86 @@ function extractCodeText(node) {
   return output.replace(/\u00a0/g, " ").replace(/\n+$/, "");
 }
 
-function htmlToWiki(html) {
+function htmlToWiki(html, {protect = value => value} = {}) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
+  function childrenToWiki(parent) {
+    const parts = [];
+    let inline = "";
+    const flush = () => { if (inline) parts.push({value:inline, gap:1}); inline = ""; };
+    for (const child of parent.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE && child.matches("[data-editor-ui]")) continue;
+      const block = child.nodeType === Node.ELEMENT_NODE && /^(P|DIV|FIGURE|PRE|UL|OL|H[1-6])$/.test(child.tagName);
+      if (!block) { inline += walk(child); continue; }
+      flush();
+      const empty = /^(P|DIV)$/.test(child.tagName) && child.querySelectorAll("br").length <= 1 && [...child.childNodes].every(node =>
+        node.nodeType === Node.TEXT_NODE ? !node.textContent.trim() : node.nodeType === Node.ELEMENT_NODE && node.tagName === "BR");
+      parts.push({value:empty ? "" : walk(child), gap:child.tagName === "P" ? 2 : 1});
+    }
+    flush();
+    let output = "";
+    parts.forEach((part, index) => {
+      if (index) {
+        const previous = parts[index-1];
+        const trailing = previous.value ? (output.match(/\n*$/)?.[0].length || 0) : 0;
+        const leading = part.value.match(/^\n*/)?.[0].length || 0;
+        output += "\n".repeat(Math.max(0, Math.max(previous.gap,part.gap) - trailing - leading));
+      }
+      output += part.value;
+    });
+    return output;
+  }
   function walk(node) {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent;
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
-    if (node.matches?.(".cell-file")) return fileCardToWiki(node);
+    if (node.matches?.("[data-editor-ui]")) return "";
+    if (node.matches?.(".cell-file")) return protect(fileCardToWiki(node));
     if (node.matches?.(".jira-image-placeholder")) {
       const name = node.dataset.jiraName || "image.png";
       const options = node.dataset.jiraOptions;
-      return `!${name}${options ? `|${options}` : ""}!`;
+      return protect(`!${name}${options ? `|${options}` : ""}!`);
     }
-    if (node.matches?.(".jira-file-placeholder")) return `[^${node.dataset.jiraName || "file"}]`;
+    if (node.matches?.(".jira-file-placeholder")) return protect(`[^${node.dataset.jiraName || "file"}]`);
     const tag = node.tagName.toLowerCase();
     if ((tag === "span" && node.style.color) || (tag === "font" && node.getAttribute("color"))) {
-      const content = [...node.childNodes].map(walk).join("");
-      if (!content.trim()) return "";
+      const content = childrenToWiki(node);
+      if (!content.trim()) return content;
       if (/\{color(?::[^}]+)?\}/i.test(content)) return content;
       const color = node.style.color || node.getAttribute("color");
       return `{color:${cssColorToHex(color)}}${content}{color}`;
     }
-    const content = [...node.childNodes].map(walk).join("");
+    const content = childrenToWiki(node);
     if (tag === "strong" || tag === "b") return `*${content}*`;
     if (tag === "em" || tag === "i") return `_${content}_`;
     if (tag === "u") return `+${content}+`;
     if (tag === "s" || tag === "strike") return `-${content}-`;
     if (tag === "sup") return `^${content}^`;
     if (tag === "sub") return `~${content}~`;
-    if (tag === "code" && node.parentElement?.tagName !== "PRE") return `{{${content}}}`;
-    if (tag === "a") return `[${content}|${node.getAttribute("href") || ""}]`;
+    if (tag === "code" && node.parentElement?.tagName !== "PRE") return protect(`{{${content}}}`);
+    if (tag === "a") return protect(`[${content}|${node.getAttribute("href") || ""}]`);
     if (tag === "pre") {
-      return `{code}\n${extractCodeText(node)}\n{code}`;
+      return protect(`{code}\n${extractCodeText(node)}\n{code}`);
     }
     if (tag === "img") {
       const name = node.dataset.jiraName || node.dataset.fileName || node.alt || "image.png";
-      if (isStoredObjectUrl(node.src)) return `[${name}|${node.src}]`;
+      if (isStoredObjectUrl(node.src)) return protect(`[${name}|${node.src}]`);
       const jiraOptions = node.dataset.jiraOptions;
-      if (jiraOptions) return `!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|${jiraOptions}!`;
+      if (jiraOptions) return protect(`!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|${jiraOptions}!`);
       // Ссылка по имени вложения даёт Jira возможность открыть изображение
       // во встроенном просмотрщике, а параметр thumbnail оставляет его компактным.
-      return `!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|thumbnail!`;
+      return protect(`!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|thumbnail!`);
     }
-    if (tag === "figure") return `\n${content}\n`;
+    if (tag === "figure") return content;
     if (tag === "br") return "\n";
-    if (tag === "ul") return [...node.children].map((item) => `* ${walk(item).trim()}`).join("\n");
-    if (tag === "ol") return [...node.children].map((item) => `# ${walk(item).trim()}`).join("\n");
+    if (tag === "ul") return protect("\n" + [...node.children].map((item) => `* ${walk(item).trim()}`).join("\n") + "\n", "list");
+    if (tag === "ol") return protect("\n" + [...node.children].map((item) => `# ${walk(item).trim()}`).join("\n") + "\n", "list");
     if (tag === "li") return content;
     if (/h[1-6]/.test(tag)) return `h${tag.slice(1)}. ${content}\n`;
-    if (tag === "p" || tag === "div") return `${content}\n`;
+    if (tag === "p" || tag === "div") return content;
     return content;
   }
   return normalizeJiraColorMarkup(
-    [...container.childNodes].map(walk).join("").replace(/\n{3,}/g, "\n\n").trim(),
+    childrenToWiki(container).trim(),
   );
 }
 
@@ -3296,56 +3323,26 @@ function normalizeJiraCellWhitespace(value) {
   while (lines[0] === "") lines.shift();
   while (lines.at(-1) === "") lines.pop();
 
-  const normalized = [];
-  for (const line of lines) {
-    if (!line) {
-      if (normalized.length && normalized.at(-1) !== "") normalized.push("");
-      continue;
-    }
-    normalized.push(line);
-  }
-  return normalized.join("\n");
+  return lines.join("\n");
 }
 
 function jiraCell(value) {
-  let content = normalizeJiraColorMarkup(htmlToWiki(value));
   const protectedBlocks = [];
-  content = content.replace(/\{code(?::[^}]+)?\}[\s\S]*?\{code\}/gi, (block) => {
-    const token = `@@JIRA_PROTECTED_${protectedBlocks.length}@@`;
-    protectedBlocks.push(block);
+  const tokenPrefix = `@@JIRA_CELL_${crypto.randomUUID()}_`;
+  // Generate syntax only after escaping text; never run a second escape over it.
+  const escapeCellText = text => text.replace(/\\/g, "&#92;").replace(/\|/g, "\\|");
+  let content = htmlToWiki(value, {protect: (block, kind) => {
+    const token = `${tokenPrefix}${protectedBlocks.length}@@`;
+    protectedBlocks.push(kind === "list" ? escapeCellText(block) : block);
     return token;
-  });
-  content = content.replace(/![^!\r\n]+!/g, (block) => {
-    const token = `@@JIRA_IMAGE_${protectedBlocks.length}@@`;
-    // Jira распознаёт служебную вертикальную черту внутри image markup.
-    // Блок временно вынимается, чтобы общий экранировщик ячейки не превратил
-    // её в часть имени файла.
-    protectedBlocks.push(block);
-    return token;
-  });
-  content = content.replace(/\[[^\]\r\n]+\|https?:\/\/[^\]\r\n]+\]/g, (block) => {
-    const token = `@@JIRA_LINK_${protectedBlocks.length}@@`;
-    protectedBlocks.push(block);
-    return token;
-  });
-  // Если перед image-макросом оставить Jira-перенос `\\`, Jira перестаёт
-  // распознавать изображение и воспринимает `|thumbnail` как новую ячейку.
-  // Поэтому только на границе текста и изображения используем обычный пробел.
-  content = content
-    .replace(/[ \t]*(?:\r?\n)+[ \t]*(?=@@JIRA_IMAGE_\d+@@)/g, " ")
-    .replace(/(@@JIRA_IMAGE_\d+@@)[ \t]*(?:\r?\n)+[ \t]*/g, "$1 ");
-  content = normalizeJiraCellWhitespace(content);
-  content = content
-    .replace(/\\/g, "\\\\")
-    .replace(/\|/g, "\\|")
-    .replace(/[ \t]*(?:\r?\n)+[ \t]*/g, (breaks) => {
-      const count = (breaks.match(/\n/g) || []).length;
-      return count > 1 ? "\n\u00a0\n" : "\n";
-    });
-  content = content.replace(
-    /@@JIRA_(?:PROTECTED|IMAGE|LINK)_(\d+)@@/g,
-    (_, index) => protectedBlocks[Number(index)] || "",
-  );
+  }});
+  content = escapeCellText(normalizeJiraCellWhitespace(content))
+    // Whitespace separates the break from !image!, {code} and the next break.
+    .replace(/\n/g, "\\\\ ");
+  // Lists/links may contain protected children, so restore parents first.
+  for (let index = protectedBlocks.length - 1; index >= 0; index--) {
+    content = content.split(`${tokenPrefix}${index}@@`).join(protectedBlocks[index]);
+  }
   return content.trim() ? content : " ";
 }
 
@@ -3363,8 +3360,8 @@ function normalizeJiraColorMarkup(value) {
   while (output !== previous) {
     previous = output;
     output = output.replace(
-      /\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}\s*\{color:\1\}([\s\S]*?)\{color\}/gi,
-      "{color:$1}$2$3{color}",
+      /\{color:(#[0-9a-f]{3,8})\}([\s\S]*?)\{color\}(\s*)\{color:\1\}([\s\S]*?)\{color\}/gi,
+      "{color:$1}$2$3$4{color}",
     );
   }
   return output.replace(
@@ -4760,17 +4757,7 @@ function highlightCodeBlocks(root = document) {
 }
 
 function ensureCodeBlockBoundaries(block) {
-  const createParagraph = () => {
-    const paragraph = document.createElement("p");
-    paragraph.innerHTML = "<br>";
-    return paragraph;
-  };
-  if (!block.previousSibling || block.previousSibling.nodeType !== Node.ELEMENT_NODE) {
-    block.before(createParagraph());
-  }
-  if (!block.nextSibling || block.nextSibling.nodeType !== Node.ELEMENT_NODE) {
-    block.after(createParagraph());
-  }
+  ensureMediaBoundaries(block);
 }
 
 function getCodeColumnContext(block) {
@@ -4940,7 +4927,7 @@ function insertCodeSnippet(editor, snippet, range = null) {
   activeEditor = editor;
   const code = formatCode(snippet.code);
   const language = String(snippet.language || detectCodeLanguage(code) || "text").toLowerCase();
-  const html = `<p><br></p>${codeSnippetHtml(language, code, snippet.width)}<p><br></p>`;
+  const html = `${codeSnippetHtml(language, code, snippet.width)}<p><br></p>`;
   insertHtmlAtSelection(html, range);
   highlightCodeBlocks(editor);
 }
@@ -5190,7 +5177,7 @@ function insertCodeBlock() {
   const code = formatCode(selection);
   const language = detectCodeLanguage(code);
   const marker = crypto.randomUUID();
-  const html = `<p><br></p><pre class="cell-code-block" data-new-code="${marker}" data-language="${language}"><code>${escapeHtml(code)}</code></pre><p><br></p>`;
+  const html = `<pre class="cell-code-block" data-new-code="${marker}" data-language="${language}"><code>${escapeHtml(code)}</code></pre><p><br></p>`;
   insertHtmlAtSelection(html, range);
   highlightCodeBlocks(activeEditor);
   const inserted = activeEditor.querySelector(`pre[data-new-code="${marker}"]`);
@@ -5631,13 +5618,60 @@ function enhanceImageControls(root = document) {
   });
 }
 
+function focusObjectBoundary(object, side = "before") {
+  const editor = object.closest(".cell-editor, .intro-editor");
+  if (!editor) return false;
+  editor.focus({preventScroll:true});
+  const range = document.createRange();
+  if (side === "after") range.setStartAfter(object); else range.setStartBefore(object);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges(); selection.addRange(range);
+  activeEditor = editor; savedEditorRange = range.cloneRange();
+  return true;
+}
+
+function objectAtEditorCaret() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  const parent = range.startContainer;
+  const editor = document.activeElement?.closest(".cell-editor, .intro-editor");
+  if (!editor || parent.nodeType !== Node.ELEMENT_NODE || !editor.contains(parent)) return null;
+  const next = parent.childNodes[range.startOffset];
+  const previous = parent.childNodes[range.startOffset-1];
+  const selector = ".cell-image, .cell-code-block, .cell-file";
+  if (next?.matches?.(selector)) return {object:next, side:"before"};
+  if (previous?.matches?.(selector)) return {object:previous, side:"after"};
+  return null;
+}
+
+function insertLineBesideObject(object, side = "before", text = "") {
+  const editor = object.closest(".cell-editor, .intro-editor");
+  if (!editor) return;
+  const line = document.createElement("div");
+  if (text) line.textContent = text; else line.append(document.createElement("br"));
+  if (side === "after") object.after(line); else object.before(line);
+  editor.focus({preventScroll:true});
+  const range = document.createRange();
+  if (text) { range.selectNodeContents(line); range.collapse(false); }
+  else { range.setStart(line,0); range.collapse(true); }
+  const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  activeEditor = editor; savedEditorRange = range.cloneRange();
+  editor.dispatchEvent(new Event("input",{bubbles:true}));
+}
+
+function isObjectLeadingEdge(event, object) {
+  const rect = object.getBoundingClientRect();
+  return object.closest(".cell-editor, .intro-editor") && event.clientX >= rect.left && event.clientX <= rect.left+12;
+}
+
 function ensureMediaBoundaries(figure) {
   const createParagraph = () => {
     const paragraph = document.createElement("p");
     paragraph.innerHTML = "<br>";
     return paragraph;
   };
-  if (!figure.previousSibling) figure.before(createParagraph());
   if (!figure.nextSibling) figure.after(createParagraph());
 }
 
@@ -7013,6 +7047,17 @@ document.addEventListener("paste", async (event) => {
     insertHtmlAtSelection(cleanHtml, range);
   }
 });
+document.addEventListener("beforeinput", (event) => {
+  if (event.inputType !== "insertText" || !event.data || event.isComposing || !event.cancelable) return;
+  const boundary = objectAtEditorCaret();
+  if (!boundary) return;
+  // Chromium otherwise relocates direct typing across a noneditable figure.
+  event.preventDefault(); insertLineBesideObject(boundary.object,boundary.side,event.data);
+});
+document.addEventListener("compositionstart", () => {
+  const boundary = objectAtEditorCaret();
+  if (boundary) insertLineBesideObject(boundary.object,boundary.side);
+});
 document.addEventListener("focusin", (event) => {
   if (event.target.matches(".intro-editor, .cell-editor")) {
     activeEditor = event.target;
@@ -7025,6 +7070,12 @@ document.addEventListener("selectionchange", () => {
   savedEditorRange = selection.getRangeAt(0).cloneRange();
 });
 document.addEventListener("pointerdown", (event) => {
+  const edgeObject = event.target.closest(".cell-image, .cell-code-block");
+  if (edgeObject && !event.target.closest("[data-editor-ui]") && isObjectLeadingEdge(event,edgeObject)) {
+    event.preventDefault(); pointerObjectGesture = null;
+    focusObjectBoundary(edgeObject);
+    return;
+  }
   if (
     !elements.linkPopover.hidden &&
     !event.target.closest("#linkPopover, #linkButton")
@@ -7099,6 +7150,10 @@ document.addEventListener("pointercancel", () => {
   pointerObjectGesture = null;
 });
 document.addEventListener("click", (event) => {
+  const edgeObject = event.target.closest(".cell-image, .cell-code-block");
+  if (edgeObject && !event.target.closest("[data-editor-ui]") && isObjectLeadingEdge(event,edgeObject)) {
+    event.preventDefault(); focusObjectBoundary(edgeObject); return;
+  }
   const codeBlock = event.target.closest(".cell-code-block");
   if (codeBlock && !event.target.closest("[data-editor-ui]")) {
     event.preventDefault();
@@ -7503,6 +7558,18 @@ window.addEventListener("scroll", (event) => {
 }, true);
 document.addEventListener("keydown", (event) => {
   const focusedObject = document.activeElement;
+  const editorObject = focusedObject?.matches?.(".cell-image, .cell-code-block, .cell-file") && focusedObject.closest(".cell-editor, .intro-editor");
+  if (!event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (event.key === "Enter" && event.shiftKey) {
+      const boundary = editorObject ? {object:focusedObject,side:"before"} : objectAtEditorCaret();
+      if (boundary) {
+        event.preventDefault(); insertLineBesideObject(boundary.object,boundary.side); return;
+      }
+    }
+    if (editorObject && !event.shiftKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      event.preventDefault(); focusObjectBoundary(focusedObject,event.key === "ArrowLeft" ? "before" : "after"); return;
+    }
+  }
   if (
     (event.key === "Enter" || event.key === " ") &&
     focusedObject?.matches?.(".cell-code-block, .cell-image, .cell-file") &&

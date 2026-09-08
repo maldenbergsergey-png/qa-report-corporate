@@ -5031,3 +5031,10 @@ body.pin-number-columns .section-header-table .number-header::before,
 .import-column-choice.is-reference-only { cursor: default; }
 .import-column-choice.is-reference-only:hover { background: transparent; }
 .import-column-item:has(.is-reference-only) .import-file-list { margin-left: 0; }
+
+/* The leading edge places the native text caret before an editor object. */
+.cell-editor .cell-image::before, .intro-editor .cell-image::before,
+.cell-editor .cell-code-block::before, .intro-editor .cell-code-block::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 12px;
+  cursor: text; z-index: 1;
+}

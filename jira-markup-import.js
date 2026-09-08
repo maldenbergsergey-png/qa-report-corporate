@@ -109,6 +109,7 @@
 
   function formatWikiText(value) {
     let output = escapeHtml(value)
+      .replace(/&amp;#(?:92|x5c);/gi, "&#92;")
       .replace(/\\\\/g, "<br>")
       .replace(/\n/g, "<br>")
       .replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>")

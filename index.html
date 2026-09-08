@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=81" />
+    <link rel="stylesheet" href="/styles.css?v=88" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -57,6 +57,8 @@
       <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></symbol>
       <symbol id="icon-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5Z" /><path d="M8 4v6h8V4M8 20v-6h8v6" /></symbol>
       <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" /></symbol>
+      <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></symbol>
+      <symbol id="icon-drag" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="6" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="9" cy="12" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="12" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="9" cy="18" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="18" r="1.4" style="fill:currentColor;stroke:none" /></symbol>
       <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></symbol>
       <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="M15 6 9 12l6 6" /><path d="M20 12H9" /></symbol>
       <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /><path d="M4 12h11" /></symbol>
@@ -541,9 +543,9 @@
           <div class="import-summary" id="importSummary" hidden></div>
         </div>
         <footer class="modal-footer">
-          <span>Перед импортом текущий отчёт будет сохранён в истории.</span>
+          <span>Данные будут импортированы в текущий чек-лист. Перед заменой заполненных данных появится подтверждение.</span>
           <div class="modal-actions">
-            <button class="button button-primary" id="applyImportButton" type="button">Заменить отчёт</button>
+            <button class="button button-primary" id="applyImportButton" type="button">Импортировать в чек-лист</button>
           </div>
         </footer>
       </section>
@@ -677,6 +679,7 @@
             </button>
             <div class="settings-subnav" aria-label="Настройки чек-листа">
               <button class="settings-nav-item active" type="button" data-settings-section="checklist">Нумерация</button>
+              <button class="settings-nav-item" type="button" data-settings-section="columns">Столбцы</button>
               <button class="settings-nav-item" type="button" data-settings-section="pinning">Закрепление столбцов</button>
             </div>
             <button class="settings-nav-item" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
@@ -706,6 +709,22 @@
                   <span><strong>По номеру раздела и пункта</strong><small>Сначала номер раздела, затем номер пункта через точку.</small><span class="numbering-example">Раздел 1: 1.1, 1.2, 1.3 · Раздел 2: 2.1, 2.2, 2.3</span></span>
                 </label>
               </fieldset>
+            </section>
+            <section class="settings-section" data-settings-panel="columns" hidden>
+              <h3>Столбцы по умолчанию</h3>
+              <div class="settings-note">Настройка применяется к новым чек-листам и разделам. Существующие таблицы и столбцы из импорта не изменяются. Номер и статус всегда остаются в наборе.</div>
+              <div class="default-columns-editor">
+                <div class="default-columns-editor-heading">
+                  <strong>Состав и порядок</strong>
+                  <small>Перетащите карточку за маркер или используйте стрелки.</small>
+                </div>
+                <div id="defaultColumnsList" class="default-columns-list" aria-label="Столбцы по умолчанию"></div>
+                <div class="default-columns-tools">
+                  <button type="button" class="button button-secondary" id="addDefaultColumn"><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg><span>Добавить столбец</span></button>
+                  <button type="button" class="button button-ghost" id="resetDefaultColumns"><svg class="ui-icon" aria-hidden="true"><use href="#icon-undo"></use></svg><span>Вернуть стандартный набор</span></button>
+                </div>
+              </div>
+              <div class="settings-note default-columns-save-note">Нажмите «Сохранить настройки», чтобы использовать этот набор для новых чек-листов и разделов в текущем браузере.</div>
             </section>
             <section class="settings-section" id="settingsPinningSection" data-settings-panel="pinning" hidden>
               <fieldset class="numbering-settings">
@@ -862,10 +881,11 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=1"></script>
+    <script src="/jira-markup-import.js?v=2"></script>
     <script src="/checklist-selection.js?v=2"></script>
+    <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=1"></script>
-    <script src="/app.js?v=85"></script>
+    <script src="/release-notes.js?v=2"></script>
+    <script src="/app.js?v=91"></script>
   </body>
 </html>

@@ -230,3 +230,18 @@ test("comparison operators and Jira line breaks remain inside strikethrough text
     "<s>проверка &gt; 5 значений</s> и <s>строка<br>продолжение</s>",
   );
 });
+
+
+test("section ordinals are removed without deleting meaningful numeric titles", () => {
+  for (const [title, expected] of [
+    ["1. Авторизация", "Авторизация"], ["12) Оплата", "Оплата"],
+    ["2FA", "2FA"], ["2026 год", "2026 год"], ["1.5 версия", "1.5 версия"],
+    ["Авторизация", "Авторизация"], ["2026. Итоги", "2026. Итоги"],
+  ]) {
+    const markup = `h2. ${title}\n||Проверка||Статус||\n|Вход|OK|`;
+    const section = parseJiraMarkup(markup).sections[0];
+    assert.equal(section.title, expected);
+    const repeated = parseJiraMarkup(`h2. 1. ${section.title}\n||Проверка||Статус||\n|Вход|OK|`);
+    assert.equal(repeated.sections[0].title, expected);
+  }
+});

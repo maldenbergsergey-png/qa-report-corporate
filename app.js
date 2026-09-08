@@ -13,7 +13,7 @@ const HISTORY_LIMIT = 50;
 const REQUIRED_API_REVISION = 5;
 const FILE_ATTACHMENT_MAX_SIZE = 50 * 1024 * 1024;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
-const { parseJiraMarkup, normalizeStatus } = window.QaReportJiraImport;
+const { parseJiraMarkup, normalizeStatus, stripSectionNumber } = window.QaReportJiraImport;
 const nativeFetch = window.fetch.bind(window);
 let authRedirectStarted = false;
 
@@ -52,6 +52,140 @@ const DEFAULT_COLUMNS = [
   { id: "comment", title: "Комментарий" },
 ];
 
+function loadDefaultColumns() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("qa-report-default-columns-v1"));
+    if (Array.isArray(stored) && stored.every(column => column && typeof column.id === "string" && typeof column.title === "string" && column.title.trim()) &&
+        new Set(stored.map(column => column.id)).size === stored.length) return stored.map(column => ({ id: column.id, title: column.title }));
+  } catch {}
+  return DEFAULT_COLUMNS.map(column => ({ ...column }));
+}
+
+let defaultColumnsDraft = [];
+let defaultColumnHighlightId = "";
+let defaultColumnDraggingId = "";
+
+function clearDefaultColumnDropIndicators() {
+  document.querySelectorAll("#defaultColumnsList .drop-before, #defaultColumnsList .drop-after")
+    .forEach(card => card.classList.remove("drop-before", "drop-after"));
+}
+
+function renderDefaultColumnsSettings() {
+  const list = document.getElementById("defaultColumnsList");
+  list.replaceChildren();
+  const locked = label => {
+    const item = document.createElement("div");
+    item.className = "default-column-card locked";
+    item.title = `${label} — неизменяемый столбец`;
+    item.append(createUiIcon("lock"), document.createTextNode(label));
+    return item;
+  };
+  list.append(locked("№"));
+  defaultColumnsDraft.forEach((column, index) => {
+    const card = document.createElement("div");
+    card.className = "default-column-card";
+    card.dataset.defaultColumnId = column.id;
+    if (column.id === defaultColumnHighlightId) {
+      card.classList.add("just-moved");
+      setTimeout(() => card.classList.remove("just-moved"), 900);
+    }
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "default-column-handle";
+    handle.title = "Перетащить столбец";
+    handle.setAttribute("aria-label", "Перетащить столбец");
+    handle.append(createUiIcon("drag"));
+    handle.draggable = true;
+    handle.addEventListener("dragstart", event => {
+      event.stopPropagation();
+      defaultColumnDraggingId = column.id;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/default-column", column.id);
+      requestAnimationFrame(() => card.classList.add("is-dragging"));
+    });
+    handle.addEventListener("dragend", () => {
+      defaultColumnDraggingId = "";
+      card.classList.remove("is-dragging");
+      clearDefaultColumnDropIndicators();
+    });
+    card.addEventListener("dragover", event => {
+      if (!defaultColumnDraggingId || defaultColumnDraggingId === column.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const placeAfter = event.clientX >= card.getBoundingClientRect().left + card.getBoundingClientRect().width / 2;
+      clearDefaultColumnDropIndicators();
+      card.classList.add(placeAfter ? "drop-after" : "drop-before");
+    });
+    card.addEventListener("dragleave", event => {
+      if (!card.contains(event.relatedTarget)) card.classList.remove("drop-before", "drop-after");
+    });
+    card.addEventListener("drop", event => {
+      const id = defaultColumnDraggingId || event.dataTransfer.getData("text/default-column");
+      const from = defaultColumnsDraft.findIndex(item => item.id === id);
+      if (from < 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const placeAfter = event.clientX >= card.getBoundingClientRect().left + card.getBoundingClientRect().width / 2;
+      let destination = index + (placeAfter ? 1 : 0);
+      const [moving] = defaultColumnsDraft.splice(from, 1);
+      if (from < destination) destination -= 1;
+      defaultColumnsDraft.splice(destination, 0, moving);
+      defaultColumnDraggingId = "";
+      defaultColumnHighlightId = moving.id;
+      clearDefaultColumnDropIndicators();
+      renderDefaultColumnsSettings(); setSettingsSavedState(false);
+    });
+    const input = document.createElement("input");
+    input.value = column.title; input.setAttribute("aria-label", `Название столбца по умолчанию ${index + 1}`);
+    input.addEventListener("input", () => { column.title = input.value; setSettingsSavedState(false); });
+    const actions = document.createElement("div"); actions.className = "default-column-actions";
+    for (const [label, offset, icon] of [["Переместить влево", -1, "arrow-left"], ["Переместить вправо", 1, "arrow-right"], ["Удалить столбец", 0, "trash"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `object-action-button${icon === "trash" ? " object-action-danger" : ""}`;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.append(createUiIcon(icon));
+      button.disabled = offset !== 0 && (index + offset < 0 || index + offset >= defaultColumnsDraft.length);
+      button.addEventListener("click", () => {
+        if (offset) {
+          defaultColumnHighlightId = column.id;
+          [defaultColumnsDraft[index], defaultColumnsDraft[index + offset]] = [defaultColumnsDraft[index + offset], defaultColumnsDraft[index]];
+        } else {
+          defaultColumnHighlightId = "";
+          defaultColumnsDraft.splice(index, 1);
+        }
+        renderDefaultColumnsSettings();
+        setSettingsSavedState(false);
+        if (offset) {
+          requestAnimationFrame(() => {
+            const moved = list.querySelector(`[data-default-column-id="${CSS.escape(column.id)}"]`);
+            moved?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+            moved?.querySelector(`[aria-label="${label}"]`)?.focus();
+          });
+        }
+      }); actions.append(button);
+    }
+    card.append(handle, input, actions); list.append(card);
+  });
+  list.append(locked("Статус"));
+}
+
+function saveDefaultColumnsSettings() {
+  if (defaultColumnsDraft.some(column => !column.title.trim())) throw new Error("Введите названия столбцов по умолчанию");
+  const columns = defaultColumnsDraft.map(column => ({ id: column.id, title: column.title.trim() }));
+  localStorage.setItem("qa-report-default-columns-v1", JSON.stringify(columns));
+  DEFAULT_DRAFT.sections = [createSection("Основные проверки", columns, 2)];
+}
+
+function toggleStatusSort(sectionId) {
+  flushDraftFromDom();
+  const section = draft.sections.find(item => item.id === sectionId);
+  if (!section) return;
+  section.statusSort = !section.statusSort;
+  closeSelectionMenus();
+  renderSections(); saveLocalMutationNow();
+}
+
 function createRow(columns = DEFAULT_COLUMNS) {
   return {
     id: crypto.randomUUID(),
@@ -85,7 +219,7 @@ const DEFAULT_DRAFT = {
   overallStatus: "OK",
   intro: "",
   numberingMode: "section",
-  sections: [createSection("Основные проверки", DEFAULT_COLUMNS, 2)],
+  sections: [createSection("Основные проверки", loadDefaultColumns(), 2)],
 };
 
 const elements = {
@@ -350,7 +484,7 @@ function preserveKnownColumnMetadata(nextDraft, baseDraft = draft) {
 
 function normalizeSections(sections) {
   return clone(sections).map((section, sectionIndex) => {
-    const columns = (Array.isArray(section.columns) && section.columns.length ? section.columns : DEFAULT_COLUMNS).map(
+    const columns = (Array.isArray(section.columns) ? section.columns : DEFAULT_COLUMNS).map(
       (column, columnIndex) => ({
         ...column,
         id: column.id || `column-${crypto.randomUUID()}`,
@@ -765,7 +899,7 @@ async function saveReportSnapshot(reason = "manual") {
   await dbTransaction("readwrite", (store) => store.put(record));
   if (suppressNextServerSave) {
     suppressNextServerSave = false;
-  } else {
+  } else if (!["before-import", "before-inbound-import"].includes(reason)) {
     queueServerReportSave(record);
   }
   await trimReportHistory();
@@ -787,6 +921,7 @@ function queueServerReportSave(record) {
     })
     .catch((error) => {
       if (error.status === 409) {
+        if (draft.reportId !== record.id) return;
         const serverReport = error.payload?.report;
         const serverHash = serverReport?.contentHash;
         if (serverReport?.document) {
@@ -1848,8 +1983,9 @@ function updateSelectionUi() {
   selectionUi.All.checked = count > 0 && count === rows.length;
   selectionUi.All.indeterminate = count > 0 && count < rows.length;
   selectionUi.Delete.disabled = count === 0;
-  selectionUi.MoveButton.disabled = count === 0;
-  if (!count && !selectionUi.MoveMenu.hidden) closeSelectionMenus();
+  selectionUi.MoveButton.disabled = count === 0 || !window.QaReportTable.canMove(draft.sections, selectedRowIds);
+  selectionUi.MoveButton.title = !window.QaReportTable.canMove(draft.sections, selectedRowIds) ? "Верните исходный порядок выбранных строк для переноса" : "Перенести выбранные строки";
+  if (selectionUi.MoveButton.disabled && !selectionUi.MoveMenu.hidden) closeSelectionMenus();
   elements.sections.querySelectorAll("[data-selection-row]").forEach((checkbox) => {
     checkbox.checked = selectedRowIds.has(checkbox.dataset.selectionRow);
     checkbox.closest("tr").classList.toggle("row-selected", checkbox.checked);
@@ -1865,6 +2001,7 @@ function updateSelectionUi() {
 }
 
 function openSelectionMenu(name) {
+  if (name === "Move" && !window.QaReportTable.canMove(draft.sections, selectedRowIds)) return;
   const opening = selectionUi[`${name}Menu`].hidden;
   closeSelectionMenus();
   if (!opening) return;
@@ -1891,8 +2028,8 @@ function renderSelectionDestinations() {
     button.type = "button";
     button.textContent = section.title;
     button.title = section.title;
-    button.disabled = !draft.sections.some((source) => source.id !== section.id && source.rows.some((row) => selectedRowIds.has(row.id)));
-    if (button.disabled) button.title = "Все выбранные строки уже в этом разделе";
+    button.disabled = !window.QaReportTable.canMove(draft.sections, selectedRowIds, section.id) || !draft.sections.some((source) => source.id !== section.id && source.rows.some((row) => selectedRowIds.has(row.id)));
+    if (button.disabled) button.title = section.statusSort ? "Верните исходный порядок строк в разделе назначения" : "Перенос недоступен: проверьте сортировку и выбранные строки";
     button.addEventListener("click", () => moveSelectedRows(section.id));
     selectionUi.Destinations.append(button);
   }
@@ -1922,6 +2059,7 @@ function commitSelectionMutation(mutate) {
 }
 
 async function moveSelectedRows(targetId, newTitle = "") {
+  if (!window.QaReportTable.canMove(draft.sections, selectedRowIds, targetId)) return;
   flushDraftFromDom();
   const ids = new Set(selectedRowIds);
   const documentId = draft.draftId;
@@ -1946,6 +2084,7 @@ async function moveSelectedRows(targetId, newTitle = "") {
     return;
   }
   if (!draft.sections.some((section) => section.id !== targetId && section.rows.some((row) => ids.has(row.id)))) return;
+  if (!window.QaReportTable.canMove(draft.sections, ids, targetId)) return;
   let destinationId = targetId;
   let movedCount = 0;
   commitSelectionMutation(() => {
@@ -1981,7 +2120,7 @@ async function deleteSelectedRows() {
   let deletedCount = 0;
   commitSelectionMutation(() => {
     const result = window.QaReportSelection.deleteRows(draft.sections, ids, createRow,
-      () => createSection("Основные проверки", DEFAULT_COLUMNS, 2));
+      () => createSection("Основные проверки", loadDefaultColumns(), 2));
     draft.sections = result.sections;
     deletedCount = result.count;
     selectedRowIds.clear();
@@ -1990,7 +2129,37 @@ async function deleteSelectedRows() {
   selectionUi.All.focus();
 }
 
+let renderSectionsRevision = 0;
+
+function captureChecklistViewport() {
+  const page = document.scrollingElement || document.documentElement;
+  return {
+    pageLeft: page.scrollLeft,
+    pageTop: page.scrollTop,
+    sections: new Map([...elements.sections.querySelectorAll(".check-section[data-section-id]")].map(sectionElement => [
+      sectionElement.dataset.sectionId,
+      sectionElement.querySelector(".table-scroll")?.scrollLeft || 0,
+    ])),
+  };
+}
+
+function restoreChecklistViewport(viewport) {
+  const page = document.scrollingElement || document.documentElement;
+  for (const [sectionId, scrollLeft] of viewport.sections) {
+    const sectionElement = elements.sections.querySelector(`[data-section-id="${CSS.escape(sectionId)}"]`);
+    const tableScroll = sectionElement?.querySelector(".table-scroll");
+    const headerScroll = sectionElement?.querySelector(".section-header-scroll");
+    if (tableScroll) tableScroll.scrollLeft = scrollLeft;
+    if (headerScroll) headerScroll.scrollLeft = scrollLeft;
+  }
+  page.scrollLeft = viewport.pageLeft;
+  page.scrollTop = viewport.pageTop;
+}
+
 function renderSections() {
+  const preserveViewport = selectionDraftId === draft.draftId;
+  const viewport = preserveViewport ? captureChecklistViewport() : null;
+  const revision = ++renderSectionsRevision;
   if (selectionDraftId !== draft.draftId) {
     selectedRowIds.clear();
     selectionDraftId = draft.draftId;
@@ -2039,6 +2208,12 @@ function renderSections() {
   });
   updateSelectionUi();
   applyPinnedColumns();
+  if (viewport) {
+    restoreChecklistViewport(viewport);
+    requestAnimationFrame(() => {
+      if (revision === renderSectionsRevision) restoreChecklistViewport(viewport);
+    });
+  }
   scheduleStickySectionUpdate();
 }
 
@@ -2095,9 +2270,9 @@ function renderTable(fragment, section, rowNumbers) {
   headerTable.style.minWidth = "100%";
 
   const tbody = fragment.querySelector("tbody");
-  section.rows.forEach((row) => tbody.append(createRowElement(section, row, rowNumbers.get(row.id))));
+  window.QaReportTable.visibleRows(section).forEach((row) => tbody.append(createRowElement(section, row, rowNumbers.get(row.id))));
   tbody.addEventListener("dragover", (event) => {
-    if (!hasDragType(event, "text/row-id")) return;
+    if (section.statusSort || !hasDragType(event, "text/row-id")) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     updateRowDragAutoScroll(event);
@@ -2114,7 +2289,7 @@ function renderTable(fragment, section, rowNumbers) {
     }
   });
   tbody.addEventListener("dragleave", (event) => {
-    if (!hasDragType(event, "text/row-id")) return;
+    if (section.statusSort || !hasDragType(event, "text/row-id")) return;
     if (event.relatedTarget && tbody.contains(event.relatedTarget)) return;
     tbody.classList.remove("row-drop-empty");
     clearRowDropState(tbody);
@@ -2380,7 +2555,7 @@ function createStatusHeader(section) {
   const th = document.createElement("th");
   th.className = "status-header";
   const label = document.createElement("span");
-  label.innerHTML = 'Статус <span class="required">*</span>';
+  label.innerHTML = 'Статус <span class="required">*</span>' + (section.statusSort ? ' ↓' : '');
   const menuButton = document.createElement("button");
   menuButton.type = "button";
   menuButton.className = "column-menu-button";
@@ -2389,6 +2564,7 @@ function createStatusHeader(section) {
   menuButton.addEventListener("click", (event) => {
     event.stopPropagation();
     showFloatingMenu(menuButton, [
+      { label: section.statusSort ? "Вернуть исходный порядок" : "Сортировать по статусу", icon: section.statusSort ? "undo" : "arrow-down", action: () => toggleStatusSort(section.id) },
       {
         label: "Вставить столбец слева",
         icon: "column-insert-left",
@@ -2396,6 +2572,7 @@ function createStatusHeader(section) {
       },
     ]);
   });
+  th.addEventListener("contextmenu", event => { event.preventDefault(); menuButton.click(); });
   th.append(label, menuButton);
   return th;
 }
@@ -2422,7 +2599,8 @@ function createRowElement(section, row, number) {
   rowDragHandle.className = "row-drag-handle";
   rowDragHandle.textContent = "⋮⋮";
   rowDragHandle.title = "Перетащить строку";
-  rowDragHandle.draggable = true;
+  rowDragHandle.draggable = !section.statusSort;
+  rowDragHandle.hidden = Boolean(section.statusSort);
   const rowNumber = document.createElement("span");
   rowNumber.className = "row-number-text";
   rowNumber.textContent = number;
@@ -2474,6 +2652,9 @@ function createRowElement(section, row, number) {
   statusSelect.addEventListener("change", () => {
     row.status = statusSelect.value;
     setStatusClass(statusSelect, row.status);
+    if (section.statusSort) {
+      flushDraftFromDom(); renderSections(); renderSummary(); saveLocalMutationNow(); return;
+    }
     // The captured row may predate autosave. scheduleSave synchronizes the current draft.
     scheduleSave();
     renderSummary();
@@ -2491,12 +2672,12 @@ function createRowElement(section, row, number) {
   menuButton.addEventListener("click", (event) => {
     event.stopPropagation();
     showFloatingMenu(menuButton, [
-      { label: "Добавить строку выше", icon: "row-insert-above", action: () => applyRowAction(section, row.id, "insert-above") },
-      { label: "Добавить строку ниже", icon: "row-insert-below", action: () => applyRowAction(section, row.id, "insert-below") },
+      { label: "Добавить строку выше", icon: "row-insert-above", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-above") },
+      { label: "Добавить строку ниже", icon: "row-insert-below", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-below") },
       { label: "Дублировать", icon: "copy", action: () => applyRowAction(section, row.id, "duplicate") },
-      { label: "Новый раздел отсюда", icon: "section-split", action: () => applyRowAction(section, row.id, "split") },
-      { label: "Поднять выше", icon: "arrow-up", action: () => applyRowAction(section, row.id, "move-up") },
-      { label: "Опустить ниже", icon: "arrow-down", action: () => applyRowAction(section, row.id, "move-down") },
+      { label: "Новый раздел отсюда", icon: "section-split", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "split") },
+      { label: "Поднять выше", icon: "arrow-up", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "move-up") },
+      { label: "Опустить ниже", icon: "arrow-down", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "move-down") },
       {
         label: "Удалить",
         icon: "trash",
@@ -2508,6 +2689,7 @@ function createRowElement(section, row, number) {
   actions.append(menuButton);
   tr.append(actions);
   rowDragHandle.addEventListener("dragstart", (event) => {
+    if (section.statusSort) { event.preventDefault(); return; }
     event.stopPropagation();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/row-id", row.id);
@@ -2515,7 +2697,7 @@ function createRowElement(section, row, number) {
   });
   rowDragHandle.addEventListener("dragend", clearRowDragState);
   tr.addEventListener("dragover", (event) => {
-    if (!hasDragType(event, "text/row-id")) return;
+    if (section.statusSort || !hasDragType(event, "text/row-id")) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     updateRowDragAutoScroll(event);
@@ -2525,7 +2707,7 @@ function createRowElement(section, row, number) {
     tr.classList.add(placeAfter ? "row-drop-after" : "row-drop-before");
   });
   tr.addEventListener("dragleave", (event) => {
-    if (!hasDragType(event, "text/row-id")) return;
+    if (section.statusSort || !hasDragType(event, "text/row-id")) return;
     if (event.relatedTarget && tr.contains(event.relatedTarget)) return;
     tr.classList.remove("row-drop-before", "row-drop-after");
   });
@@ -2682,6 +2864,7 @@ function adaptRowCellsForSection(row, sourceSection, targetSection) {
 }
 
 function moveRowTo(targetSectionRef, sourceId, targetId, placeAfter = false) {
+  if (!window.QaReportTable.canMove(draft.sections, new Set([sourceId]), targetSectionRef.id)) return;
   flushDraftFromDom();
   const targetSection = draft.sections.find((item) => item.id === targetSectionRef.id);
   const sourceSection = draft.sections.find((item) => item.rows.some((row) => row.id === sourceId));
@@ -2703,6 +2886,7 @@ function moveRowTo(targetSectionRef, sourceId, targetId, placeAfter = false) {
 }
 
 function moveRowToSectionEnd(targetSectionRef, sourceId) {
+  if (!window.QaReportTable.canMove(draft.sections, new Set([sourceId]), targetSectionRef.id)) return;
   flushDraftFromDom();
   const targetSection = draft.sections.find((item) => item.id === targetSectionRef.id);
   const sourceSection = draft.sections.find((item) => item.rows.some((row) => row.id === sourceId));
@@ -2731,6 +2915,7 @@ function deleteColumn(section, columnId) {
 }
 
 function splitSectionAtRow(section, rowIndex) {
+  if (draft.sections.find(item => item.id === section.id)?.statusSort) return;
   flushDraftFromDom();
   const currentSection = draft.sections.find((item) => item.id === section.id);
   if (!currentSection) return;
@@ -2757,6 +2942,7 @@ function applyRowAction(section, rowId, action) {
   flushDraftFromDom();
   const currentSection = draft.sections.find((item) => item.id === section.id);
   if (!currentSection) return;
+  if (currentSection.statusSort && ["insert-above", "insert-below", "split", "move-up", "move-down"].includes(action)) return;
   const index = currentSection.rows.findIndex((row) => row.id === rowId);
   if (index < 0) return;
   if (action === "insert-above") {
@@ -2764,7 +2950,7 @@ function applyRowAction(section, rowId, action) {
   } else if (action === "insert-below") {
     currentSection.rows.splice(index + 1, 0, createRow(currentSection.columns));
   } else if (action === "duplicate") {
-    currentSection.rows.splice(index + 1, 0, { ...clone(currentSection.rows[index]), id: crypto.randomUUID() });
+    currentSection.rows.splice(currentSection.statusSort ? currentSection.rows.length : index + 1, 0, { ...clone(currentSection.rows[index]), id: crypto.randomUUID() });
   } else if (action === "split") {
     splitSectionAtRow(currentSection, index);
     return;
@@ -2850,6 +3036,8 @@ function showFloatingMenu(anchor, items) {
     label.textContent = item.label;
     button.append(label);
     if (item.danger) button.className = "danger-text";
+    button.disabled = Boolean(item.disabled);
+    if (item.disabled) button.title = "Верните исходный порядок строк, чтобы выполнить действие";
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       item.action();
@@ -3479,8 +3667,8 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "pinning", "jira", "history"].includes(section) ? section : "checklist";
-  elements.settingsChecklistSectionButton.classList.toggle("group-active", ["checklist", "pinning"].includes(selected));
+  const selected = ["checklist", "columns", "pinning", "jira", "history"].includes(section) ? section : "checklist";
+  elements.settingsChecklistSectionButton.classList.toggle("group-active", ["checklist", "columns", "pinning"].includes(selected));
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
     button.classList.toggle("active", active);
@@ -3541,6 +3729,8 @@ function updatePinnedColumnOffsets() {
 }
 
 function fillChecklistSettingsForm() {
+  defaultColumnsDraft = loadDefaultColumns();
+  renderDefaultColumnsSettings();
   elements.jiraSettingsModal.querySelectorAll('[name="numberingMode"]').forEach((input) => {
     input.checked = input.value === ChecklistNumbering.normalizeMode(draft.numberingMode);
   });
@@ -3657,6 +3847,7 @@ function closeJiraSettings() {
 function saveJiraSettings() {
   try {
     saveReportIdentitySettings();
+    saveDefaultColumnsSettings();
     saveChecklistSettings();
     savePinnedColumns();
     setSettingsSavedState(true);
@@ -4323,7 +4514,14 @@ async function renderHistoryList() {
       }
       await renderHistoryList();
     }, true);
-    actions.append(openButton, copyButton, deleteButton);
+    const linkButton = createSmallButton("Копировать ссылку", async () => {
+      const id = normalizePublicId(report.publicId || report.document?.publicId);
+      if (!id) { showToast("У отчёта пока нет ссылки"); return; }
+      await writeClipboardText(new URL(`/report/${id}`, window.location.origin).href,
+        report.source === "local" ? "Ссылка скопирована — локальный отчёт доступен в этом браузере" : "Ссылка на отчёт скопирована");
+    });
+    linkButton.title = report.source === "local" ? "Локальный отчёт: ссылка работает в этом браузере" : "Скопировать ссылку на этот отчёт";
+    actions.append(openButton, linkButton, copyButton, deleteButton);
     item.append(info, commentField, actions);
     elements.historyList.append(item);
   });
@@ -5733,44 +5931,71 @@ async function prepareImport() {
   }
 }
 
+function hasReportDataToReplace() {
+  const hasHtml = (html) => {
+    const root = document.createElement("div");
+    root.innerHTML = html || "";
+    return Boolean(root.textContent.replace(/\u00a0/g, " ").trim() ||
+      root.querySelector("img, a, pre, table, video, audio, iframe, [data-file-id], .cell-file, .file-attachment"));
+  };
+  if (hasHtml(draft.intro) || draft.issueUrl || draft.environment !== DEFAULT_DRAFT.environment ||
+      draft.overallStatus !== DEFAULT_DRAFT.overallStatus) return true;
+  if (!draft.sections.length) return false;
+  if (draft.sections.length !== 1) return true;
+  const section = draft.sections[0];
+  if (section.title !== "Основные проверки" || section.rows.length !== 2 ||
+      section.columns.length !== loadDefaultColumns().length || section.columns.some((column, index) =>
+        column.title !== loadDefaultColumns()[index].title)) return true;
+  return section.rows.some((row) => row.status !== "НЕ ПРОВЕРЕНО" || Object.values(row.cells || {}).some(hasHtml));
+}
+
+async function confirmImportReplacement() {
+  flushDraftFromDom();
+  return !hasReportDataToReplace() || await askConfirmation(
+    "Существующие данные этого чек-листа будут заменены импортируемыми. Продолжить?", {
+      title: "Замена данных чек-листа", confirmText: "Заменить данные", danger: true,
+    });
+}
+
+function importedDraftInCurrentReport(imported) {
+  return normalizeDraft({
+    ...draft, ...imported,
+    draftId: draft.draftId, reportId: draft.reportId, publicId: draft.publicId,
+    revision: draft.revision, updatedAt: draft.updatedAt,
+    lastSavedBy: draft.lastSavedBy, lastSavedClientId: draft.lastSavedClientId,
+    issueUrl: imported.issueUrl || draft.issueUrl,
+  });
+}
+
 async function applyImport(mode = "replace") {
   try {
     const imported = pendingImportedDraft || (await prepareImport());
+    if (mode !== "append" && !await confirmImportReplacement()) return;
     await saveReportSnapshot("before-import");
     if (mode === "append") {
       draft.sections.push(...clone(imported.sections));
       if (imported.intro) draft.intro += imported.intro;
     } else {
-      const issueUrl = draft.issueUrl;
-      draft = normalizeDraft({
-        ...imported,
-        draftId: crypto.randomUUID(),
-        reportId: crypto.randomUUID(),
-        publicId: createPublicId(),
-        issueUrl: imported.issueUrl || issueUrl,
-      });
+      draft = importedDraftInCurrentReport(imported);
     }
-    scheduleHistoryCommit();
-    saveDraft();
     render();
+    scheduleHistoryCommit();
+    if (await saveDraft() === false) return;
+    renderEnvironmentOptions(draft.environment);
     updateChecklistUrl(draft.publicId);
     closeImport();
     showToast(`Импортировано таблиц: ${imported.sections.length}`);
-  } catch {
-    // Ошибка уже показана в окне импорта.
+  } catch (error) {
+    showToast(`Не удалось импортировать: ${error.message}`, 9000);
   }
 }
 
 async function applyImportedChecklist(imported, metadata = {}) {
-  await saveReportSnapshot("before-inbound-import").catch(() => {});
-  const nextDraft = normalizeDraft({
-    ...imported,
-    draftId: crypto.randomUUID(),
-    reportId: metadata.checklistId || crypto.randomUUID(),
-    publicId: normalizePublicId(metadata.publicId) || createPublicId(),
-  });
+  if (!await confirmImportReplacement()) return false;
+  await saveReportSnapshot("before-inbound-import");
+  const nextDraft = importedDraftInCurrentReport(imported);
   const title = String(metadata.title || "").trim();
-  if (title && nextDraft.sections[0]) nextDraft.sections[0].title = title;
+  if (title && nextDraft.sections[0]) nextDraft.sections[0].title = stripSectionNumber(title);
   const issueUrl = String(metadata.issueKey || "").trim();
   if (issueUrl) nextDraft.issueUrl = issueUrl;
   draft = nextDraft;
@@ -5782,7 +6007,9 @@ async function applyImportedChecklist(imported, metadata = {}) {
   updateHistoryButtons();
   forceLocalDraftSave = true;
   await saveDraft();
-  await saveReportSnapshot("inbound-import").catch(() => {});
+  await saveReportSnapshot("inbound-import");
+  renderEnvironmentOptions(draft.environment);
+  return true;
 }
 
 async function handleInboundChecklistImport() {
@@ -5796,7 +6023,11 @@ async function handleInboundChecklistImport() {
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     if (payload.format !== "jira") throw new Error("Ссылка содержит неподдерживаемый формат импорта");
     const imported = parseJiraMarkup(payload.content);
-    await applyImportedChecklist(imported, payload);
+    if (!await applyImportedChecklist(imported, payload)) {
+      updateChecklistUrl(draft.publicId);
+      setSaveStatus("Импорт отменён");
+      return;
+    }
     window.history.replaceState({}, "", `/report/${draft.publicId}`);
     showToast("Чек-лист импортирован из QA Assistant", 5000);
   } catch (error) {
@@ -6305,27 +6536,27 @@ function resolveConfirmation(value) {
 }
 
 async function resetDraft() {
-  const confirmed = await askConfirmation("Очистить текущий отчёт и создать новый?", {
-    title: "Новый отчёт",
-    confirmText: "Создать новый",
-    danger: true,
-  });
-  if (!confirmed) return;
-  saveReportSnapshot("before-new").catch(() => {});
+  try {
+    await saveReportSnapshot("before-new");
+  } catch (error) {
+    showToast(`Не удалось сохранить текущий отчёт: ${error.message}`, 9000);
+    return;
+  }
   hideDraftSyncBanner();
   hideSyncRecovery();
   draft = normalizeDraft(clone(DEFAULT_DRAFT));
   draft.draftId = crypto.randomUUID();
   draft.reportId = crypto.randomUUID();
   draft.publicId = createPublicId();
-  draft.sections = [createSection("Основные проверки", DEFAULT_COLUMNS, 2)];
+  draft.sections = [createSection("Основные проверки", loadDefaultColumns(), 2)];
   historyCurrent = serializeDraft();
   undoStack = [];
   redoStack = [];
   render();
   updateHistoryButtons();
   forceLocalDraftSave = true;
-  saveDraft();
+  await saveDraft();
+  updateChecklistUrl(draft.publicId);
   showToast("Создан новый отчёт");
 }
 
@@ -6402,11 +6633,38 @@ new ResizeObserver(scheduleStickySectionUpdate).observe(document.querySelector("
 elements.addSectionButton.addEventListener("click", () => {
   flushDraftFromDom();
   const previous = draft.sections[draft.sections.length - 1];
-  const section = createSection(`Новый раздел ${draft.sections.length + 1}`, previous?.columns || DEFAULT_COLUMNS);
+  const section = createSection(`Новый раздел ${draft.sections.length + 1}`, loadDefaultColumns());
   draft.sections.push(section);
   renderSections();
   saveLocalMutationNow();
 });
+
+function renderEnvironmentOptions(value = "") {
+  const key = `qa-report-environments-v1:${reportWorkspaceKey || "local"}`;
+  let values = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || "[]");
+    if (Array.isArray(stored)) values = stored.filter((item) => typeof item === "string");
+  } catch {}
+  const next = String(value).trim();
+  values = [next, ...values].filter((item, index, all) => item &&
+    all.findIndex((other) => other.toLocaleLowerCase() === item.toLocaleLowerCase()) === index).slice(0, 50);
+  if (next) {
+    try { localStorage.setItem(key, JSON.stringify(values)); } catch {}
+  }
+  const list = document.getElementById("environmentOptions");
+  list.replaceChildren();
+  for (const item of [...values, "STAGE", "DEV", "PROD", "Локально"].filter((item, index, all) =>
+    all.findIndex((other) => other.toLocaleLowerCase() === item.toLocaleLowerCase()) === index)) {
+    const option = document.createElement("option");
+    option.value = item;
+    list.append(option);
+  }
+}
+
+elements.environment.addEventListener("change", () => renderEnvironmentOptions(elements.environment.value));
+elements.environment.addEventListener("focus", () => renderEnvironmentOptions());
+renderEnvironmentOptions();
 
 ["input", "change"].forEach((eventName) => {
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
@@ -7248,10 +7506,11 @@ render();
 refreshObjectStorageUi();
 if (!routeChecklistPublicId()) updateChecklistUrl(draft.publicId);
 updateHistoryButtons();
-openReportFromRoute()
-  .catch(() => {})
-  .finally(() => checkStoredDraftFreshness());
-handleInboundChecklistImport();
+if (new URL(window.location.href).searchParams.has("importToken")) {
+  handleInboundChecklistImport();
+} else {
+  openReportFromRoute().catch(() => {}).finally(() => checkStoredDraftFreshness());
+}
 
 
 // Release notes are presentation data, independent of report documents.
@@ -7356,4 +7615,15 @@ document.getElementById('openJiraConnectionsButton').addEventListener('click', (
   closeHeaderDropdowns();
   openJiraSettings();
   setSettingsSection('jira');
+});
+
+
+document.getElementById("addDefaultColumn").addEventListener("click", () => {
+  defaultColumnsDraft.push({ id: `column-${crypto.randomUUID()}`, title: "Новый столбец" });
+  renderDefaultColumnsSettings(); setSettingsSavedState(false);
+  [...document.querySelectorAll("#defaultColumnsList input")].at(-1)?.focus();
+});
+document.getElementById("resetDefaultColumns").addEventListener("click", () => {
+  defaultColumnsDraft = DEFAULT_COLUMNS.map(column => ({ ...column }));
+  renderDefaultColumnsSettings(); setSettingsSavedState(false);
 });

@@ -350,7 +350,7 @@
           }));
         currentSection = {
           id: randomUUID(),
-          title: pendingTitle || `Раздел ${tableNumber}`,
+          title: stripSectionNumber(pendingTitle) || `Раздел ${tableNumber}`,
           collapsed: false,
           columns,
           rows: [],
@@ -390,5 +390,10 @@
     return imported;
   }
 
-  return { parseJiraMarkup, normalizeStatus };
+  // Only explicit ordinal prefixes; years, versions and 2FA remain titles.
+  function stripSectionNumber(title) {
+    return String(title || "").replace(/^\s*\d{1,3}[.)]\s+(?=\S)/, "").trim();
+  }
+
+  return { parseJiraMarkup, normalizeStatus, stripSectionNumber };
 });

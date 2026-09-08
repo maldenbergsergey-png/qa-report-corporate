@@ -48,8 +48,9 @@ test('offline navigation is a connection message, never the editor', async () =>
 });
 test('cached script does not override server denial', async () => {
   const response = new Response(null, { status: 401 });
-  const w = worker(async () => response); w.stored.set('/app.js?v=85', new Response('cached script'));
-  assert.equal(await dispatch(w, 'fetch', { request: { url: 'https://qa.test/app.js?v=85', method: 'GET', mode: 'cors' } }), response);
+  const asset = source.match(/['"](\/app\.js\?v=\d+)['"]/)[1];
+  const w = worker(async () => response); w.stored.set(asset, new Response('cached script'));
+  assert.equal(await dispatch(w, 'fetch', { request: { url: `https://qa.test${asset}`, method: 'GET', mode: 'cors' } }), response);
 });
 test('failed download prevents installation', async () => {
   const w = worker(async () => new Response(null, { status: 403 }));

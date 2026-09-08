@@ -2305,8 +2305,10 @@ body.section-sticky-active .editor-toolbar::after {
 
 .settings-body {
   display: grid;
+  min-width: 0;
   gap: 16px;
   padding: 22px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -4702,3 +4704,205 @@ body.pin-number-columns .section-header-table .number-header::before,
 @media (max-width: 820px) {
   .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
+
+/* Keep the palette above bulk selection while respecting modal/header layers. */
+.editor-toolbar:has(.toolbar-color-menu:not([hidden])) { z-index: 42; }
+:root .editor-toolbar .toolbar-color-menu button[data-color],
+:root .editor-toolbar .toolbar-color-menu button[data-color]:hover,
+:root .editor-toolbar .toolbar-color-menu button[data-color]:focus-visible {
+  background: var(--swatch);
+  filter: none;
+  opacity: 1;
+}
+
+/* Default columns editor mirrors the card and callout patterns used by the other settings. */
+.default-columns-editor {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--canvas));
+}
+
+.settings-section[data-settings-panel="columns"] {
+  min-width: 0;
+}
+
+.default-columns-editor-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.default-columns-editor-heading strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.default-columns-editor-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.default-columns-list {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 8px 16px;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.default-column-card {
+  position: relative;
+  flex: 0 0 200px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+
+.default-column-card.locked {
+  flex: 0 0 64px;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.default-column-card.locked .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.default-column-card input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: 0;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.default-column-card input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.default-column-handle {
+  display: inline-grid;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: grab;
+}
+
+.default-column-handle:hover,
+.default-column-handle:focus-visible {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.default-column-handle:active {
+  cursor: grabbing;
+}
+
+.default-column-handle .ui-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.default-column-actions,
+.default-columns-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.default-column-actions .object-action-button {
+  color: var(--muted);
+}
+
+.default-column-actions .object-action-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.default-columns-tools {
+  padding-top: 2px;
+}
+
+.default-columns-tools .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.default-column-card.drop-before::before,
+.default-column-card.drop-after::after {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 16%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.default-column-card.drop-before::before {
+  left: -7px;
+}
+
+.default-column-card.drop-after::after {
+  right: -7px;
+}
+
+.default-column-card.is-dragging {
+  opacity: 0.42;
+}
+
+.default-column-card.just-moved {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  animation: default-column-highlight 900ms ease-out;
+}
+
+@keyframes default-column-highlight {
+  from { background: color-mix(in srgb, var(--surface) 76%, var(--primary)); }
+  to { background: var(--surface); }
+}
+
+.default-columns-save-note {
+  margin-top: 2px;
+}
+
+.floating-context-menu button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.row-drag-handle[hidden] { display:none !important; }

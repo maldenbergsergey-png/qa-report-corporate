@@ -1,10 +1,10 @@
 {
   "name": "qa-report-jira-editor",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.5.0",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js && node --check auth.js && node --check jira-oauth.js && node --check jira-markup-import.js && node --check checklist-selection.js && node --check checklist-numbering.js && node --check release-notes.js && node --check pwa.js && node --check sw.js",
+    "check": "node --check app.js && node --check server.js && node --check auth.js && node --check jira-oauth.js && node --check jira-markup-import.js && node --check checklist-selection.js && node --check checklist-numbering.js && node --check checklist-table.js && node --check release-notes.js && node --check pwa.js && node --check sw.js && node scripts/check-release-notes.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

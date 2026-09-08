@@ -130,7 +130,7 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     });
     assert.equal(comment.status, 201, JSON.stringify(await comment.clone().json()));
     const commentPayload = await comment.json();
-    assert.equal(commentPayload.apiRevision, 7);
+    assert.equal(commentPayload.apiRevision, 8);
     assert.equal(commentPayload.verified, true);
     assert.match(commentPayload.commentId, /^\d+$/);
     const jiraCalls = received.filter((item) => item.url.startsWith("/jira7/rest/api/2/"));
@@ -138,6 +138,12 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal(jiraCalls.some((item) => item.authorization?.includes("access-user-a")), true);
     assert.equal(jiraCalls.some((item) => item.body.includes("browser-token")), false);
 
+    const inventoryOptions = {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({issueUrl:`${jiraOrigin}/jira7/browse/QA-1`})};
+    const inventory = await request(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions);
+    assert.equal(inventory.status,200);assert.equal((await inventory.json()).attachments[0].id,"42");
+    assert.equal((await request(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions,"user-b@example.com")).status,409);
+    assert.equal((await fetch(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions)).status,401);
+    assert.equal((await request(`${appOrigin}/api/jira/attachment-manifest`,{...inventoryOptions,headers:{...inventoryOptions.headers,Origin:"https://other.example"}})).status,403);
     const fileBody = JSON.stringify({ commentUrl: `${jiraOrigin}/jira7/browse/QA-1?focusedCommentId=10001`, attachmentId: "42" });
     const downloaded = await request(`${appOrigin}/api/jira/import-attachment`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: fileBody,

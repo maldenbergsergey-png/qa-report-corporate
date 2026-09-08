@@ -22,4 +22,18 @@ async function downloadJiraAttachment({ connection, issueKey, attachmentId, jira
   const bytes = await readBytes(response.body, maxBytes);
   return { bytes, name: cleanName(attachment.filename), type: fileType(bytes, attachment.mimeType || type) };
 }
-module.exports = { downloadJiraAttachment };
+async function listJiraAttachments({ connection, issueKey, jiraFetch }) {
+  const version = connection.type === "cloud" ? "3" : "2";
+  const issue = await jiraFetch(connection, `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}?fields=attachment`);
+  if (!Array.isArray(issue.fields?.attachment)) throw new Error("Jira не вернула список вложений. Публикация остановлена, чтобы не создать дубликаты");
+  const safeUrl = value => {
+    if (!value) return "";
+    const url = new URL(value, `${connection.baseUrl}/`);
+    return url.origin === new URL(connection.baseUrl).origin && !url.username && !url.password ? url.href : "";
+  };
+  return issue.fields.attachment.map(item => ({
+    id: String(item.id), filename: item.filename, mimeType: item.mimeType, size: item.size,
+    content: safeUrl(item.content), thumbnail: safeUrl(item.thumbnail),
+  }));
+}
+module.exports = { downloadJiraAttachment, listJiraAttachments };

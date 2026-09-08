@@ -4919,7 +4919,7 @@ body.pin-number-columns .section-header-table .number-header::before,
 #localImportModal .button:disabled { opacity: .5; cursor: default; }
 
 /* Jira import: prominent attachment option and a separate loading state. */
-#importModal .import-modal { width: min(920px, calc(100vw - 48px)); height: auto; max-height: min(760px, calc(100dvh - 48px)); }
+#importModal .import-modal { width: min(920px, calc(100vw - 48px)); height: auto; max-height: min(860px, calc(100dvh - 48px)); }
 #importModal .import-body { display: flex; flex-direction: column; gap: 20px; overflow: auto; }
 #importModal .import-body > * { flex-shrink: 0; }
 #importModal .import-textarea { min-height: clamp(160px, 32vh, 360px); }
@@ -4964,3 +4964,55 @@ body.pin-number-columns .section-header-table .number-header::before,
   #applyImportButton .button-spinner, .import-progress-bar.is-indeterminate > span { animation: none; }
   .import-progress-bar > span { transition: none; }
 }
+
+/* Attachment selection follows the import dialog's existing spacing and colors. */
+.import-preview-meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.import-preview-meta[hidden], .import-attachment-choices[hidden], .publish-attachment-summary[hidden] { display: none; }
+.import-attachment-choices { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.import-choices-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+#importSelectionCount { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#importColumnList { padding: 0 16px; }
+.import-column-group { min-width: 0; margin: 0; padding: 8px 0; border: 0; }
+.import-column-group + .import-column-group { border-top: 1px solid var(--line); }
+.import-column-group legend { padding: 12px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+.import-column-choice { display: flex; align-items: center; gap: 12px; margin: 2px -6px; padding: 10px 6px; border-radius: 6px; cursor: pointer; }
+.import-column-choice:hover { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+.import-column-choice:has(input:disabled) { cursor: default; color: var(--muted); }
+.import-column-choice input { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; accent-color: var(--primary); }
+.import-column-copy { display: grid; min-width: 0; gap: 4px; flex: 1; }
+.import-column-copy strong { font-size: 14px; font-weight: 500; }
+.import-column-copy small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-column-count { min-width: 26px; padding: 3px 6px; border-radius: 5px; background: var(--line-soft); color: var(--muted); text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+#importModal .import-column-hint { border-top: 1px solid var(--line); padding: 12px 16px; font-size: 12px; }
+#importModal:has(#importAttachmentChoices:not([hidden])) .import-body { gap: 14px; }
+.jira-attachment-reference { border-style: dashed; }
+.jira-attachment-reference .file-type-badge { background: var(--line-soft); color: var(--muted); }
+.jira-attachment-reference.is-loading { opacity: .65; pointer-events: none; }
+.publish-attachment-summary { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-size: 14px; font-variant-numeric: tabular-nums; }
+@media (max-width:600px) {
+  .import-choices-heading { padding: 12px; }
+  #importColumnList { padding: 0 12px; }
+  #importModal .import-column-hint { padding: 12px; }
+}
+
+#importModal.has-import-preview .import-source-tabs,
+#importModal.has-import-preview .import-pane { display: none; }
+.import-source-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 14px; }
+.import-source-summary[hidden] { display: none; }
+#importSourceTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+#changeImportSource { flex-shrink: 0; padding: 6px 0; border: 0; background: transparent; color: var(--primary); cursor: pointer; }
+#importModal .import-column-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+#importModal .import-column-choice { margin-right: 0; }
+.import-files-toggle { min-width: 42px; min-height: 36px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-variant-numeric: tabular-nums; }
+.import-files-toggle:hover, .import-files-toggle[aria-expanded="true"] { color: var(--ink); background: var(--line-soft); }
+.import-file-list { grid-column: 1 / -1; margin: 0 0 10px 32px; padding: 10px 12px; list-style: none; border-left: 2px solid var(--line); color: var(--muted); font-size: 12px; }
+.import-file-list[hidden] { display: none; }
+.import-file-list li { padding: 4px 0; overflow-wrap: anywhere; }
+
+#importModal .import-modal { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+#importModal .import-progress { margin: 0 22px; padding: 14px 0; border-top: 1px solid var(--line); }
+#importModal .import-column-choice:has(input[data-unavailable="true"]) input { cursor: default; }
+
+.import-source-copy { display: grid; gap: 6px; min-width: 0; }
+
+#importModal .local-import-option[hidden] { display: none; }

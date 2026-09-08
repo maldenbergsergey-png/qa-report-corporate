@@ -10,7 +10,7 @@ const DB_NAME = "qa-report-editor";
 const DB_VERSION = 1;
 const REPORT_STORE = "reports";
 const HISTORY_LIMIT = 50;
-const REQUIRED_API_REVISION = 7;
+const REQUIRED_API_REVISION = 8;
 const FILE_ATTACHMENT_MAX_SIZE = 50 * 1024 * 1024;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
 const { parseJiraMarkup, normalizeStatus, stripSectionNumber } = window.QaReportJiraImport;
@@ -382,6 +382,8 @@ let historyTimer;
 let suppressHistory = false;
 let importSource = "markup";
 let pendingImportedDraft = null;
+let preparedImport = null;
+let importLocationSelection = new Set();
 let dbPromise;
 let draggedCodeBlock = null;
 let draggedImageFigure = null;
@@ -557,7 +559,7 @@ function sanitizeRichHtml(value) {
   const allowedAttributes = new Set([
     "alt", "class", "contenteditable", "data-align", "data-attachment-id", "data-file-extension",
     "data-file-name", "data-file-size", "data-jira-id", "data-jira-name", "data-jira-thumbnail",
-    "data-jira-options", "data-jira-url", "data-language", "data-mime-type", "data-qa-code-snippet", "data-data-url",
+    "data-jira-options", "data-jira-url", "data-jira-source-issue", "data-jira-source-hash", "data-jira-kind", "data-jira-exact-url", "data-language", "data-mime-type", "data-qa-code-snippet", "data-data-url",
     "href", "rel", "src", "style", "target", "title",
   ]);
   const safeUrl = (raw, { image = false, fileData = false } = {}) => {
@@ -3260,10 +3262,10 @@ function htmlToWiki(html) {
       const name = node.dataset.jiraName || node.dataset.fileName || node.alt || "image.png";
       if (isStoredObjectUrl(node.src)) return `[${name}|${node.src}]`;
       const jiraOptions = node.dataset.jiraOptions;
-      if (jiraOptions) return `!${name}|${jiraOptions}!`;
+      if (jiraOptions) return `!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|${jiraOptions}!`;
       // Ссылка по имени вложения даёт Jira возможность открыть изображение
       // во встроенном просмотрщике, а параметр thumbnail оставляет его компактным.
-      return `!${name}|thumbnail!`;
+      return `!${node.dataset.jiraExactUrl === "true" && node.dataset.jiraUrl ? node.dataset.jiraUrl : name}|thumbnail!`;
     }
     if (tag === "figure") return `\n${content}\n`;
     if (tag === "br") return "\n";
@@ -4035,6 +4037,7 @@ function openPublishProgress() {
   elements.publishCancelButton.textContent = "Отменить";
   elements.publishCancelButton.disabled = false;
   elements.publishErrorText.hidden = true;
+  document.getElementById("publishAttachmentSummary").hidden = true;
   elements.publishErrorText.textContent = "";
   elements.publishProgressHint.textContent = "Не закрывайте страницу до завершения публикации.";
   syncBodyModalOverflow();
@@ -4087,55 +4090,40 @@ function cancelPublishProgress() {
 
 async function uploadPendingImages(settings, issue, options = {}) {
   const { signal, onProgress = () => {}, sectionIds = null, statuses = null } = options;
-  const files = [
-    ...collectLocalImages({ sectionIds, statuses }),
-    ...collectLocalFiles({ sectionIds, statuses }),
-  ];
-  if (!files.length) return [];
-  const uploaded = [];
-  let index = 0;
-  onProgress({ done: 0, total: files.length });
-  while (index < files.length) {
+  const reuse = window.QaReportJiraReuse;
+  const publication = { ...draft, sections: sectionsForPublication(sectionIds, draft, statuses) };
+  const assets = reuse.collect(publication);
+  const summary = document.getElementById("publishAttachmentSummary"); summary.hidden = true;
+  if (!assets.length) return [];
+  setPublishProgress({ step: "prepare", percent: 10, status: "Проверяем вложения в Jira…" });
+  const manifest = await jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal });
+  if (!manifest.attachmentReuse) throw new Error("Обновите подключение Jira: проверка существующих вложений не поддерживается");
+  const plan = await reuse.plan(assets, { issueUrl: manifest.issueUrl, attachments: manifest.attachments, signal,
+    loadSource: async source => window.QaReportAttachments.dataUrl(await jiraRequest("/api/jira/import-attachment", {
+      ...settings, commentUrl: source.issueUrl, attachmentId: source.id,
+    }, { binary: true, signal })),
+  });
+  summary.textContent = `Уже в Jira: ${plan.reused.length} · Загрузим: ${plan.uploads.length}`; summary.hidden = false;
+  const persist = async entries => {
+    const changes = reuse.bindings(entries);
+    reuse.apply(draft, changes); reuse.applyRoot(elements.introEditor, changes); reuse.applyRoot(elements.sections, changes);
+    if (await saveDraft() === false) throw new Error("Не удалось сохранить связь с вложениями. Проверьте текущую версию отчёта");
+    await saveReportSnapshot("jira-attachment-links");
+  };
+  if (plan.reused.length) await persist(plan.reused);
+  const uploaded = []; onProgress({done:0,total:plan.uploads.length});
+  for (const [index, file] of plan.uploads.entries()) {
     signal?.throwIfAborted?.();
-    const batch = files.slice(index, index + ATTACHMENT_UPLOAD_BATCH_SIZE);
-    try {
-      const result = await publishJiraRequest(
-        "/api/jira/attachments",
-        {
-          ...settings,
-          ...issue,
-          files: batch.map(({ attachmentId, name, type, dataBase64 }) => ({
-            attachmentId,
-            name,
-            type,
-            dataBase64,
-          })),
-        },
-        { signal },
-      );
-      const attachments = result.attachments || [];
-      uploaded.push(...attachments);
-      applyUploadedAttachments(attachments);
-      saveDraft();
-      index += batch.length;
-      onProgress({ done: index, total: files.length, current: batch.at(-1)?.name || "" });
-    } catch (error) {
-      if (error instanceof JiraRequestError && error.status === 413 && batch.length === 1) {
-        throw new JiraRequestError(
-          `Вложение «${batch[0].name}» слишком большое для nginx/Jira. ` +
-            "Файлы отправляются по одному; если файл небольшой, увеличьте лимит тела запроса в reverse proxy.",
-          {
-            status: 413,
-            path: "/api/jira/attachments",
-            payload: error.payload,
-          },
-        );
-      }
-      throw error;
-    }
+    // Uploads are not retried automatically: a lost response may hide a successful upload.
+    const result = await jiraRequest("/api/jira/attachments", {
+      ...settings, ...issue,
+      files:[{attachmentId:file.attachmentId,name:file.name,type:file.type,dataBase64:file.dataBase64}],
+    }, {signal});
+    const attachment = result.attachments?.find(item=>item.attachmentId===file.attachmentId);
+    if (!attachment?.id) throw new Error(`Jira не подтвердила загрузку «${file.name}»`);
+    await persist([{...file,...attachment}]); uploaded.push(attachment);
+    onProgress({done:index+1,total:plan.uploads.length,current:attachment.filename});
   }
-  saveDraft();
-  render();
   return uploaded;
 }
 
@@ -4297,7 +4285,7 @@ async function publishToJira() {
         setPublishProgress({
           step: "attachments",
           percent,
-          status: `Загрузка вложений: ${done} из ${total}`,
+          status: total ? `Загрузка вложений: ${done} из ${total}` : "Используем существующие вложения",
         });
       },
     });
@@ -4352,6 +4340,7 @@ function closePreview() {
 function openImport() {
   if (elements.applyImportButton.disabled) return;
   setImportBusy(false);
+  resetImportPreview();
   elements.importMarkup.value = "";
   elements.commentImportUrl.value = "";
   elements.importWarning.hidden = true;
@@ -5333,6 +5322,8 @@ function fileCardToWiki(card) {
   const name = card.dataset.jiraName || card.dataset.fileName || "file";
   const storageUrl = isStoredObjectUrl(card.dataset.dataUrl) ? card.dataset.dataUrl : "";
   const url = card.dataset.jiraUrl || storageUrl;
+  if (card.dataset.jiraKind === "image") return `!${card.dataset.jiraExactUrl === "true" && url ? url : name}|thumbnail!`;
+  if (card.dataset.jiraExactUrl === "true" && url) return `[${name}|${url}]`;
   if (card.dataset.jiraName) return `[^${name}]`;
   return url ? `[${name}|${url}]` : `[Файл: ${name}]`;
 }
@@ -5349,7 +5340,31 @@ function extractFileCardHtml(html) {
   return `${card.outerHTML}<p><br></p>`;
 }
 
+async function loadJiraReference(card) {
+  if (card.classList.contains("is-loading")) return;
+  const reportId = draft.reportId;
+  const source = { issueUrl: card.dataset.jiraSourceIssue, id: card.dataset.jiraId,
+    name: card.dataset.jiraName || card.dataset.fileName, url: card.dataset.jiraUrl, kind: card.dataset.jiraKind };
+  const meta = card.querySelector(".file-card-meta");
+  card.classList.add("is-loading"); if (meta) meta.textContent = "Скачиваем из Jira…"; pwaPendingOperations++;
+  try {
+    const blob = await jiraRequest("/api/jira/import-attachment", {
+      commentUrl: source.issueUrl, attachmentId: source.id,
+    }, {binary:true});
+    if (blob.size > 50 * 1048576) throw new Error("Вложение больше 50 МБ");
+    const file = {id:card.dataset.attachmentId,name:source.name,type:blob.type || "application/octet-stream",size:blob.size,
+      dataUrl:await window.QaReportAttachments.dataUrl(blob),source:{...source,hash:await window.QaReportAttachments.hashBlob(blob)}};
+    if (draft.reportId !== reportId || !card.isConnected) throw new Error("Открыт другой отчёт. Повторите загрузку");
+    const template = document.createElement("template"); template.innerHTML = window.QaReportAttachments.render(file);
+    card.replaceWith(template.content);
+    if (await saveDraft() === false) throw new Error("Не удалось сохранить файл в текущем отчёте");
+    await saveReportSnapshot("jira-reference-download"); render(); showToast("Файл сохранён в браузере");
+  } catch(error) {showToast(`Не удалось скачать вложение: ${error.message}`,9000);}
+  finally {pwaPendingOperations--;card.classList.remove("is-loading");if(meta)meta.textContent="В Jira · не скачан в браузер";}
+}
+
 async function downloadFileCard(card) {
+  if (card.classList.contains("jira-attachment-reference")) return loadJiraReference(card);
   try {
     const dataUrl = card.dataset.dataUrl || card.dataset.jiraUrl || "";
     if (!dataUrl) throw new Error("У файла нет локальных данных");
@@ -5475,7 +5490,7 @@ function showFileMenu(card, anchor = card) {
         : null;
   showFloatingMenu(anchor, [
     storageAction,
-    { label: "Скачать файл", icon: "download", action: () => downloadFileCard(card) },
+    { label: card.classList.contains("jira-attachment-reference") ? "Скачать в браузер" : "Скачать файл", icon: "download", action: () => downloadFileCard(card) },
   ].filter(Boolean));
 }
 
@@ -5730,105 +5745,6 @@ function startImageResize(event, figure) {
   document.addEventListener("pointercancel", onEnd);
 }
 
-function collectLocalImages(options = {}) {
-  const { sectionIds = null, statuses = null } = options;
-  const images = [];
-  const container = document.createElement("div");
-  const usedNumbers = [];
-  const allHtml = [
-    draft.intro,
-    ...draft.sections.flatMap((section) =>
-      section.rows.flatMap((row) => Object.values(row.cells)),
-    ),
-  ];
-  allHtml.forEach((html) => {
-    container.innerHTML = html || "";
-    container.querySelectorAll("img").forEach((image) => {
-      const name = image.dataset.jiraName || image.dataset.fileName || "";
-      const match = name.match(/^screenshot-(\d+)\./i);
-      if (match) usedNumbers.push(Number(match[1]));
-    });
-  });
-  let screenshotNumber = Math.max(0, ...usedNumbers) + 1;
-  const extensionByType = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/gif": "gif",
-    "image/webp": "webp",
-  };
-  const collectFromHtml = (html, location) => {
-    container.innerHTML = html || "";
-    container.querySelectorAll("img[data-attachment-id]").forEach((image) => {
-      // Локальный data URL остаётся исходником изображения и после публикации.
-      // Загружаем его заново при каждой отправке: старое вложение пользователь
-      // мог удалить из Jira, а новый комментарий не должен от него зависеть.
-      if (!image.src.startsWith("data:")) return;
-      const [, dataBase64 = ""] = image.src.split(",");
-      const type = image.dataset.mimeType || "image/png";
-      const extension = extensionByType[type] || "png";
-      images.push({
-        attachmentId: image.dataset.attachmentId,
-        name: `screenshot-${screenshotNumber}.${extension}`,
-        type,
-        dataBase64,
-        ...location,
-      });
-      screenshotNumber += 1;
-    });
-  };
-  collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of sectionsForPublication(sectionIds, draft, statuses)) {
-    for (const row of section.rows) {
-      for (const [columnId, html] of Object.entries(row.cells)) {
-        collectFromHtml(html, {
-          location: "cell",
-          sectionId: section.id,
-          rowId: row.id,
-          columnId,
-        });
-      }
-    }
-  }
-  return images;
-}
-
-function collectLocalFiles(options = {}) {
-  const { sectionIds = null, statuses = null } = options;
-  const files = [];
-  const collectFromHtml = (html, location) => {
-    const container = document.createElement("div");
-    container.innerHTML = html || "";
-    container.querySelectorAll(".cell-file[data-attachment-id]").forEach((card) => {
-      if (card.dataset.jiraUrl) return;
-      const dataUrl = card.dataset.dataUrl || "";
-      const [, dataBase64 = ""] = dataUrl.split(",");
-      if (!dataBase64) return;
-      files.push({
-        attachmentId: card.dataset.attachmentId,
-        name: card.dataset.fileName || "file",
-        type: card.dataset.mimeType || "application/octet-stream",
-        size: Number(card.dataset.fileSize) || 0,
-        dataBase64,
-        ...location,
-      });
-    });
-  };
-  collectFromHtml(draft.intro, { location: "intro" });
-  for (const section of sectionsForPublication(sectionIds, draft, statuses)) {
-    for (const row of section.rows) {
-      for (const [columnId, html] of Object.entries(row.cells)) {
-        collectFromHtml(html, {
-          location: "cell",
-          sectionId: section.id,
-          rowId: row.id,
-          columnId,
-        });
-      }
-    }
-  }
-  return files;
-}
-
 function collectCurrentAttachments() {
   const attachments = [];
   const seen = new Set();
@@ -5913,9 +5829,9 @@ function setImportBusy(busy) {
   elements.applyImportButton.disabled = busy;
   elements.applyImportButton.setAttribute("aria-busy", String(busy));
   elements.applyImportButton.querySelector(".button-spinner").hidden = !busy;
-  elements.applyImportButton.querySelector(".button-label").textContent = busy ? "Импортируем…" : "Импортировать";
-  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton")) {
-    control.disabled = busy;
+  elements.applyImportButton.querySelector(".button-label").textContent = busy ? (preparedImport ? "Импортируем…" : "Проверяем…") : (preparedImport ? "Импортировать" : "Продолжить");
+  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton, #changeImportSource, #importColumnList input, #importColumnList button")) {
+    control.disabled = busy || control.dataset.unavailable === "true";
   }
   if (!busy) document.getElementById("importProgress").hidden = true;
 }
@@ -5939,14 +5855,95 @@ function setImportProgress(label, completed, total) {
   }
 }
 
-async function prepareImport() {
+function resetImportPreview() {
+  preparedImport = null; pendingImportedDraft = null; importLocationSelection = new Set();
+  elements.importModal.classList.remove("has-import-preview");
+  document.getElementById("importSourceSummary").hidden = true;
+  document.getElementById("importTitle").textContent = "Импорт чек-листа из Jira";
+  document.getElementById("importAttachmentsHint").textContent = "Изображения и файлы сохранятся в этом браузере";
+  document.getElementById("importAttachmentChoices").hidden = true;
+  document.getElementById("importPreviewMeta").hidden = true;
+  const master = document.getElementById("importWithAttachments");
+  master.indeterminate = false; master.disabled = false; delete master.dataset.unavailable;
+  master.closest("label").hidden = false;
+  elements.importSummary.hidden = true; elements.importWarning.hidden = true;
+  if (!elements.applyImportButton.disabled) setImportBusy(false);
+}
+
+function syncImportSelection() {
+  if (!preparedImport) return;
+  const columns = preparedImport.catalogue.groups.flatMap(group => group.columns).filter(column => column.keys.length);
+  const selected = columns.filter(column => importLocationSelection.has(column.id));
+  const master = document.getElementById("importWithAttachments");
+  master.checked = columns.length > 0 && selected.length === columns.length;
+  master.indeterminate = selected.length > 0 && selected.length < columns.length;
+  const keys = new Set(selected.flatMap(column => column.keys));
+  document.getElementById("importSelectionCount").textContent = preparedImport.catalogue.total ? `К скачиванию: ${keys.size} из ${preparedImport.catalogue.total}` : "Вложений нет";
+  document.getElementById("importAttachmentsHint").textContent = keys.size ? "Скачиваем только выбранные колонки. Остальные файлы останутся в Jira." : "Файлы останутся на своих местах ссылками на Jira.";
+  pendingImportedDraft = null;
+}
+
+function renderImportChoices() {
+  const panel = document.getElementById("importAttachmentChoices");
+  const list = document.getElementById("importColumnList"); list.replaceChildren(); panel.hidden = false;
+  elements.importModal.classList.add("has-import-preview");
+  document.getElementById("importTitle").textContent = preparedImport.catalogue.total ? "Выберите вложения" : "Чек-лист готов к импорту";
+  document.getElementById("importChoicesTitle").textContent = preparedImport.catalogue.total ? "Вложения по колонкам" : "Колонки чек-листа";
+  const sourceSummary = document.getElementById("importSourceSummary"); sourceSummary.hidden = false;
+  const sourceTitle = document.getElementById("importSourceTitle");
+  sourceTitle.textContent = importSource === "comment" ? `Комментарий Jira · ${preparedImport.document.issueUrl.split("/").pop()}` : "Из вставленной разметки";
+  sourceTitle.title = importSource === "comment" ? elements.commentImportUrl.value : "";
+  for (const group of preparedImport.catalogue.groups) {
+    const section = document.createElement("fieldset"); section.className = "import-column-group";
+    const legend = document.createElement("legend"); legend.textContent = group.title || "Раздел"; section.append(legend);
+    for (const column of group.columns) {
+      const row = document.createElement("label"); row.className = "import-column-choice";
+      const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.value = column.id;
+      checkbox.checked = importLocationSelection.has(column.id); checkbox.disabled = !column.keys.length;
+      if (!column.keys.length) checkbox.dataset.unavailable = "true";
+      const copy = document.createElement("span"); copy.className = "import-column-copy";
+      const title = document.createElement("strong"); title.textContent = column.title;
+      const files = document.createElement("small");
+      const names = column.files.map(file => file.name);
+      files.textContent = names.length ? names.slice(0,2).join(", ") + (names.length>2 ? ` и ещё ${names.length-2}` : "") : "Без вложений";
+      if (column.missing) files.textContent += ` · Недоступно: ${column.missing}`;
+      files.title = names.join("\n"); copy.append(title,files);
+      const count = document.createElement("span"); count.className = "import-column-count"; count.textContent = String(column.keys.length);
+      row.append(checkbox,copy);
+      const item = document.createElement("div"); item.className = "import-column-item"; item.append(row);
+      if (names.length) {
+        const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "import-files-toggle";
+        toggle.textContent = `${names.length} ▾`; toggle.setAttribute("aria-expanded","false");
+        toggle.setAttribute("aria-label",`Показать файлы: ${column.title}`);
+        const details = document.createElement("ul"); details.className = "import-file-list"; details.hidden = true;
+        details.id = `import-files-${list.children.length}-${section.children.length}`; toggle.setAttribute("aria-controls",details.id);
+        for (const name of names) {const file = document.createElement("li");file.textContent = name;details.append(file);}
+        toggle.addEventListener("click",()=>{details.hidden=!details.hidden;toggle.setAttribute("aria-expanded",String(!details.hidden));toggle.textContent=`${names.length} ${details.hidden ? "▾":"▴"}`;});
+        item.append(toggle,details);
+      } else item.append(count);
+      section.append(item);
+      checkbox.addEventListener("change",()=>{if(checkbox.checked)importLocationSelection.add(column.id);else importLocationSelection.delete(column.id);syncImportSelection();});
+    }
+    list.append(section);
+  }
+  const master = document.getElementById("importWithAttachments");
+  master.dataset.unavailable = preparedImport.catalogue.total ? "false" : "true";
+  master.closest("label").hidden = !preparedImport.catalogue.total;
+  const rows = preparedImport.document.sections.reduce((sum,section)=>sum+section.rows.length,0);
+  const meta = document.getElementById("importPreviewMeta"); meta.hidden = false;
+  meta.textContent = `Разделов: ${preparedImport.document.sections.length} · Строк: ${rows}`;
+  document.getElementById("importColumnHint").textContent = importSource === "markup" && preparedImport.catalogue.total ? "Для скачивания файлов используйте ссылку на комментарий Jira. Текст всех колонок будет импортирован." : "Текст всех колонок будет импортирован. Один и тот же файл скачивается один раз.";
+  syncImportSelection();
+}
+
+async function analyzeImport() {
+  setImportBusy(true); pwaPendingOperations++;
+  elements.importWarning.hidden = true;
+  setImportProgress(importSource === "comment" ? "Разбираем комментарий Jira…" : "Разбираем чек-лист…");
   try {
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const includeAttachments = document.getElementById("importWithAttachments").checked;
-    let attachmentRequest = {};
-    let imported;
-    let importFiles = [];
-    let attachmentErrors = [];
-    let loadedAttachments = 0;
+    let attachmentRequest = {}, imported, importFiles = [];
     if (importSource === "markup") {
       imported = parseJiraMarkup(elements.importMarkup.value);
     } else {
@@ -5957,29 +5954,26 @@ async function prepareImport() {
       imported.issueUrl = result.issueUrl || "";
       importFiles = result.attachments || [];
     }
-    const localized = await window.QaReportAttachments.localize(imported, {
-      attachments: importFiles, include: includeAttachments,
-      load: attachment => jiraRequest("/api/jira/import-attachment", {
-        ...attachmentRequest, attachmentId: attachment.id,
-      }, { binary: true }),
-      onProgress: ({ completed, total }) => setImportProgress("Загрузка вложений", completed, total),
-    });
-    imported = localized.document; attachmentErrors = localized.errors; loadedAttachments = localized.loaded;
-    pendingImportedDraft = imported;
-    const rows = imported.sections.reduce((sum, section) => sum + section.rows.length, 0);
-    const columns = imported.sections.reduce((sum, section) => sum + section.columns.length, 0);
-    elements.importSummary.textContent = `Найдено: ${imported.sections.length} таблиц, ${rows} строк, ${columns} пользовательских колонок. Окружение: ${imported.environment}; итог: ${imported.overallStatus}.`;
-    elements.importSummary.hidden = false;
-    elements.importSummary.textContent += ` Вложений загружено: ${loadedAttachments}.`;
-    elements.importWarning.hidden = !attachmentErrors.length;
-    elements.importWarning.textContent = attachmentErrors.join("\n");
-    return imported;
-  } catch (error) {
-    elements.importWarning.textContent = friendlyJiraError(error);
-    elements.importWarning.hidden = false;
-    pendingImportedDraft = null;
-    throw error;
-  }
+    const catalogue = window.QaReportAttachments.inspect(imported, importFiles);
+    preparedImport = {document:imported,attachments:importFiles,attachmentRequest,catalogue};
+    importLocationSelection = new Set(includeAttachments ? catalogue.groups.flatMap(group=>group.columns.filter(column=>column.keys.length).map(column=>column.id)) : []);
+    renderImportChoices();
+  } catch(error) {
+    elements.importWarning.textContent = friendlyJiraError(error); elements.importWarning.hidden = false;
+    preparedImport = null;
+  } finally {setImportBusy(false);pwaPendingOperations--;}
+}
+
+async function prepareImport() {
+  const {document:source,attachments,attachmentRequest} = preparedImport;
+  const localized = await window.QaReportAttachments.localize(source, {
+    attachments, include:importLocationSelection.size>0, locations:importLocationSelection, sourceIssueUrl:source.issueUrl || "",
+    load:attachment=>jiraRequest("/api/jira/import-attachment",{...attachmentRequest,attachmentId:attachment.id},{binary:true}),
+    onProgress:({completed,total})=>setImportProgress("Загрузка вложений",completed,total),
+  });
+  pendingImportedDraft = localized.document;
+  elements.importWarning.hidden = !localized.errors.length; elements.importWarning.textContent = localized.errors.join("\n");
+  return localized.document;
 }
 
 function hasReportDataToReplace() {
@@ -6020,6 +6014,7 @@ function importedDraftInCurrentReport(imported) {
 
 async function applyImport(mode = "replace") {
   if (elements.applyImportButton.disabled) return;
+  if (!pendingImportedDraft && !preparedImport) return analyzeImport();
   const reportIdAtStart = draft.reportId;
   setImportBusy(true);
   elements.importSummary.hidden = true;
@@ -7271,9 +7266,14 @@ document.addEventListener(
   },
   true,
 );
+document.getElementById("changeImportSource").addEventListener("click", () => {
+  resetImportPreview();
+  (importSource === "comment" ? elements.commentImportUrl : elements.importMarkup).focus();
+});
 document.querySelectorAll(".import-source-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     importSource = tab.dataset.importSource;
+    resetImportPreview();
     document.querySelectorAll(".import-source-tab").forEach((item) => item.classList.remove("active"));
     tab.classList.add("active");
     elements.markupImportPane.hidden = importSource !== "markup";
@@ -7700,10 +7700,14 @@ document.getElementById("resetDefaultColumns").addEventListener("click", () => {
   renderDefaultColumnsSettings(); setSettingsSavedState(false);
 });
 
-for (const input of [elements.importMarkup, elements.commentImportUrl, document.getElementById("importWithAttachments")]) {
-  input.addEventListener("input", () => {
-    pendingImportedDraft = null;
-    elements.importWarning.hidden = true;
-    elements.importSummary.hidden = true;
-  });
+for (const input of [elements.importMarkup, elements.commentImportUrl]) {
+  input.addEventListener("input", resetImportPreview);
 }
+document.getElementById("importWithAttachments").addEventListener("change", () => {
+  pendingImportedDraft = null;
+  if (!preparedImport) return;
+  const columns = preparedImport.catalogue.groups.flatMap(group=>group.columns).filter(column=>column.keys.length);
+  importLocationSelection = new Set(document.getElementById("importWithAttachments").checked ? columns.map(column=>column.id) : []);
+  for (const checkbox of document.querySelectorAll("#importColumnList input")) checkbox.checked = importLocationSelection.has(checkbox.value);
+  syncImportSelection();
+});

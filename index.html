@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=90" />
+    <link rel="stylesheet" href="/styles.css?v=91" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -450,6 +450,7 @@
             <li data-step="verify">Проверка результата</li>
           </ol>
           <p class="publish-status" id="publishStatusText">Ожидание запуска</p>
+          <div class="publish-attachment-summary" id="publishAttachmentSummary" role="status" hidden></div>
           <p class="publish-error" id="publishErrorText" hidden></p>
         </div>
         <footer class="modal-footer">
@@ -511,7 +512,7 @@
         <header class="modal-header">
           <div>
             <div class="eyebrow">Импорт</div>
-            <h2 id="importTitle">Вставить чек-лист из Jira</h2>
+            <h2 id="importTitle">Импорт чек-листа из Jira</h2>
           </div>
           <button class="icon-button" id="closeImportButton" type="button" aria-label="Закрыть импорт">×</button>
         </header>
@@ -537,24 +538,30 @@
               <input id="commentImportUrl" type="url" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
             </label>
             <p>
-              Вставьте прямую ссылку на комментарий Jira. Подключение берётся из настроек Jira.
+              Вставьте ссылку на комментарий Jira. На следующем шаге выберите, из каких колонок скачать вложения.
             </p>
           </div>
+          <div id="importSourceSummary" class="import-source-summary" hidden><span class="import-source-copy"><span id="importSourceTitle"></span><span id="importPreviewMeta" class="import-preview-meta" role="status" hidden></span></span><button type="button" id="changeImportSource" class="text-button">Изменить</button></div>
           <label class="local-import-option">
             <input id="importWithAttachments" type="checkbox" checked aria-describedby="importAttachmentsHint" />
-            <span class="import-option-copy"><strong>Импортировать с вложениями</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
+            <span class="import-option-copy"><strong>Скачать вложения в браузер</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
           </label>
-          <div class="import-progress" id="importProgress" hidden>
-            <div class="import-progress-heading" role="status" aria-live="polite" aria-atomic="true"><span id="importProgressLabel"></span><span id="importProgressCount"></span></div>
-            <div class="import-progress-bar is-indeterminate" id="importProgressBar" role="progressbar" aria-labelledby="importProgressLabel" aria-valuemin="0"><span></span></div>
-          </div>
+          <section class="import-attachment-choices" id="importAttachmentChoices" aria-label="Выбор вложений по колонкам" hidden>
+            <div class="import-choices-heading"><strong id="importChoicesTitle">Вложения по колонкам</strong><span id="importSelectionCount"></span></div>
+            <div id="importColumnList"></div>
+            <p id="importColumnHint" class="import-column-hint"></p>
+          </section>
           <div class="import-warning" id="importWarning" hidden></div>
           <div class="import-summary" id="importSummary" hidden></div>
+        </div>
+        <div class="import-progress" id="importProgress" hidden>
+          <div class="import-progress-heading" role="status" aria-live="polite" aria-atomic="true"><span id="importProgressLabel"></span><span id="importProgressCount"></span></div>
+          <div class="import-progress-bar is-indeterminate" id="importProgressBar" role="progressbar" aria-labelledby="importProgressLabel" aria-valuemin="0"><span></span></div>
         </div>
         <footer class="modal-footer">
           <span>Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.</span>
           <div class="modal-actions">
-            <button class="button button-primary" id="applyImportButton" type="button"><span class="button-spinner" aria-hidden="true" hidden></span><span class="button-label">Импортировать</span></button>
+            <button class="button button-primary" id="applyImportButton" type="button"><span class="button-spinner" aria-hidden="true" hidden></span><span class="button-label">Продолжить</span></button>
           </div>
         </footer>
       </section>
@@ -911,9 +918,10 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=5"></script>
-    <script src="/attachment-import.js?v=2"></script>
-    <script src="/app.js?v=93"></script>
+    <script src="/release-notes.js?v=6"></script>
+    <script src="/jira-attachment-reuse.js?v=1"></script>
+    <script src="/attachment-import.js?v=3"></script>
+    <script src="/app.js?v=94"></script>
     <script src="/local-import-client.js?v=1"></script>
   </body>
 </html>

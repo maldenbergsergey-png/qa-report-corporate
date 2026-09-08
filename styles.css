@@ -5016,3 +5016,18 @@ body.pin-number-columns .section-header-table .number-header::before,
 .import-source-copy { display: grid; gap: 6px; min-width: 0; }
 
 #importModal .local-import-option[hidden] { display: none; }
+
+/* References keep their Jira syntax without pretending to be downloaded files. */
+.jira-image-placeholder, .jira-file-placeholder {
+  display: inline-block; max-width: 100%; margin: 3px 0; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--line-soft);
+  color: var(--ink); font-size: 13px; line-height: 1.5; vertical-align: baseline;
+  overflow-wrap: anywhere;
+}
+.jira-image-placeholder::before, .jira-file-placeholder::before {
+  content: "JIRA"; margin-right: 7px; color: var(--muted); font-size: 10px;
+  font-weight: 700; letter-spacing: .04em;
+}
+.import-column-choice.is-reference-only { cursor: default; }
+.import-column-choice.is-reference-only:hover { background: transparent; }
+.import-column-item:has(.is-reference-only) .import-file-list { margin-left: 0; }

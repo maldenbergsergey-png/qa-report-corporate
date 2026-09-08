@@ -211,7 +211,7 @@
       const src = thumbnailUrl || attachmentUrl || externalUrl;
       if (!src) {
         return protect(
-          `<span class="jira-image-placeholder" data-jira-name="${escapeHtml(filename)}" data-jira-options="${escapeHtml(options)}">${escapeHtml(filename)}</span>`,
+          `<span class="jira-image-placeholder" contenteditable="false" title="Ссылка на вложение Jira. Файл не скачан в браузер." data-jira-name="${escapeHtml(filename)}" data-jira-options="${escapeHtml(options)}">${escapeHtml(filename)}</span>`,
         );
       }
       const attachmentId = attachment?.id ? ` data-attachment-id="${escapeHtml(attachment.id)}"` : "";
@@ -230,7 +230,7 @@
       const name = rawName.trim();
       const matches = attachments.filter(item => item.filename === name);
       const attachment = matches.length === 1 ? matches[0] : null;
-      return protect(`<span class="jira-file-placeholder" data-jira-name="${escapeHtml(name)}"${attachment?.id ? ` data-jira-id="${escapeHtml(attachment.id)}"` : ""}>${escapeHtml(name)}</span>`);
+      return protect(`<span class="jira-file-placeholder" contenteditable="false" title="Ссылка на вложение Jira. Файл не скачан в браузер." data-jira-name="${escapeHtml(name)}"${attachment?.id ? ` data-jira-id="${escapeHtml(attachment.id)}"` : ""}>${escapeHtml(name)}</span>`);
     });
     const replaceWikiLinks = (input) => {
       let output = "";

@@ -77,7 +77,7 @@
         if (!chosen(part)) {
           if (source) {
             const replacement = document.createElement("template"); replacement.innerHTML = reference({id:ids.get(key),name,type:attachment.mimeType,source}); target.replaceWith(replacement.content);
-          } else target.replaceWith(document.createTextNode(`[${name}: без вложения]`));
+          } // Without source metadata, retain the original Jira markup reference.
           continue;
         }
         let file = cache.get(key);
@@ -95,7 +95,7 @@
         const replacement = document.createElement("template");
         if (file) replacement.innerHTML = render({...file, source:file.source ? {...file.source,kind} : undefined});
         else if (source) replacement.innerHTML = reference({id:ids.get(key),name,type:attachment.mimeType,source});
-        else { const placeholder = document.createElement("span"); placeholder.className = "attachment-import-error"; placeholder.textContent = `[${name}: не удалось загрузить]`; replacement.content.append(placeholder); }
+        else continue; // A failed download must not destroy a reusable Jira reference.
         target.replaceWith(replacement.content);
       }
       if (part.owner) part.owner[part.field] = part.template.innerHTML;

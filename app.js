@@ -3238,6 +3238,7 @@ function htmlToWiki(html) {
       const options = node.dataset.jiraOptions;
       return `!${name}${options ? `|${options}` : ""}!`;
     }
+    if (node.matches?.(".jira-file-placeholder")) return `[^${node.dataset.jiraName || "file"}]`;
     const tag = node.tagName.toLowerCase();
     if ((tag === "span" && node.style.color) || (tag === "font" && node.getAttribute("color"))) {
       const content = [...node.childNodes].map(walk).join("");
@@ -5865,13 +5866,18 @@ function resetImportPreview() {
   document.getElementById("importPreviewMeta").hidden = true;
   const master = document.getElementById("importWithAttachments");
   master.indeterminate = false; master.disabled = false; delete master.dataset.unavailable;
-  master.closest("label").hidden = false;
+  master.closest("label").hidden = importSource === "markup";
   elements.importSummary.hidden = true; elements.importWarning.hidden = true;
   if (!elements.applyImportButton.disabled) setImportBusy(false);
 }
 
 function syncImportSelection() {
   if (!preparedImport) return;
+  if (importSource === "markup") {
+    document.getElementById("importSelectionCount").textContent = preparedImport.catalogue.total ? `Ссылок на вложения: ${preparedImport.catalogue.total}` : "Вложений нет";
+    pendingImportedDraft = null;
+    return;
+  }
   const columns = preparedImport.catalogue.groups.flatMap(group => group.columns).filter(column => column.keys.length);
   const selected = columns.filter(column => importLocationSelection.has(column.id));
   const master = document.getElementById("importWithAttachments");
@@ -5884,10 +5890,11 @@ function syncImportSelection() {
 }
 
 function renderImportChoices() {
+  const referencesOnly = importSource === "markup";
   const panel = document.getElementById("importAttachmentChoices");
   const list = document.getElementById("importColumnList"); list.replaceChildren(); panel.hidden = false;
   elements.importModal.classList.add("has-import-preview");
-  document.getElementById("importTitle").textContent = preparedImport.catalogue.total ? "Выберите вложения" : "Чек-лист готов к импорту";
+  document.getElementById("importTitle").textContent = !referencesOnly && preparedImport.catalogue.total ? "Выберите вложения" : "Чек-лист готов к импорту";
   document.getElementById("importChoicesTitle").textContent = preparedImport.catalogue.total ? "Вложения по колонкам" : "Колонки чек-листа";
   const sourceSummary = document.getElementById("importSourceSummary"); sourceSummary.hidden = false;
   const sourceTitle = document.getElementById("importSourceTitle");
@@ -5897,7 +5904,7 @@ function renderImportChoices() {
     const section = document.createElement("fieldset"); section.className = "import-column-group";
     const legend = document.createElement("legend"); legend.textContent = group.title || "Раздел"; section.append(legend);
     for (const column of group.columns) {
-      const row = document.createElement("label"); row.className = "import-column-choice";
+      const row = document.createElement(referencesOnly ? "div" : "label"); row.className = `import-column-choice${referencesOnly ? " is-reference-only" : ""}`;
       const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.value = column.id;
       checkbox.checked = importLocationSelection.has(column.id); checkbox.disabled = !column.keys.length;
       if (!column.keys.length) checkbox.dataset.unavailable = "true";
@@ -5906,10 +5913,11 @@ function renderImportChoices() {
       const files = document.createElement("small");
       const names = column.files.map(file => file.name);
       files.textContent = names.length ? names.slice(0,2).join(", ") + (names.length>2 ? ` и ещё ${names.length-2}` : "") : "Без вложений";
-      if (column.missing) files.textContent += ` · Недоступно: ${column.missing}`;
+      if (!referencesOnly && column.missing) files.textContent += ` · Недоступно: ${column.missing}`;
       files.title = names.join("\n"); copy.append(title,files);
       const count = document.createElement("span"); count.className = "import-column-count"; count.textContent = String(column.keys.length);
-      row.append(checkbox,copy);
+      if (!referencesOnly) row.append(checkbox);
+      row.append(copy);
       const item = document.createElement("div"); item.className = "import-column-item"; item.append(row);
       if (names.length) {
         const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "import-files-toggle";
@@ -5927,12 +5935,12 @@ function renderImportChoices() {
     list.append(section);
   }
   const master = document.getElementById("importWithAttachments");
-  master.dataset.unavailable = preparedImport.catalogue.total ? "false" : "true";
-  master.closest("label").hidden = !preparedImport.catalogue.total;
+  master.dataset.unavailable = !referencesOnly && preparedImport.catalogue.total ? "false" : "true";
+  master.closest("label").hidden = referencesOnly || !preparedImport.catalogue.total;
   const rows = preparedImport.document.sections.reduce((sum,section)=>sum+section.rows.length,0);
   const meta = document.getElementById("importPreviewMeta"); meta.hidden = false;
   meta.textContent = `Разделов: ${preparedImport.document.sections.length} · Строк: ${rows}`;
-  document.getElementById("importColumnHint").textContent = importSource === "markup" && preparedImport.catalogue.total ? "Для скачивания файлов используйте ссылку на комментарий Jira. Текст всех колонок будет импортирован." : "Текст всех колонок будет импортирован. Один и тот же файл скачивается один раз.";
+  document.getElementById("importColumnHint").textContent = importSource === "markup" && preparedImport.catalogue.total ? "Ссылки сохранятся в исходных колонках без скачивания. В Jira они отобразятся, если файлы есть в целевой задаче." : "Текст всех колонок будет импортирован. Один и тот же файл скачивается один раз.";
   syncImportSelection();
 }
 
@@ -5942,7 +5950,7 @@ async function analyzeImport() {
   setImportProgress(importSource === "comment" ? "Разбираем комментарий Jira…" : "Разбираем чек-лист…");
   try {
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    const includeAttachments = document.getElementById("importWithAttachments").checked;
+    const includeAttachments = importSource === "comment" && document.getElementById("importWithAttachments").checked;
     let attachmentRequest = {}, imported, importFiles = [];
     if (importSource === "markup") {
       imported = parseJiraMarkup(elements.importMarkup.value);
@@ -5967,7 +5975,7 @@ async function analyzeImport() {
 async function prepareImport() {
   const {document:source,attachments,attachmentRequest} = preparedImport;
   const localized = await window.QaReportAttachments.localize(source, {
-    attachments, include:importLocationSelection.size>0, locations:importLocationSelection, sourceIssueUrl:source.issueUrl || "",
+    attachments, include:importSource === "comment" && importLocationSelection.size>0, locations:importLocationSelection, sourceIssueUrl:source.issueUrl || "",
     load:attachment=>jiraRequest("/api/jira/import-attachment",{...attachmentRequest,attachmentId:attachment.id},{binary:true}),
     onProgress:({completed,total})=>setImportProgress("Загрузка вложений",completed,total),
   });
@@ -6026,7 +6034,7 @@ async function applyImport(mode = "replace") {
     const imported = pendingImportedDraft || (await prepareImport());
     document.getElementById("importProgress").hidden = true;
     if (!elements.importWarning.hidden && !await askConfirmation(
-      elements.importWarning.textContent + "\nПродолжить импорт с доступными файлами?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
+      elements.importWarning.textContent + "\nСсылки на остальные вложения сохранятся без скачивания. Продолжить импорт?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
     )) return;
     if (mode !== "append" && !await confirmImportReplacement()) return;
     if (draft.reportId !== reportIdAtStart) throw new Error("Открыт другой отчёт. Повторите импорт в нужном отчёте");

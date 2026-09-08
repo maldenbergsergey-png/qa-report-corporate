@@ -4917,3 +4917,50 @@ body.pin-number-columns .section-header-table .number-header::before,
 #localImportModal .import-body { display: block; min-height: 0; }
 #localImportModal .import-body p { margin: 0 0 14px; }
 #localImportModal .button:disabled { opacity: .5; cursor: default; }
+
+/* Jira import: prominent attachment option and a separate loading state. */
+#importModal .import-modal { width: min(920px, calc(100vw - 48px)); height: auto; max-height: min(760px, calc(100dvh - 48px)); }
+#importModal .import-body { display: flex; flex-direction: column; gap: 20px; overflow: auto; }
+#importModal .import-body > * { flex-shrink: 0; }
+#importModal .import-textarea { min-height: clamp(160px, 32vh, 360px); }
+#importModal .local-import-option {
+  gap: 14px; min-height: 68px; margin: 0; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+  background: var(--surface); line-height: 1.4;
+}
+#importModal .local-import-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--line));
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+}
+#importModal .local-import-option:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 3px; }
+#importModal .local-import-option input { width: 24px; height: 24px; flex: 0 0 24px; margin: 0; accent-color: var(--primary); cursor: inherit; }
+.import-option-copy { display: grid; gap: 3px; }
+.import-option-copy strong { color: var(--ink); font-size: 15px; font-weight: 600; }
+.import-option-copy small { color: var(--muted); font-size: 13px; }
+#importModal .modal-footer { gap: 24px; }
+#importModal .modal-footer > span { min-width: 0; line-height: 1.5; }
+#importModal .modal-actions { flex: 0 0 auto; }
+#applyImportButton { min-width: 170px; min-height: 44px; white-space: nowrap; }
+#applyImportButton:disabled { cursor: wait; }
+#importModal input:disabled, #importModal textarea:disabled, #importModal button:disabled { cursor: wait; }
+#applyImportButton .button-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: publish-step-spin .8s linear infinite; }
+#applyImportButton .button-spinner[hidden], .import-progress[hidden] { display: none; }
+.import-progress { display: grid; gap: 10px; padding: 2px 0; }
+.import-progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--ink); font-size: 14px; line-height: 1.4; }
+#importProgressCount { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.import-progress-bar { height: 7px; overflow: hidden; border-radius: 99px; background: var(--line-soft); }
+.import-progress-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .2s ease; }
+.import-progress-bar.is-indeterminate > span { width: 35%; animation: import-progress-slide 1.4s ease-in-out infinite; }
+@keyframes import-progress-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+@media (max-width: 600px) {
+  #importModal { padding: 12px; }
+  #importModal .import-modal { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  #importModal .import-body { padding: 18px; gap: 16px; }
+  #importModal .modal-footer { flex-direction: column-reverse; align-items: stretch; gap: 12px; padding: 16px 18px; }
+  #importModal .modal-actions, #applyImportButton { width: 100%; }
+  #importModal .local-import-option { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #applyImportButton .button-spinner, .import-progress-bar.is-indeterminate > span { animation: none; }
+  .import-progress-bar > span { transition: none; }
+}

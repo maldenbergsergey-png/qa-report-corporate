@@ -68,8 +68,13 @@ test("replacement and inbound import keep the open report; cancel performs no sa
     for (const confirmed of [false,true]) {
       const ctx=harness(); const calls=[];
       ctx.draft.intro="Existing";
-      ctx.elements={applyImportButton:{disabled:false},importWarning:{hidden:true}};
+      ctx.elements={applyImportButton:{disabled:false},importWarning:{hidden:true},importSummary:{hidden:true}};
       ctx.pwaPendingOperations=0;
+      ctx.importSource="markup";
+      ctx.requestAnimationFrame=callback=>callback();
+      ctx.setImportBusy=busy=>{ctx.elements.applyImportButton.disabled=busy;};
+      ctx.setImportProgress=()=>{};
+      ctx.document.getElementById=()=>({hidden:true});
       ctx.askConfirmation=async()=>confirmed;
       ctx.pendingImportedDraft={intro:"Imported",sections:[{title:"Вход"}]};
       ctx.saveReportSnapshot=async reason=>calls.push(reason);

@@ -4350,6 +4350,8 @@ function closePreview() {
 }
 
 function openImport() {
+  if (elements.applyImportButton.disabled) return;
+  setImportBusy(false);
   elements.importMarkup.value = "";
   elements.commentImportUrl.value = "";
   elements.importWarning.hidden = true;
@@ -4361,6 +4363,7 @@ function openImport() {
 }
 
 function closeImport() {
+  if (elements.applyImportButton.disabled) return;
   elements.importModal.hidden = true;
   syncBodyModalOverflow();
 }
@@ -5906,6 +5909,36 @@ function applyUploadedAttachments(uploaded) {
   applyUploadedAttachmentsToRoot(elements.sections, byLocalId);
 }
 
+function setImportBusy(busy) {
+  elements.applyImportButton.disabled = busy;
+  elements.applyImportButton.setAttribute("aria-busy", String(busy));
+  elements.applyImportButton.querySelector(".button-spinner").hidden = !busy;
+  elements.applyImportButton.querySelector(".button-label").textContent = busy ? "Импортируем…" : "Импортировать";
+  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton")) {
+    control.disabled = busy;
+  }
+  if (!busy) document.getElementById("importProgress").hidden = true;
+}
+
+function setImportProgress(label, completed, total) {
+  const progress = document.getElementById("importProgress");
+  const bar = document.getElementById("importProgressBar");
+  const determinate = Number.isFinite(total) && total > 0;
+  progress.hidden = false;
+  document.getElementById("importProgressLabel").textContent = label;
+  document.getElementById("importProgressCount").textContent = determinate ? `${completed} из ${total}` : "";
+  bar.classList.toggle("is-indeterminate", !determinate);
+  if (determinate) {
+    bar.setAttribute("aria-valuemax", String(total));
+    bar.setAttribute("aria-valuenow", String(completed));
+    bar.firstElementChild.style.width = `${completed / total * 100}%`;
+  } else {
+    bar.removeAttribute("aria-valuemax");
+    bar.removeAttribute("aria-valuenow");
+    bar.firstElementChild.style.width = "";
+  }
+}
+
 async function prepareImport() {
   try {
     const includeAttachments = document.getElementById("importWithAttachments").checked;
@@ -5929,7 +5962,7 @@ async function prepareImport() {
       load: attachment => jiraRequest("/api/jira/import-attachment", {
         ...attachmentRequest, attachmentId: attachment.id,
       }, { binary: true }),
-      onProgress: message => { elements.importSummary.hidden = false; elements.importSummary.textContent = message; },
+      onProgress: ({ completed, total }) => setImportProgress("Загрузка вложений", completed, total),
     });
     imported = localized.document; attachmentErrors = localized.errors; loadedAttachments = localized.loaded;
     pendingImportedDraft = imported;
@@ -5937,7 +5970,7 @@ async function prepareImport() {
     const columns = imported.sections.reduce((sum, section) => sum + section.columns.length, 0);
     elements.importSummary.textContent = `Найдено: ${imported.sections.length} таблиц, ${rows} строк, ${columns} пользовательских колонок. Окружение: ${imported.environment}; итог: ${imported.overallStatus}.`;
     elements.importSummary.hidden = false;
-    elements.importSummary.textContent += ` Вложений сохранено: ${loadedAttachments}.`;
+    elements.importSummary.textContent += ` Вложений загружено: ${loadedAttachments}.`;
     elements.importWarning.hidden = !attachmentErrors.length;
     elements.importWarning.textContent = attachmentErrors.join("\n");
     return imported;
@@ -5988,15 +6021,22 @@ function importedDraftInCurrentReport(imported) {
 async function applyImport(mode = "replace") {
   if (elements.applyImportButton.disabled) return;
   const reportIdAtStart = draft.reportId;
-  elements.applyImportButton.disabled = true;
+  setImportBusy(true);
+  elements.importSummary.hidden = true;
+  if (!pendingImportedDraft) elements.importWarning.hidden = true;
+  setImportProgress(importSource === "comment" ? "Получаем комментарий из Jira…" : "Подготавливаем чек-лист…");
   pwaPendingOperations++;
   try {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const imported = pendingImportedDraft || (await prepareImport());
+    document.getElementById("importProgress").hidden = true;
     if (!elements.importWarning.hidden && !await askConfirmation(
       elements.importWarning.textContent + "\nПродолжить импорт с доступными файлами?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
     )) return;
     if (mode !== "append" && !await confirmImportReplacement()) return;
     if (draft.reportId !== reportIdAtStart) throw new Error("Открыт другой отчёт. Повторите импорт в нужном отчёте");
+    setImportProgress("Сохраняем в браузере…");
+    elements.importSummary.hidden = true;
     await saveReportSnapshot("before-import");
     if (mode === "append") {
       draft.sections.push(...clone(imported.sections));
@@ -6010,12 +6050,13 @@ async function applyImport(mode = "replace") {
     await saveReportSnapshot("import-complete");
     renderEnvironmentOptions(draft.environment);
     updateChecklistUrl(draft.publicId);
+    setImportBusy(false);
     closeImport();
     showToast(`Импортировано таблиц: ${imported.sections.length}`);
   } catch (error) {
     showToast(`Не удалось импортировать: ${error.message}`, 9000);
   } finally {
-    elements.applyImportButton.disabled = false;
+    setImportBusy(false);
     pwaPendingOperations--;
   }
 }
@@ -7237,6 +7278,7 @@ document.querySelectorAll(".import-source-tab").forEach((tab) => {
     tab.classList.add("active");
     elements.markupImportPane.hidden = importSource !== "markup";
     elements.commentImportPane.hidden = importSource !== "comment";
+    elements.importWarning.hidden = true;
     elements.importSummary.hidden = true;
     pendingImportedDraft = null;
   });
@@ -7659,5 +7701,9 @@ document.getElementById("resetDefaultColumns").addEventListener("click", () => {
 });
 
 for (const input of [elements.importMarkup, elements.commentImportUrl, document.getElementById("importWithAttachments")]) {
-  input.addEventListener("input", () => { pendingImportedDraft = null; });
+  input.addEventListener("input", () => {
+    pendingImportedDraft = null;
+    elements.importWarning.hidden = true;
+    elements.importSummary.hidden = true;
+  });
 }

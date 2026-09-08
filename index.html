@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=89" />
+    <link rel="stylesheet" href="/styles.css?v=90" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -540,14 +540,21 @@
               Вставьте прямую ссылку на комментарий Jira. Подключение берётся из настроек Jira.
             </p>
           </div>
-          <label class="local-import-option"><input id="importWithAttachments" type="checkbox" checked /> Импортировать с вложениями в этот браузер</label>
+          <label class="local-import-option">
+            <input id="importWithAttachments" type="checkbox" checked aria-describedby="importAttachmentsHint" />
+            <span class="import-option-copy"><strong>Импортировать с вложениями</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
+          </label>
+          <div class="import-progress" id="importProgress" hidden>
+            <div class="import-progress-heading" role="status" aria-live="polite" aria-atomic="true"><span id="importProgressLabel"></span><span id="importProgressCount"></span></div>
+            <div class="import-progress-bar is-indeterminate" id="importProgressBar" role="progressbar" aria-labelledby="importProgressLabel" aria-valuemin="0"><span></span></div>
+          </div>
           <div class="import-warning" id="importWarning" hidden></div>
           <div class="import-summary" id="importSummary" hidden></div>
         </div>
         <footer class="modal-footer">
-          <span>Данные будут импортированы в текущий чек-лист. Перед заменой заполненных данных появится подтверждение.</span>
+          <span>Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.</span>
           <div class="modal-actions">
-            <button class="button button-primary" id="applyImportButton" type="button">Импортировать в чек-лист</button>
+            <button class="button button-primary" id="applyImportButton" type="button"><span class="button-spinner" aria-hidden="true" hidden></span><span class="button-label">Импортировать</span></button>
           </div>
         </footer>
       </section>
@@ -904,9 +911,9 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=4"></script>
-    <script src="/attachment-import.js?v=1"></script>
-    <script src="/app.js?v=92"></script>
+    <script src="/release-notes.js?v=5"></script>
+    <script src="/attachment-import.js?v=2"></script>
+    <script src="/app.js?v=93"></script>
     <script src="/local-import-client.js?v=1"></script>
   </body>
 </html>

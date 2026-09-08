@@ -16,10 +16,11 @@
   }
   async function localize(documentValue, { attachments = [], load, include = true, onProgress = () => {} }) {
     const copy = JSON.parse(JSON.stringify(documentValue));
-    const cache = new Map(); const failures = new Map(); let loaded = 0; let totalBytes = 0;
-    const process = async html => {
+    const cache = new Map(); const failures = new Map(); let loaded = 0; let totalBytes = 0; let completed = 0;
+    const plan = html => {
       const template = document.createElement("template"); template.innerHTML = html || "";
       const nodes = template.content.querySelectorAll("img, .jira-image-placeholder, .jira-file-placeholder, a[href]");
+      const items = [];
       for (const node of nodes) {
         const name = node.dataset.jiraName || node.dataset.fileName || node.getAttribute("alt") || "Вложение";
         const id = node.dataset.jiraId || node.dataset.attachmentId;
@@ -31,19 +32,32 @@
         if (node.tagName === "A" && !attachment) continue;
         const target = node.closest(".cell-image, .cell-file") || node;
         const displayName = attachment?.filename || name;
+        items.push({ target, attachment, displayName, key: attachment?.id || displayName, ambiguous: byName.length > 1 });
+      }
+      return { template, items };
+    };
+    const fragments = [{ owner: copy, field: "intro" }];
+    for (const section of copy.sections || []) for (const row of section.rows || []) {
+      for (const field of Object.keys(row.cells || {})) fragments.push({ owner: row.cells, field });
+    }
+    const plans = fragments.map(({ owner, field }) => ({ owner, field, ...plan(owner[field]) }));
+    const total = new Set(plans.flatMap(part => part.items.map(item => item.key))).size;
+    const notify = () => onProgress({ completed, total, loaded, failed: failures.size });
+    if (include && total) notify();
+    for (const { owner, field, template, items } of plans) {
+      for (const { target, attachment, displayName, key, ambiguous } of items) {
         if (!include) { target.replaceWith(document.createTextNode(`[${displayName}: без вложения]`)); continue; }
-        const key = attachment?.id || displayName;
         let file = cache.get(key);
         if (!file && !failures.has(key)) {
           try {
-            if (!attachment) throw new Error(byName.length > 1 ? "несколько файлов с таким именем" : "файл не найден среди вложений задачи");
+            if (!attachment) throw new Error(ambiguous ? "несколько файлов с таким именем" : "файл не найден среди вложений задачи");
             if (cache.size >= 100) throw new Error("не более 100 вложений за импорт");
-            onProgress(`Загружаем ${displayName}…`);
             const blob = await load(attachment);
             if (blob.size > 50 * 1048576 || totalBytes + blob.size > 100 * 1048576) throw new Error("превышен лимит: 50 МБ на файл, 100 МБ на импорт");
             file = { id: crypto.randomUUID(), name: displayName, type: blob.type || "application/octet-stream", size: blob.size, dataUrl: await dataUrl(blob) };
             cache.set(key, file); totalBytes += blob.size; loaded++;
           } catch (error) { failures.set(key, `${displayName}: ${error.message}`); }
+          completed++; notify();
         }
         if (file) {
           const replacement = document.createElement("template"); replacement.innerHTML = render(file);
@@ -54,10 +68,8 @@
           target.replaceWith(placeholder);
         }
       }
-      return template.innerHTML;
-    };
-    copy.intro = await process(copy.intro);
-    for (const section of copy.sections || []) for (const row of section.rows || []) for (const column of Object.keys(row.cells || {})) row.cells[column] = await process(row.cells[column]);
+      owner[field] = template.innerHTML;
+    }
     return { document: copy, loaded, errors: [...failures.values()] };
   }
   root.QaReportAttachments = { render, dataUrl, localize };

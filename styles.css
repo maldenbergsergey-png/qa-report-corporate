@@ -4908,7 +4908,32 @@ body.pin-number-columns .section-header-table .number-header::before,
 .row-drag-handle[hidden] { display:none !important; }
 
 .local-import-option { display: flex; align-items: center; gap: 10px; margin: 16px 0; font-size: 14px; }
-.local-import-active { color: var(--accent, #22a06b); }
+#localImportButton {
+  position: relative;
+  width: auto;
+  min-width: 66px;
+  padding: 9px 10px 0;
+}
+#localImportButton > span { display: inline; }
+.local-import-indicator {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  min-width: 25px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--line-soft);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 12px;
+  letter-spacing: .3px;
+  text-align: center;
+}
+#localImportButton.local-import-active .local-import-indicator {
+  color: #fff;
+  background: #1f845a;
+}
 .attachment-import-error { color: var(--danger, #c9372c); }
 #localImportModal .modal-actions { flex-wrap: wrap; }
 #localImportStatus { overflow-wrap: anywhere; }
@@ -4916,7 +4941,25 @@ body.pin-number-columns .section-header-table .number-header::before,
 #localImportModal .import-modal { width: min(680px, calc(100vw - 32px)); height: auto; min-height: 0; }
 #localImportModal .import-body { display: block; min-height: 0; }
 #localImportModal .import-body p { margin: 0 0 14px; }
-#localImportModal .button:disabled { opacity: .5; cursor: default; }
+#localImportModal .button { border: 1px solid transparent; }
+#localImportModal .button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+#copyLocalImport:enabled { color: #fff; background: #1f845a; }
+#copyLocalImport:enabled:hover { background: #216e4e; }
+#stopLocalImport:enabled {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, var(--line));
+  background: color-mix(in srgb, var(--red) 10%, var(--surface));
+}
+:root[data-theme="dark"] #stopLocalImport:enabled { color: #ff9c8f; }
+#stopLocalImport:enabled:hover { background: color-mix(in srgb, var(--red) 18%, var(--surface)); }
+#localImportModal .button:disabled {
+  color: var(--muted);
+  background: var(--line-soft);
+  border-color: var(--line);
+  opacity: .6;
+  cursor: default;
+}
+#localImportModal[data-state="off"] #localImportStatus { color: var(--muted); background: var(--line-soft); }
 
 /* Jira import: prominent attachment option and a separate loading state. */
 #importModal .import-modal { width: min(920px, calc(100vw - 48px)); height: auto; max-height: min(860px, calc(100dvh - 48px)); }
@@ -5037,4 +5080,11 @@ body.pin-number-columns .section-header-table .number-header::before,
 .cell-editor .cell-code-block::before, .intro-editor .cell-code-block::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 12px;
   cursor: text; z-index: 1;
+}
+
+.attachment-limits-hint {
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }

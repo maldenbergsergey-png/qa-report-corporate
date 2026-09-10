@@ -23,6 +23,8 @@ const {
   authenticateLdap,
 } = require("./auth");
 
+const AttachmentLimits = require("./attachment-limits");
+
 const ROOT = __dirname;
 
 function loadLocalEnv() {
@@ -66,6 +68,7 @@ function readSizeMb(name, fallback) {
 
 const MAX_BODY = readSizeMb("QA_REPORT_MAX_BODY_MB", 150);
 const MAX_ATTACHMENT_FILE = readSizeMb("QA_REPORT_MAX_ATTACHMENT_MB", 50);
+const ATTACHMENT_LIMITS = { ...AttachmentLimits.defaults, appMaxFileBytes: MAX_ATTACHMENT_FILE, requestMaxBytes: MAX_BODY };
 const localImportService = createLocalImportService({ maxFileBytes: MAX_ATTACHMENT_FILE });
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
 const API_REVISION = 8;
@@ -374,8 +377,9 @@ async function readJson(request) {
   for await (const chunk of request) {
     size += chunk.length;
     if (size > MAX_BODY) {
-      const error = new Error("Запрос слишком большой");
+      const error = new Error(`Запрос превышает лимит QA Report: ${AttachmentLimits.format(MAX_BODY)}. Размер файлов при передаче учтён.`);
       error.status = 413;
+      error.code = "APP_REQUEST_TOO_LARGE";
       throw error;
     }
     chunks.push(chunk);
@@ -729,6 +733,10 @@ async function jiraFetch(connection, pathname, options = {}) {
     throw error;
   }
   const text = await response.text();
+  if (response.status === 413) {
+    throw Object.assign(new Error("Jira или её прокси отклонили загрузку по размеру (HTTP 413). Проверьте лимит вложений Jira и её прокси."),
+      { status: 413, code: "JIRA_PAYLOAD_TOO_LARGE", pathname });
+  }
   const contentType = response.headers.get("content-type") || "";
   const looksLikeHtml =
     /text\/html/i.test(contentType) ||
@@ -925,9 +933,9 @@ function decodeImageFile(file, index) {
   };
 }
 
-function decodeAttachmentFile(file, index) {
+function decodeAttachmentFile(file, index, { allowOtherImageTypes = false } = {}) {
   const declaredType = String(file.type || "").toLowerCase();
-  if (declaredType.startsWith("image/")) return { ...decodeImageFile(file, index), kind: "image" };
+  if (declaredType.startsWith("image/") && !allowOtherImageTypes) return { ...decodeImageFile(file, index), kind: "image" };
   const base64 = String(file.dataBase64 || "")
     .replace(/^data:[^;]+;base64,/i, "")
     .replace(/\s+/g, "");
@@ -937,14 +945,14 @@ function decodeAttachmentFile(file, index) {
   const bytes = Buffer.from(base64, "base64");
   if (!bytes.length) throw new Error(`Файл «${file.name || index + 1}» пустой`);
   if (bytes.length > MAX_ATTACHMENT_FILE) {
-    throw new Error(`Файл «${file.name || index + 1}» больше ${formatLimitMb(MAX_ATTACHMENT_FILE)}`);
+    throw Object.assign(new Error(`Файл «${file.name || index + 1}» превышает лимит QA Report: ${AttachmentLimits.format(MAX_ATTACHMENT_FILE)}`), { status: 413, code: "ATTACHMENT_LIMIT" });
   }
   return {
     attachmentId: file.attachmentId,
     bytes,
     type: declaredType || "application/octet-stream",
     name: sanitizeGenericAttachmentName(file.name, index),
-    kind: "file",
+    kind: declaredType.startsWith("image/") ? "image" : "file",
   };
 }
 
@@ -1228,8 +1236,9 @@ async function handleJiraAttachmentManifest(request, response) {
   const body = await readJson(request);
   const connection = jiraConnection(request, body);
   const { issueKey } = parseIssueReference(connection, body.issueUrl);
-  const attachments = await listJiraAttachments({ connection, issueKey, jiraFetch });
-  sendJson(response, 200, { ok: true, attachmentReuse: true,
+  const attachmentLimits = { ...ATTACHMENT_LIMITS, ...await AttachmentLimits.fromJira(connection, jiraFetch) };
+  const attachments = body.limitsOnly ? [] : await listJiraAttachments({ connection, issueKey, jiraFetch });
+  sendJson(response, 200, { ok: true, attachmentReuse: true, attachmentLimits,
     issueUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}`, attachments });
 }
 
@@ -1575,7 +1584,12 @@ async function handleJiraAttachments(request, response) {
   const files = Array.isArray(body.files) ? body.files : [];
   if (!files.length) return sendJson(response, 200, { ok: true, attachments: [] });
   if (files.length > 20) throw new Error("За один раз можно загрузить не более 20 вложений");
-  const normalizedFiles = files.map(decodeAttachmentFile);
+  const normalizedFiles = files.map((file, index) => decodeAttachmentFile(file, index, { allowOtherImageTypes: true }));
+  const limits = { ...ATTACHMENT_LIMITS, ...await AttachmentLimits.fromJira(connection, jiraFetch) };
+  for (const file of normalizedFiles) {
+    const message = AttachmentLimits.fileError({ name: file.name, size: file.bytes.length }, limits);
+    if (message) throw Object.assign(new Error(message), { status: limits.jiraEnabled === false ? 403 : 413, code: "ATTACHMENT_LIMIT" });
+  }
   const existing = await listJiraAttachments({ connection, issueKey, jiraFetch });
   const usedNames = new Set(existing.map(file => String(file.filename).toLowerCase()));
   for (const file of normalizedFiles) {
@@ -1599,9 +1613,8 @@ async function handleJiraAttachments(request, response) {
         },
       );
     } catch (error) {
-      throw new Error(
-        `Не удалось загрузить «${file.name}» (${file.type}, ${file.bytes.length} байт): ${error.message}`,
-      );
+      error.message = `Не удалось загрузить «${file.name}» (${file.bytes.length} байт): ${error.message}`;
+      throw error;
     }
     const item = Array.isArray(uploaded) ? uploaded[0] : uploaded;
     if (!item?.id) {
@@ -1693,7 +1706,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && requestPath === "/api/health") {
       sendJson(response, 200, {
         ok: true,
-        service: "qa-report",
+        service: "qa-report", attachmentLimits: ATTACHMENT_LIMITS,
         apiRevision: API_REVISION,
         objectStorageConfigured: objectStorageConfigured(),
       });

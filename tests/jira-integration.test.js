@@ -19,10 +19,12 @@ function request(url, options = {}, email) {
 
 test("multi-Jira OAuth connects a user and signs Jira actions as that user", async () => {
   const received = [];
+  let attachmentMeta = { enabled: true, uploadLimit: 1204756 };
+  let rejectUpload = false;
   const jira = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
-    received.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body: Buffer.concat(chunks).toString() });
+    received.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body: Buffer.concat(chunks).toString(), rawBody: Buffer.concat(chunks) });
     if (req.url === "/jira7/plugins/servlet/oauth/request-token") {
       res.setHeader("Content-Type", "application/x-www-form-urlencoded");
       res.end("oauth_token=request-7&oauth_token_secret=request-secret&oauth_callback_confirmed=true");
@@ -39,6 +41,13 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/jira7/rest/api/2/issue/QA-1?fields=attachment") {
       res.end(JSON.stringify({ fields: { attachment: [{ id: "42", filename: "screen.png", mimeType: "image/png", content: `http://${req.headers.host}/jira7/secure/attachment/42/screen.png` }] } })); return;
+    }
+    if (req.url === "/jira7/rest/api/2/attachment/meta") {
+      res.end(JSON.stringify(attachmentMeta)); return;
+    }
+    if (req.url.endsWith("/attachments")) {
+      if (rejectUpload) { res.writeHead(413, { "Content-Type": "text/html" }); res.end("<html>413 too large</html>"); return; }
+      res.end(JSON.stringify([{ id: "901", filename: "clip.mp4" }])); return;
     }
     if (req.url === "/jira7/rest/api/2/myself") {
       res.end(JSON.stringify({ name: "user-a", emailAddress: "user-a@example.com", displayName: "User A", active: true }));
@@ -144,6 +153,40 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal((await request(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions,"user-b@example.com")).status,409);
     assert.equal((await fetch(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions)).status,401);
     assert.equal((await request(`${appOrigin}/api/jira/attachment-manifest`,{...inventoryOptions,headers:{...inventoryOptions.headers,Origin:"https://other.example"}})).status,403);
+    const uploadFixture = (files) => request(`${appOrigin}/api/jira/attachments`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({  issueUrl: `${jiraOrigin}/jira7/browse/QA-1`, files }),
+    });
+    const videoBytes = Buffer.alloc(1204756, 0x82);
+    const clip = { attachmentId: "video-local", name: "clip.mp4", type: "video/mp4", dataBase64: videoBytes.toString("base64") };
+    const videoResponse = await uploadFixture([clip]);
+    assert.equal(videoResponse.status, 200, await videoResponse.clone().text());
+    const sentVideo = received.filter(item => item.url.endsWith("/attachments")).at(-1);
+    assert.ok(sentVideo.rawBody.includes(videoBytes), "Jira receives original video bytes");
+    assert.match(sentVideo.authorization, /^OAuth /);
+    const uploadCount = () => received.filter(item => item.url.endsWith("/attachments")).length;
+    const beforeLimit = uploadCount();
+    attachmentMeta.uploadLimit = 1204755;
+    const oversized = await uploadFixture([{ ...clip, name: "small.txt", dataBase64: "eA==" }, clip]);
+    assert.equal(oversized.status, 413);
+    assert.match((await oversized.json()).error, /лимит Jira/);
+    assert.equal(uploadCount(), beforeLimit, "whole batch is checked before the first upload");
+    attachmentMeta = { enabled: false, uploadLimit: 1204756 };
+    const disabled = await uploadFixture([clip]);
+    assert.equal(disabled.status, 403);
+    assert.equal((await disabled.json()).errorCode, "ATTACHMENT_LIMIT");
+    assert.equal(uploadCount(), beforeLimit);
+    attachmentMeta = { enabled: true, uploadLimit: 1204756 };
+    rejectUpload = true;
+    const jiraProxyError = await uploadFixture([clip]);
+    assert.equal(jiraProxyError.status, 413);
+    const jiraProxyPayload = await jiraProxyError.json();
+    assert.equal(jiraProxyPayload.errorCode, "JIRA_PAYLOAD_TOO_LARGE");
+    assert.match(jiraProxyPayload.error, /clip.mp4/);
+    rejectUpload = false;
+    const svg = await uploadFixture([{ name: "diagram.svg", type: "image/svg+xml", dataBase64: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64") }]);
+    assert.equal(svg.status, 200, await svg.clone().text());
+
     const fileBody = JSON.stringify({ commentUrl: `${jiraOrigin}/jira7/browse/QA-1?focusedCommentId=10001`, attachmentId: "42" });
     const downloaded = await request(`${appOrigin}/api/jira/import-attachment`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: fileBody,

@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=93" />
+    <link rel="stylesheet" href="/styles.css?v=95" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -129,7 +129,6 @@
             </button>
           </div>
           <div class="header-action-group">
-            <button class="header-action" id="localImportButton" type="button" title="Приём от ИИ" aria-label="Приём от ИИ"><svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg><span>Приём от ИИ</span></button>
             <button class="header-action" id="focusModeButton" type="button">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-focus"></use></svg>
               <span>Фокус</span>
@@ -142,6 +141,7 @@
         </nav>
 
         <div class="header-integrations">
+            <button class="header-action" id="localImportButton" type="button" title="Приём результатов от ИИ выключен" aria-label="Приём результатов от ИИ выключен" aria-haspopup="dialog"><svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg><span>ИИ</span><small class="local-import-indicator" id="localImportIndicator" aria-hidden="true">OFF</small></button>
           <div class="header-dropdown">
             <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu" aria-label="Jira" title="Jira">
               <svg class="ui-icon dropdown-leading-icon jira-logo" aria-hidden="true"><use href="#icon-jira"></use></svg>
@@ -304,8 +304,9 @@
             <button type="button" id="imageButton" class="toolbar-icon-button" title="Добавить вложение" aria-label="Добавить вложение">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
             </button>
-            <input id="imageInput" type="file" multiple hidden />
+            <input id="imageInput" type="file" multiple hidden aria-describedby="attachmentLimitsHint" />
           </div>
+          <p id="attachmentLimitsHint" class="attachment-limits-hint" role="status" hidden></p>
           <div id="selectionToolbar" class="selection-toolbar" role="region" aria-label="Выделение строк" hidden>
             <label class="selection-all"><input id="selectionAll" type="checkbox" /> Выбрать всё</label>
             <span id="selectionCount" class="selection-count" role="status" aria-live="polite">Выбрано: 0</span>
@@ -575,11 +576,11 @@
           <p>Агент сможет заполнить этот отчёт и прикрепить скриншоты, логи и другие файлы. Результаты сохранятся в браузере. Включать облачное хранилище не требуется.</p>
           <p>Оставьте отчёт открытым. Подключение действует 30 минут и прекращается при смене отчёта или нажатии «Остановить».</p>
           <p>Изменённые вами ячейки защищены от перезаписи устаревшими результатами агента.</p>
-          <div class="import-summary" id="localImportStatus" role="status" aria-live="polite">Приём выключен</div>
+          <div class="import-summary" id="localImportStatus" role="status" aria-live="polite">Приём выключен. Включите его, чтобы агент мог отправить результаты.</div>
         </div>
         <footer class="modal-footer"><div class="modal-actions">
           <button class="button" id="stopLocalImport" type="button" disabled>Остановить</button>
-          <button class="button" id="copyLocalImport" type="button" disabled>Скопировать для агента</button>
+          <button class="button" id="copyLocalImport" type="button" disabled>Скопировать промпт</button>
           <button class="button button-primary" id="startLocalImport" type="button">Включить приём</button>
         </div></footer>
       </section>
@@ -919,10 +920,11 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=9"></script>
+    <script src="/release-notes.js?v=11"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
+    <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=4"></script>
-    <script src="/app.js?v=96"></script>
-    <script src="/local-import-client.js?v=1"></script>
+    <script src="/app.js?v=97"></script>
+    <script src="/local-import-client.js?v=2"></script>
   </body>
 </html>

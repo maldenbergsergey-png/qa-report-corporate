@@ -11,7 +11,6 @@ const DB_VERSION = 1;
 const REPORT_STORE = "reports";
 const HISTORY_LIMIT = 50;
 const REQUIRED_API_REVISION = 8;
-const FILE_ATTACHMENT_MAX_SIZE = 50 * 1024 * 1024;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
 const { parseJiraMarkup, normalizeStatus, stripSectionNumber } = window.QaReportJiraImport;
 const nativeFetch = window.fetch.bind(window);
@@ -3903,6 +3902,7 @@ function wait(ms, signal) {
 
 function friendlyJiraError(error) {
   if (error?.name === "AbortError") return "Публикация отменена";
+  if (error?.code === "ATTACHMENT_LIMIT") return error.message;
   const message = String(error?.message || "");
   if (/JIRA_INSTANCES_JSON|не настроен список Jira/i.test(message)) {
     return "На этом стенде ещё не добавлены адреса Jira. После настройки администратором здесь появятся доступные подключения.";
@@ -3914,7 +3914,10 @@ function friendlyJiraError(error) {
     return "Это ссылка на задачу, а нужна ссылка именно на комментарий. В Jira откройте меню нужного комментария, выберите «Скопировать ссылку» и вставьте её сюда.";
   }
   if (error instanceof JiraRequestError) {
-    if (error.status === 413) return "Запрос слишком большой. Уменьшите размер вложения или отчёта.";
+    if (error.status === 413) {
+      if (error.code || error.payload?.error) return error.message;
+      return "Прокси QA Report отклонил запрос по размеру (HTTP 413). Файл мог ещё не попасть в Jira. Передайте администратору QA Report: нужно увеличить лимит тела запроса на прокси с учётом размера файлов при передаче.";
+    }
     if (error.status === 429) return "Jira временно ограничила частоту запросов. Повторите позже.";
     if (error.code === "JIRA_AUTH_REQUIRED" || error.status === 401) {
       return "Сначала откройте Настройки → Jira и подключите нужную Jira.";
@@ -3956,10 +3959,15 @@ async function jiraRequest(path, body, options = {}) {
     try {
       const safeBody = { ...(body || {}) };
       for (const field of ["token", "password", "cookie", "authorization", "user", "baseUrl", "authMethod"]) delete safeBody[field];
+      const serializedBody = JSON.stringify(safeBody);
+      if (path === "/api/jira/attachments") {
+        const limitError = window.QaReportAttachmentLimits.requestError(serializedBody, attachmentLimits);
+        if (limitError) throw new JiraRequestError(limitError, { status: 413, code: "APP_REQUEST_TOO_LARGE" });
+      }
       const response = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(safeBody),
+        body: serializedBody,
         signal,
       });
       if (binary && response.ok) return response.blob();
@@ -4101,6 +4109,12 @@ async function uploadPendingImages(settings, issue, options = {}) {
       ...settings, commentUrl: source.issueUrl, attachmentId: source.id,
     }, { binary: true, signal })),
   });
+  attachmentLimits = { ...window.QaReportAttachmentLimits.defaults, ...manifest.attachmentLimits };
+  showAttachmentLimits(attachmentLimits);
+  for (const file of plan.uploads) {
+    const limitError = window.QaReportAttachmentLimits.fileError(file, attachmentLimits);
+    if (limitError) throw new Error(limitError);
+  }
   summary.textContent = `Уже в Jira: ${plan.reused.length} · Загрузим: ${plan.uploads.length}`; summary.hidden = false;
   const persist = async entries => {
     const changes = reuse.bindings(entries);
@@ -5205,6 +5219,35 @@ function closeFeedback() {
   syncBodyModalOverflow();
 }
 
+let attachmentLimits = { ...window.QaReportAttachmentLimits.defaults };
+
+function showAttachmentLimits(limits) {
+  const hint = document.getElementById("attachmentLimitsHint");
+  hint.textContent = window.QaReportAttachmentLimits.describe(limits);
+  hint.hidden = false;
+  elements.imageButton.title = `Добавить вложение. ${hint.textContent}`;
+}
+
+async function refreshAttachmentLimits() {
+  // Fetch per target instead of retaining another Jira's limit after a report switch.
+  let limits = { ...window.QaReportAttachmentLimits.defaults };
+  try {
+    const response = await fetch("/api/health", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (response.ok) limits = { ...limits, ...(await response.json()).attachmentLimits };
+  } catch { /* Offline editing still uses the documented local limit. */ }
+  try {
+    const issue = parseIssueUrl(elements.issueUrl.value);
+    const settings = {};
+    const result = await jiraRequest("/api/jira/attachment-manifest", {
+      ...settings, ...issue, limitsOnly: true,
+    }, { signal: AbortSignal.timeout(10000) });
+    limits = { ...limits, ...result.attachmentLimits };
+  } catch { /* Missing connection/metadata must not prevent local editing. */ }
+  attachmentLimits = limits;
+  showAttachmentLimits(limits);
+  return limits;
+}
+
 async function insertImages(files) {
   pwaPendingOperations++;
   try { return await insertImagesForPwa(files); }
@@ -5213,10 +5256,17 @@ async function insertImages(files) {
 
 async function insertImagesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
+  const targetEditor = activeEditor;
+  const limits = await refreshAttachmentLimits();
+  if (activeEditor !== targetEditor || !targetEditor.isConnected) {
+    showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
+    return;
+  }
   for (const file of [...files]) {
     if (!isImageLikeFile(file)) continue;
-    if (file.size > FILE_ATTACHMENT_MAX_SIZE) {
-      showToast(`Файл ${file.name} больше ${formatFileSize(FILE_ATTACHMENT_MAX_SIZE)}`);
+    const limitError = window.QaReportAttachmentLimits.fileError(file, limits);
+    if (limitError) {
+      showToast(limitError, 9000);
       continue;
     }
     const dataUrl = await readFileAsDataUrl(file);
@@ -5274,10 +5324,17 @@ async function insertFiles(files) {
 
 async function insertFilesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
+  const targetEditor = activeEditor;
+  const limits = await refreshAttachmentLimits();
+  if (activeEditor !== targetEditor || !targetEditor.isConnected) {
+    showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
+    return;
+  }
   for (const file of [...files]) {
     if (isImageLikeFile(file)) continue;
-    if (file.size > FILE_ATTACHMENT_MAX_SIZE) {
-      showToast(`Файл «${file.name}» больше ${formatFileSize(FILE_ATTACHMENT_MAX_SIZE)}`);
+    const limitError = window.QaReportAttachmentLimits.fileError(file, limits);
+    if (limitError) {
+      showToast(limitError, 9000);
       continue;
     }
     try {
@@ -6951,6 +7008,7 @@ elements.imageButton.addEventListener("pointerdown", () => {
 elements.imageButton.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
+  showAttachmentLimits(attachmentLimits);
   elements.imageInput.click();
 });
 elements.imageInput.addEventListener("change", async () => {

@@ -36,14 +36,19 @@
   const copy = document.getElementById("copyLocalImport");
   const status = document.getElementById("localImportStatus");
   const trigger = document.getElementById("localImportButton");
+  const indicator = document.getElementById("localImportIndicator");
   const key = "qa-report-local-import-session-v1";
-  let session = null; let busy = false; let timer; let lastError = "";
+  let session = null; let starting = false; let busy = false; let timer; let lastError = "";
   function message(value) { status.textContent = value; }
   function updateControls() {
-    start.disabled = Boolean(session); stop.disabled = !session; copy.disabled = !session;
-    trigger.classList.toggle("local-import-active", Boolean(session));
-    const label = session ? "Приём от ИИ включён" : "Приём от ИИ";
-    trigger.querySelector("span").textContent = label; trigger.title = label; trigger.setAttribute("aria-label", label);
+    const active = Boolean(session);
+    start.disabled = active || starting; stop.disabled = !active; copy.disabled = !active;
+    start.textContent = starting ? "Включаем…" : active ? "Приём включён" : "Включить приём";
+    panel.dataset.state = active ? "on" : "off";
+    trigger.classList.toggle("local-import-active", active);
+    indicator.textContent = active ? "ON" : "OFF";
+    const label = `Приём результатов от ИИ ${active ? "включён" : "выключен"}`;
+    trigger.title = label; trigger.setAttribute("aria-label", label);
   }
   async function context() {
     flushDraftFromDom();
@@ -63,7 +68,7 @@
     if (!response.ok) throw Object.assign(new Error(payload.error || `HTTP ${response.status}`), { status: response.status });
     return payload;
   }
-  async function endSession(note = "Приём остановлен") {
+  async function endSession(note = "Приём выключен. Чтобы продолжить, включите его снова.") {
     const previous = session; session = null; clearTimeout(timer);
     sessionStorage.removeItem(key); updateControls(); message(note);
     if (previous) await browserRequest(`/${previous.id}`, { method: "DELETE" }, previous).catch(() => {});
@@ -111,7 +116,8 @@
     } finally { shell.inert = wasInert; }
   }
   async function poll() {
-    if (!session || busy) return;
+    if (!session) return;
+    if (busy) { timer = setTimeout(poll, 2500); return; }
     const current = session;
     if (draft.reportId !== current.reportId) { await endSession("Открыт другой отчёт. Создайте новую сессию приёма"); return; }
     if (Date.now() >= current.expiresAt) { await endSession("Срок сессии истёк. Уже полученные файлы сохранены в браузере"); return; }
@@ -119,6 +125,7 @@
     busy = true;
     try {
       const result = await browserRequest(`/${current.id}/next`, {}, current);
+      if (session !== current) return;
       if (result.batch) {
         pwaPendingOperations++;
         let ack = { id: result.batch.id, status: "saved" };
@@ -131,20 +138,23 @@
         const updatedContext = await context();
         if (new TextEncoder().encode(JSON.stringify(updatedContext)).length < 900_000) ack.context = updatedContext;
         await browserRequest(`/${current.id}/ack`, { method: "POST", body: JSON.stringify(ack) }, current);
+        if (session !== current) return;
         message(ack.status === "saved" ? "Результаты и вложения сохранены в этом браузере. Ожидаем следующий пакет" : `Пакет не применён: ${ack.error}`);
         showToast(ack.status === "saved" ? "Результаты агента сохранены" : `Пакет агента не применён: ${ack.error}`, 7000);
       }
       lastError = "";
     } catch (error) {
+      if (session !== current) return;
       if ([401,403,404,410].includes(error.status)) { await endSession("Сессия недоступна. Проверьте вход и включите приём снова"); }
       else { message(`Ожидаем повторной попытки: ${error.message}`); if (lastError !== error.message) showToast(status.textContent, 7000); lastError = error.message; }
     } finally { busy = false; if (session === current) timer = setTimeout(poll, 2500); }
   }
-  trigger.addEventListener("click", () => { panel.hidden = false; updateControls(); syncBodyModalOverflow(); start.focus(); });
+  trigger.addEventListener("click", () => { panel.hidden = false; updateControls(); syncBodyModalOverflow(); (session ? copy : starting ? document.getElementById("closeLocalImport") : start).focus(); });
   document.getElementById("closeLocalImport").addEventListener("click", () => { panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); });
   panel.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); } });
   start.addEventListener("click", async () => {
-    start.disabled = true;
+    if (session || starting) return;
+    starting = true; updateControls(); message("Включаем приём результатов…");
     try {
       await checkBackendCompatibility();
       await saveReportSnapshot("before-local-agent");
@@ -152,12 +162,12 @@
       if (typeof authCsrfToken === "function") body.csrfToken = await authCsrfToken();
       session = await browserRequest("", { method: "POST", body: JSON.stringify(body) }, null);
       sessionStorage.setItem(key, JSON.stringify(session));
-      message(`Приём включён до ${new Date(session.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Скопируйте подключение для агента и оставьте отчёт открытым`);
+      message(`Приём включён до ${new Date(session.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Скопируйте промпт для агента и оставьте отчёт открытым`);
       timer = setTimeout(poll, 500);
     } catch (error) { message(`Не удалось включить приём: ${error.message}`); }
-    finally { updateControls(); }
+    finally { starting = false; updateControls(); }
   });
-  stop.addEventListener("click", () => endSession());
+  stop.addEventListener("click", () => { endSession(); start.focus(); });
   copy.addEventListener("click", async () => {
     if (!session) return;
     const instruction = `Заполни открытый отчёт QA Report через временный API. Подключение:\n${JSON.stringify(session.connection, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы и hash каждой ячейки.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf].\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;

@@ -4919,7 +4919,7 @@ body.pin-number-columns .section-header-table .number-header::before,
   height: 36px;
   min-height: 36px;
   padding: 0;
-  border: 1px solid var(--ai-receiver-color);
+  border: 1px solid var(--line);
   border-radius: 10px;
   background: transparent;
   color: #fff;
@@ -4936,8 +4936,8 @@ body.pin-number-columns .section-header-table .number-header::before,
 }
 .local-import-indicator {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: 3px;
+  right: 3px;
   width: 14px;
   padding: 0;
   color: var(--ai-receiver-color);
@@ -4951,6 +4951,7 @@ body.pin-number-columns .section-header-table .number-header::before,
 }
 #localImportButton.local-import-active {
   --ai-receiver-color: #22c55e;
+  border-color: var(--ai-receiver-color);
   animation: aiReceiverPulse 2.4s ease-in-out infinite;
 }
 #localImportButton.local-import-active .ai-receiver-icon {

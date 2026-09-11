@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=95" />
+    <link rel="stylesheet" href="/styles.css?v=96" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -141,7 +141,17 @@
         </nav>
 
         <div class="header-integrations">
-            <button class="header-action" id="localImportButton" type="button" title="Приём результатов от ИИ выключен" aria-label="Приём результатов от ИИ выключен" aria-haspopup="dialog"><svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg><span>ИИ</span><small class="local-import-indicator" id="localImportIndicator" aria-hidden="true">OFF</small></button>
+          <button class="header-icon-button" id="localImportButton" type="button" title="Приём результатов от ИИ выключен" aria-label="Приём результатов от ИИ выключен" aria-haspopup="dialog" aria-controls="localImportModal">
+            <svg class="ui-icon ai-receiver-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="8" width="16" height="13" rx="4" />
+              <path d="M12 5v3M4 12H3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h1m16-5h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1" />
+              <circle cx="12" cy="4" r="1" />
+              <circle cx="8.5" cy="13.5" r=".75" />
+              <circle cx="15.5" cy="13.5" r=".75" />
+              <path d="M9.5 17a3.5 3.5 0 0 0 5 0" />
+            </svg>
+            <small class="local-import-indicator" id="localImportIndicator" aria-hidden="true">OFF</small>
+          </button>
           <div class="header-dropdown">
             <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu" aria-label="Jira" title="Jira">
               <svg class="ui-icon dropdown-leading-icon jira-logo" aria-hidden="true"><use href="#icon-jira"></use></svg>
@@ -920,7 +930,7 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=11"></script>
+    <script src="/release-notes.js?v=12"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=4"></script>

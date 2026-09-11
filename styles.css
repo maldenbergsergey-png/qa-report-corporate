@@ -4909,30 +4909,81 @@ body.pin-number-columns .section-header-table .number-header::before,
 
 .local-import-option { display: flex; align-items: center; gap: 10px; margin: 16px 0; font-size: 14px; }
 #localImportButton {
+  --ai-receiver-color: #ef4444;
   position: relative;
-  width: auto;
-  min-width: 66px;
-  padding: 9px 10px 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 1px solid var(--ai-receiver-color);
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+  animation: none;
 }
-#localImportButton > span { display: inline; }
+#localImportButton .ai-receiver-icon {
+  width: 28px;
+  height: 28px;
+  stroke-width: 1.8;
+  filter: none;
+}
 .local-import-indicator {
   position: absolute;
-  top: 0;
-  right: 3px;
-  min-width: 25px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  color: var(--muted);
-  background: var(--line-soft);
-  font-size: 9px;
+  top: 1px;
+  right: 1px;
+  width: 14px;
+  padding: 0;
+  color: var(--ai-receiver-color);
+  background: transparent;
+  font-size: 6.5px;
   font-weight: 800;
-  line-height: 12px;
-  letter-spacing: .3px;
+  line-height: 8px;
+  letter-spacing: -.15px;
   text-align: center;
+  pointer-events: none;
 }
-#localImportButton.local-import-active .local-import-indicator {
-  color: #fff;
-  background: #1f845a;
+#localImportButton.local-import-active {
+  --ai-receiver-color: #22c55e;
+  animation: aiReceiverPulse 2.4s ease-in-out infinite;
+}
+#localImportButton.local-import-active .ai-receiver-icon {
+  filter: drop-shadow(0 0 3px rgba(34, 197, 94, 0.7));
+  animation: aiReceiverIconPulse 2.4s ease-in-out infinite;
+}
+@keyframes aiReceiverPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 4px rgba(34, 197, 94, 0.35),
+      0 0 8px rgba(34, 197, 94, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 8px rgba(34, 197, 94, 0.65),
+      0 0 16px rgba(34, 197, 94, 0.35);
+  }
+}
+@keyframes aiReceiverIconPulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.35)); }
+  50% { filter: drop-shadow(0 0 3px rgba(34, 197, 94, 0.7)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #localImportButton.local-import-active {
+    animation: none;
+    box-shadow:
+      0 0 4px rgba(34, 197, 94, 0.35),
+      0 0 8px rgba(34, 197, 94, 0.18);
+  }
+  #localImportButton.local-import-active .ai-receiver-icon {
+    animation: none;
+    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.35));
+  }
 }
 .attachment-import-error { color: var(--danger, #c9372c); }
 #localImportModal .modal-actions { flex-wrap: wrap; }

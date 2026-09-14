@@ -598,8 +598,13 @@ function storageOwnerNamespace(owner) {
 }
 
 function issueKeyFromUrl(value) {
+  const text = String(value || "").trim();
+  if (/^[A-Z][A-Z0-9_]*-\d+$/i.test(text)) return text.toUpperCase();
   try {
-    return new URL(String(value || "")).pathname.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/i)?.[1]?.toUpperCase() || "";
+    const pathname = new URL(text).pathname;
+    const match = pathname.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)(?:\/|$)/i)
+      || pathname.match(/\/([A-Z][A-Z0-9_]*-\d+)\/?$/i);
+    return match?.[1]?.toUpperCase() || "";
   } catch {
     return "";
   }
@@ -1364,7 +1369,7 @@ async function handleReportSave(request, response) {
   const issueKey = String(body.issueKey || issueKeyFromUrl(issueUrl)).trim().slice(0, 80);
   const environment = String(body.environment ?? document.environment ?? "").trim().slice(0, 120);
   const overallStatus = String(body.overallStatus ?? document.overallStatus ?? "").trim().slice(0, 80);
-  const title = String(body.title || `${issueKey || "Без задачи"} — ${environment || "Окружение не указано"}`)
+  const title = String(body.title || `${issueKey || issueUrl || "Без задачи"} — ${environment || "Окружение не указано"}`)
     .trim()
     .slice(0, 500);
   const schemaVersion = Number(body.schemaVersion || document.schemaVersion || 3) || 3;

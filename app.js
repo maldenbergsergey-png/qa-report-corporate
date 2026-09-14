@@ -869,11 +869,21 @@ async function dbTransaction(mode, action) {
 }
 
 function issueKeyFromUrl(value) {
+  const text = String(value || "").trim();
+  if (/^[A-Z][A-Z0-9_]*-\d+$/i.test(text)) return text.toUpperCase();
   try {
-    return new URL(value).pathname.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/i)?.[1]?.toUpperCase() || "";
+    const pathname = new URL(text).pathname;
+    const match = pathname.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)(?:\/|$)/i)
+      || pathname.match(/\/([A-Z][A-Z0-9_]*-\d+)\/?$/i);
+    return match?.[1]?.toUpperCase() || "";
   } catch {
     return "";
   }
+}
+
+function reportIssueLabel(report) {
+  const issueUrl = report.document?.issueUrl ?? (report.issueUrl || report.issueKey || "");
+  return issueKeyFromUrl(issueUrl) || String(issueUrl).trim() || "Без задачи";
 }
 
 async function saveReportSnapshot(reason = "manual", candidate = null) {
@@ -885,7 +895,7 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
   const record = {
     id: snapshot.reportId,
     publicId: snapshot.publicId,
-    title: `${issueKey || "Без задачи"} — ${snapshot.environment}`,
+    title: `${reportIssueLabel(snapshot)} — ${snapshot.environment}`,
     issueUrl: snapshot.issueUrl,
     issueKey,
     environment: snapshot.environment,
@@ -1639,7 +1649,7 @@ async function overwriteCloudWithLocalVersion() {
   const issueKey = issueKeyFromUrl(draft.issueUrl);
   const record = {
     id: draft.reportId,
-    title: `${issueKey || "Без задачи"} — ${draft.environment}`,
+    title: `${reportIssueLabel(draft)} — ${draft.environment}`,
     issueUrl: draft.issueUrl,
     issueKey,
     environment: draft.environment,
@@ -1688,7 +1698,7 @@ async function saveDraftCopyToHistory(copyItem) {
   const record = {
     id: copyDraft.reportId,
     publicId: copyDraft.publicId,
-    title: `${issueKey || "Без задачи"} — ${copyDraft.environment}`,
+    title: `${reportIssueLabel(copyDraft)} — ${copyDraft.environment}`,
     issueUrl: copyDraft.issueUrl,
     issueKey,
     environment: copyDraft.environment,
@@ -4417,7 +4427,7 @@ async function renderHistoryList() {
   const reports = await getAllHistoryReports();
   const query = elements.historySearch.value.trim().toLowerCase();
   const filtered = reports.filter((report) =>
-    `${report.title} ${report.issueKey} ${report.issueUrl} ${report.historyComment || ""}`.toLowerCase().includes(query),
+    `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""}`.toLowerCase().includes(query),
   );
   const serverCount = reports.filter((report) => report.source === "server").length;
   const localCount = reports.length - serverCount;
@@ -4439,7 +4449,7 @@ async function renderHistoryList() {
     const info = document.createElement("div");
     info.className = "history-item-info";
     const publicId = reportPublicId(report);
-    const issueLabel = report.issueKey || issueKeyFromUrl(report.issueUrl) || "Без задачи";
+    const issueLabel = reportIssueLabel(report);
     info.innerHTML = `<h3>${escapeHtml(issueLabel)}</h3><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";

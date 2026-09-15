@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const ChecklistNumbering = require('../checklist-numbering');
 const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 // Run the production exporters on plain-text cells without a browser or network.
-const functions = ['sectionsForPublication', 'generateMarkup', 'hasRowContent', 'xlsxEscape', 'columnName',
+const functions = ['escapeWikiNotEquals', 'sectionsForPublication', 'generateMarkup', 'hasRowContent', 'xlsxEscape', 'columnName',
   'createSharedStringStore', 'xlsxCell', 'xlsxRow', 'estimateXlsxRowHeight',
   'getXlsxStatusStyle', 'buildXlsxWorksheet'];
 const exporterCode = functions.map(name => {

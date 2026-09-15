@@ -1,5 +1,16 @@
 window.QaReportReleases = [
   {
+    version: "0.9.0",
+    date: "2026-09-15",
+    changes: {
+      new: [],
+      improvements: [],
+      fixes: [
+        "Оператор != сохраняется обычным текстом при отправке отчёта в Jira; заменять его на «НЕ» больше не нужно."
+      ]
+    }
+  },
+  {
     version: "0.8.0",
     date: "2026-09-14",
     changes: {

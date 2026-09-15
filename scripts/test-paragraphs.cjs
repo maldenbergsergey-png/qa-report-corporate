@@ -83,6 +83,43 @@ async function main() {
     const result = await page.evaluate(html => jiraCell(html), html);
     assert.equal(result, expected, name);
   }
+  const operatorSamples = [
+    ['Repeated comparisons', 'x != y, y !== z', String.raw`x \!= y, y \!== z`],
+    ['Formatted comparison', '<b>x != y</b>', String.raw`*x \!= y*`],
+    ['Literal backslash', String.raw`x\!=y`, String.raw`x&#92;\!=y`],
+    ['Link label and URL', '<a href="https://docs.example/?q=x!=y">x != y</a>', String.raw`[x \!= y|https://docs.example/?q=x!=y]`],
+    ['Nested list and link', '<ul><li>x != y</li><li><a href="https://docs.example/">a != b</a></li></ul>', String.raw`
+* x \!= y
+* [a \!= b|https://docs.example/]
+`],
+    ['Image reference', 'x != y <span class="jira-image-placeholder" data-jira-name="compare!=.png" data-jira-options="thumbnail">compare!=.png</span>', String.raw`x \!= y !compare!=.png|thumbnail!`],
+    ['Image and file', 'x != y <img data-jira-name="compare!=.png"> <span class="jira-file-placeholder" data-jira-name="log!=.txt">log!=.txt</span>', String.raw`x \!= y !compare!=.png|thumbnail! [^log!=.txt]`],
+    ['Code block', '<pre><code>if (x != y) {\n  x !== z;\n}</code></pre>', '{code}\nif (x != y) {\n  x !== z;\n}\n{code}'],
+  ];
+  for (const [name, html, expected] of operatorSamples) {
+    const wiki = await page.evaluate(html => jiraCell(html), html);
+    assert.equal(wiki, expected, name);
+    assert.doesNotMatch(wiki, /@@JIRA/);
+  }
+  const roundTripSamples = [
+    ...operatorSamples.filter(([name]) => ['Repeated comparisons', 'Formatted comparison', 'Literal backslash', 'Link label and URL', 'Code block'].includes(name)),
+    ['Comparison beside an image', 'x != y <img data-jira-name="screenshot.png"> y != z', String.raw`x \!= y !screenshot.png|thumbnail! y \!= z`],
+  ];
+  for (const [name, html, expected] of roundTripSamples) {
+    const result = await page.evaluate(html => {
+      const wiki = jiraCell(html);
+      const parsed = parseJiraMarkup('||Comparison||Статус||\n|' + wiki + '|OK|');
+      const section = parsed.sections[0];
+      const imported = section.rows[0].cells[section.columns[0].id];
+      return { round: jiraCell(imported), columns: section.columns.length };
+    }, html);
+    assert.equal(result.round, expected, name + ' survives import and re-export');
+    assert.equal(result.columns, 1, name + ' stays in one column');
+  }
+  assert.equal(await page.evaluate(() => htmlToWiki('<p>x != y</p>')), String.raw`x \!= y`, 'Report description');
+  if (fs.existsSync(path.join(root, 'auth.js'))) {
+    assert.equal(await page.evaluate(() => jiraCell('<code>x != y</code>')), '{{x != y}}', 'Corporate inline code stays literal');
+  }
   const rich = await page.evaluate(() => {
     const colored = jiraCell('<p><span style="color:#ff0000">Первый</span></p><p><span style="color:#ff0000">Второй</span></p>');
     const literals = jiraCell('C:\\Temp\\file.txt | plain');
@@ -162,8 +199,33 @@ async function main() {
   if (await page.locator('#confirmModal').isVisible()) await page.click('#acceptConfirmButton');
   await page.waitForFunction(()=>document.getElementById('codeEditorModal').hidden);
   await page.fill('#issueUrl','https://jira.example/browse/QA-1');
-  await page.evaluate(() => saveDraft());
+  await page.evaluate(() => {
+    collectDocumentFields();
+    draft.environment = 'STAGE != PROD';
+    draft.intro = '<p>Описание: x != y</p>';
+    const section = draft.sections[0];
+    section.title = 'Проверки != исключения';
+    section.columns[0].title = 'Ожидание != факт';
+    section.rows[0].cells[section.columns[0].id] += '<div>Результат: x != y, y != z</div>';
+    render();
+    saveDraft();
+  });
   const beforeReload = await page.evaluate(() => generateMarkup());
+  for (const expected of [String.raw`STAGE \!= PROD`, String.raw`Описание: x \!= y`, String.raw`Проверки \!= исключения`, String.raw`Ожидание \!= факт`, String.raw`Результат: x \!= y, y \!= z`]) {
+    assert.ok(beforeReload.includes(expected), expected);
+  }
+  const importedHeadings = await page.evaluate(() => {
+    const imported = parseJiraMarkup(generateMarkup());
+    return { title: imported.sections[0].title, column: imported.sections[0].columns[0].title, intro: htmlToWiki(imported.intro) };
+  });
+  assert.equal(importedHeadings.title, 'Проверки != исключения');
+  assert.equal(importedHeadings.column, 'Ожидание != факт');
+  assert.equal(importedHeadings.intro, String.raw`Описание: x \!= y`);
+  if (!fs.existsSync(path.join(root, 'auth.js'))) {
+    const adf = await page.evaluate(() => JSON.stringify(generateAdfDocument()));
+    assert.ok(adf.includes('Результат: x != y, y != z'), 'Jira Cloud ADF keeps literal comparisons');
+    assert.ok(!adf.includes(String.raw`\!=`), 'Wiki escaping does not leak into ADF');
+  }
   await page.reload(); await page.waitForSelector('.cell-code-block'); await configure();
   assert.equal(await page.evaluate(() => generateMarkup()),beforeReload);
   const row = await page.evaluate(() => {
@@ -177,7 +239,7 @@ async function main() {
   await page.click('#publishCancelButton');
   if(output) {fs.mkdirSync(output,{recursive:true});await page.locator('.check-table').first().screenshot({path:path.join(output,'paragraphs-and-objects.png')});}
   assert.deepEqual(errors,[]);
-  console.log('PASS: Enter/Shift+Enter, paragraph gaps, colors, code, literal backslashes, protected image pipes, table round trip, leading-edge caret, moving images/code and persistence.');
+  console.log('PASS: != escaping, descriptions/headings, nested links/lists, image/file names, code, import/re-export, publication, Enter/Shift+Enter, paragraph gaps, colors, code, literal backslashes, protected image pipes, table round trip, leading-edge caret, moving images/code and persistence.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

@@ -245,3 +245,15 @@ test("section ordinals are removed without deleting meaningful numeric titles", 
     assert.equal(repeated.sections[0].title, expected);
   }
 });
+
+
+test("escaped not-equal operators stay literal in section and column titles", () => {
+  const { section, row } = onlyRow([
+    String.raw`h2. 1. Проверки \!= исключения`,
+    String.raw`||Ожидание \!= факт||Статус||`,
+    String.raw`|x \!= y, y \!= z|OK|`,
+  ].join('\n'));
+  assert.equal(section.title, 'Проверки != исключения');
+  assert.equal(section.columns[0].title, 'Ожидание != факт');
+  assert.equal(row.cells[section.columns[0].id], 'x != y, y != z');
+});

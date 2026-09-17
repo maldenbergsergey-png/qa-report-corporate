@@ -6,7 +6,7 @@ const ChecklistNumbering = require('../checklist-numbering');
 const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 // Run the production exporters on plain-text cells without a browser or network.
 const functions = ['escapeWikiNotEquals', 'sectionsForPublication', 'generateMarkup', 'hasRowContent', 'xlsxEscape', 'columnName',
-  'createSharedStringStore', 'xlsxCell', 'xlsxRow', 'estimateXlsxRowHeight',
+  'escapeHtml', 'createSharedStringStore', 'xlsxCell', 'xlsxRow', 'estimateXlsxRowHeight',
   'getXlsxStatusStyle', 'buildXlsxWorksheet'];
 const exporterCode = functions.map(name => {
   const match = source.match(new RegExp(`^function ${name}\\([\\s\\S]*?^}`, 'm'));
@@ -14,9 +14,9 @@ const exporterCode = functions.map(name => {
   return match[0];
 }).join('\n');
 
-for (const mode of ['section', 'continuous', 'hierarchical']) {
+for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
   test(`${mode}: Jira markup and Excel keep document numbers around omitted rows and sections`, () => {
-    const row = (id, text = '') => ({ id, status: 'НЕ ПРОВЕРЕНО', cells: { text } });
+    const row = (id, text = '') => ({ id, manualNumber: { a1: '3.', b2: '5.2', d1: '10.' }[id] || '', status: 'НЕ ПРОВЕРЕНО', cells: { text } });
     const draft = { numberingMode: mode, environment: 'STAGE', overallStatus: 'OK', intro: '', sections: [
       { id: 'a', title: 'First', columns: [{ id: 'text', title: 'Check' }], rows: [row('a1', 'A'), row('a2')] },
       { id: 'b', title: 'Second', columns: [{ id: 'text', title: 'Check' }], rows: [row('b1'), row('b2', 'B')] },
@@ -42,7 +42,7 @@ for (const mode of ['section', 'continuous', 'hierarchical']) {
     assert.equal(draft.sections[1].rows.length, 2);
     draft.sections[1].rows[1].status = 'НЕ ПРОВЕРЕНО';
     const expected = {
-      section: ['1.', '2.', '1.'], continuous: ['1.', '4.', '6.'], hierarchical: ['1.1', '2.2', '4.1'],
+      section: ['1.', '2.', '1.'], continuous: ['1.', '4.', '6.'], hierarchical: ['1.1', '2.2', '4.1'], manual: ['3.', '5.2', '10.'],
     }[mode];
     for (const sectionIds of [null, ['b', 'd']]) {
       const wanted = sectionIds ? expected.slice(1) : expected;

@@ -17,10 +17,11 @@ function harness() {
         {status:"НЕ ПРОВЕРЕНО", cells:{check:""}}, {status:"НЕ ПРОВЕРЕНО", cells:{check:""}}]}]};
   const ctx = vm.createContext({ draft, DEFAULT_DRAFT:{environment:"STAGE",overallStatus:"OK"},
     DEFAULT_COLUMNS:[{id:"check",title:"Проверка"}], normalizeDraft:value=>value,
+    ChecklistNumbering:require('../checklist-numbering'),
     document:{createElement:()=>({innerHTML:"", get textContent(){return this.innerHTML.replace(/<[^>]*>/g,"");},
       querySelector(){return /<(img|a|pre|table|video|audio|iframe)\b|cell-file/.test(this.innerHTML);}})},
     flushDraftFromDom(){}, askConfirmation:async()=>false });
-  for (const name of ["loadDefaultColumns", "hasReportDataToReplace", "confirmImportReplacement", "importedDraftInCurrentReport"]) {
+  for (const name of ["loadDefaultColumns", "hasReportDataToReplace", "confirmImportReplacement", "importedDraftInCurrentReport", "chooseImportedNumbering"]) {
     vm.runInContext(functionSource(name), ctx);
   }
   return ctx;
@@ -76,7 +77,7 @@ test("replacement and inbound import keep the open report; cancel performs no sa
       ctx.setImportProgress=()=>{};
       ctx.document.getElementById=()=>({hidden:true});
       ctx.askConfirmation=async()=>confirmed;
-      ctx.pendingImportedDraft={intro:"Imported",sections:[{title:"Вход"}]};
+      ctx.pendingImportedDraft={intro:"Imported",sections:[{title:"Вход",rows:[]}]};
       ctx.saveReportSnapshot=async reason=>calls.push(reason);
       ctx.saveDraft=async()=>{calls.push("save");return true;};
       ctx.clone=value=>JSON.parse(JSON.stringify(value));

@@ -336,6 +336,7 @@ const elements = {
   confirmModalMessage: document.querySelector("#confirmModalMessage"),
   closeConfirmButton: document.querySelector("#closeConfirmButton"),
   cancelConfirmButton: document.querySelector("#cancelConfirmButton"),
+  alternativeConfirmButton: document.querySelector("#alternativeConfirmButton"),
   acceptConfirmButton: document.querySelector("#acceptConfirmButton"),
   feedbackModal: document.querySelector("#feedbackModal"),
   closeFeedbackButton: document.querySelector("#closeFeedbackButton"),
@@ -1935,6 +1936,8 @@ function collectSectionsFromDom() {
       rowElement.querySelectorAll(".cell-editor[data-column-id]").forEach((editor) => {
         row.cells[editor.dataset.columnId] = cleanEditorHtml(editor);
       });
+      const number = rowElement.querySelector(".row-number-input");
+      if (number && draft.numberingMode === "manual") row.manualNumber = ChecklistNumbering.normalizeNumber(number.value);
       const status = rowElement.querySelector(".status-select");
       if (status) row.status = status.value;
     });
@@ -2614,9 +2617,22 @@ function createRowElement(section, row, number) {
   rowDragHandle.title = "Перетащить строку";
   rowDragHandle.draggable = !section.statusSort;
   rowDragHandle.hidden = Boolean(section.statusSort);
-  const rowNumber = document.createElement("span");
-  rowNumber.className = "row-number-text";
-  rowNumber.textContent = number;
+  const manual = draft.numberingMode === "manual";
+  const rowNumber = document.createElement(manual ? "input" : "span");
+  rowNumber.className = manual ? "row-number-text row-number-input" : "row-number-text";
+  if (manual) {
+    rowNumber.type = "text";
+    rowNumber.value = number;
+    rowNumber.placeholder = "№";
+    rowNumber.setAttribute("aria-label", `Номер пункта в разделе «${section.title}»`);
+    rowNumber.addEventListener("input", () => {
+      row.manualNumber = ChecklistNumbering.normalizeNumber(rowNumber.value);
+      scheduleSave();
+    });
+    rowNumber.addEventListener("change", () => {
+      saveLocalMutationNow();
+    });
+  } else rowNumber.textContent = number;
   numberCell.append(rowDragHandle, rowNumber);
   tr.append(numberCell);
 
@@ -2963,7 +2979,7 @@ function applyRowAction(section, rowId, action) {
   } else if (action === "insert-below") {
     currentSection.rows.splice(index + 1, 0, createRow(currentSection.columns));
   } else if (action === "duplicate") {
-    currentSection.rows.splice(currentSection.statusSort ? currentSection.rows.length : index + 1, 0, { ...clone(currentSection.rows[index]), id: crypto.randomUUID() });
+    currentSection.rows.splice(currentSection.statusSort ? currentSection.rows.length : index + 1, 0, { ...clone(currentSection.rows[index]), id: crypto.randomUUID(), ...(draft.numberingMode === "manual" ? { manualNumber: "" } : {}) });
   } else if (action === "split") {
     splitSectionAtRow(currentSection, index);
     return;
@@ -3460,7 +3476,7 @@ function generateMarkup(options = {}) {
     rows.forEach((row) => {
       const values = section.columns.map((column) => jiraCell(row.cells[column.id] || ""));
       const status = `{color:${STATUS_META[row.status].jiraColor}}*${row.status}*{color}`;
-      lines.push(`|${[rowNumbers.get(row.id), ...values, status].join("|")}|`);
+      lines.push(`|${[jiraCell(escapeHtml(rowNumbers.get(row.id))), ...values, status].join("|")}|`);
     });
     blocks.push(lines.join("\n"));
   });
@@ -3517,7 +3533,7 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
       const oppositeRow = oppositeRows.get(row.id);
       const rowOnlyHere = Boolean(oppositeDraft && !oppositeRow);
       if (sectionOnlyHere || rowOnlyHere) tr.classList.add("version-diff-row");
-      tr.innerHTML = `<td>${rowNumbers.get(row.id)}</td>${section.columns
+      tr.innerHTML = `<td>${escapeHtml(rowNumbers.get(row.id))}</td>${section.columns
         .map((column) => {
           const oppositeColumn = oppositeColumns.get(column.id);
           const columnOnlyHere = Boolean(oppositeDraft && !oppositeColumn);
@@ -3756,7 +3772,7 @@ function saveChecklistSettings() {
   const mode = ChecklistNumbering.normalizeMode(elements.jiraSettingsModal.querySelector('[name="numberingMode"]:checked')?.value);
   if (draft.numberingMode === mode) return;
   flushDraftFromDom();
-  draft.numberingMode = mode;
+  ChecklistNumbering.setMode(draft, mode);
   renderSections();
   saveLocalMutationNow();
 }
@@ -5966,6 +5982,7 @@ function resetImportPreview() {
   preparedImport = null; pendingImportedDraft = null; importLocationSelection = new Set();
   elements.importModal.classList.remove("has-import-preview");
   document.getElementById("importSourceSummary").hidden = true;
+  document.getElementById("importNumberingChoice").hidden = true;
   document.getElementById("importTitle").textContent = "Импорт чек-листа из Jira";
   document.getElementById("importAttachmentsHint").textContent = "Изображения и файлы сохранятся в этом браузере";
   document.getElementById("importAttachmentChoices").hidden = true;
@@ -5997,6 +6014,8 @@ function syncImportSelection() {
 
 function renderImportChoices() {
   const referencesOnly = importSource === "markup";
+  document.getElementById("importNumberingChoice").hidden = !ChecklistNumbering.hasSourceNumbers(preparedImport.document);
+  document.getElementById("importPreserveNumbers").checked = true;
   const panel = document.getElementById("importAttachmentChoices");
   const list = document.getElementById("importColumnList"); list.replaceChildren(); panel.hidden = false;
   elements.importModal.classList.add("has-import-preview");
@@ -6147,7 +6166,9 @@ async function applyImport(mode = "replace") {
     setImportProgress("Сохраняем в браузере…");
     elements.importSummary.hidden = true;
     await saveReportSnapshot("before-import");
+    ChecklistNumbering.configureImport(imported, document.getElementById("importPreserveNumbers").checked, draft.numberingMode);
     if (mode === "append") {
+      if (imported.numberingMode === "manual") ChecklistNumbering.setMode(draft, "manual");
       draft.sections.push(...clone(imported.sections));
       if (imported.intro) draft.intro += imported.intro;
     } else {
@@ -6170,8 +6191,22 @@ async function applyImport(mode = "replace") {
   }
 }
 
+async function chooseImportedNumbering(imported) {
+  let preserve = true;
+  if (ChecklistNumbering.hasSourceNumbers(imported)) {
+    const choice = await askConfirmation("Сохранить номера из исходного чек-листа для ретеста? Их можно будет редактировать вручную, удаление строк не изменит остальные номера.", {
+      title: "Нумерация импортируемых пунктов", confirmText: "Сохранить номера", alternativeText: "Пересчитать",
+    });
+    if (choice === false) return false;
+    preserve = choice === true;
+  }
+  ChecklistNumbering.configureImport(imported, preserve, draft.numberingMode);
+  return true;
+}
+
 async function applyImportedChecklist(imported, metadata = {}) {
   if (!await confirmImportReplacement()) return false;
+  if (!await chooseImportedNumbering(imported)) return false;
   await saveReportSnapshot("before-inbound-import");
   const nextDraft = importedDraftInCurrentReport(imported);
   const title = String(metadata.title || "").trim();
@@ -6247,6 +6282,7 @@ async function copyPreviewMarkup() {
 async function savePreviewMarkupToDraft() {
   try {
     const imported = parseJiraMarkup(elements.markupPreview.value, collectCurrentAttachments());
+    ChecklistNumbering.configureImport(imported, draft.numberingMode === "manual", draft.numberingMode);
     await saveReportSnapshot("before-preview-markup-save");
     draft = normalizeDraft({
       ...imported,
@@ -6696,6 +6732,8 @@ function askConfirmation(message, options = {}) {
   elements.confirmModalTitle.textContent = options.title || "Подтвердите действие";
   elements.confirmModalMessage.textContent = message;
   elements.acceptConfirmButton.textContent = options.confirmText || "Подтвердить";
+  elements.alternativeConfirmButton.hidden = !options.alternativeText;
+  elements.alternativeConfirmButton.textContent = options.alternativeText || "";
   elements.acceptConfirmButton.className =
     `button ${options.danger ? "button-danger" : "button-primary"}`;
   elements.confirmModal.hidden = false;
@@ -7344,6 +7382,7 @@ elements.closeMediaViewerButton.addEventListener("click", closeMediaViewer);
 elements.closeCodeEditorButton.addEventListener("click", () => closeCodeEditor());
 elements.saveCodeButton.addEventListener("click", saveCodeChanges);
 elements.acceptConfirmButton.addEventListener("click", () => resolveConfirmation(true));
+elements.alternativeConfirmButton.addEventListener("click", () => resolveConfirmation("alternative"));
 elements.cancelConfirmButton.addEventListener("click", () => resolveConfirmation(false));
 elements.closeConfirmButton.addEventListener("click", () => resolveConfirmation(false));
 elements.codeEditorTextarea.addEventListener("input", () => {

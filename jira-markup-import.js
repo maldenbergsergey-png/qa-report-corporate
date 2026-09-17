@@ -345,7 +345,7 @@
       if (line.startsWith("||")) {
         tableNumber += 1;
         const rawHeaders = splitWikiRow(line).map((header) => header.replace(/\\!=/g, "!=").trim());
-        const numberIndex = rawHeaders.findIndex((header) => /^(номер|№)$/i.test(header));
+        const numberIndex = rawHeaders.findIndex((header) => /^(номер|№|nº)$/i.test(header));
         const statusIndex = rawHeaders.findIndex((header) => /статус/i.test(header));
         const columns = rawHeaders
           .map((title, index) => ({ title, index }))
@@ -363,7 +363,7 @@
           rows: [],
         };
         imported.sections.push(currentSection);
-        headers = { statusIndex, columnCount: rawHeaders.length };
+        headers = { numberIndex, statusIndex, columnCount: rawHeaders.length };
         pendingTitle = "";
         continue;
       }
@@ -373,6 +373,7 @@
         const values = splitWikiRow(collected.row);
         currentSection.rows.push({
           id: randomUUID(),
+          ...(headers.numberIndex >= 0 ? { manualNumber: String(values[headers.numberIndex] || "").replace(/\{color:[^}]+\}|\{color\}/gi, "").trim().replace(/^([*_+])(.+)\1$/, "$2") } : {}),
           status: normalizeStatus(headers.statusIndex >= 0 ? values[headers.statusIndex] : ""),
           cells: Object.fromEntries(
             currentSection.columns.map((column) => [

@@ -1551,6 +1551,23 @@ body.section-sticky-active .editor-toolbar::after {
   display: inline-block;
 }
 
+.row-number-input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 3px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+}
+
+.row-number-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .check-table tbody tr.row-dragging > td {
   opacity: 0.42;
   background: color-mix(in srgb, var(--primary) 12%, var(--surface));
@@ -3584,6 +3601,9 @@ body.resizing-code * {
     left: auto;
   }
 
+  #jiraSettingsModal { padding: 12px; }
+  .settings-modal { width: calc(100vw - 24px); }
+
   .settings-layout {
     grid-template-columns: 1fr;
   }
@@ -5140,3 +5160,5 @@ body.pin-number-columns .section-header-table .number-header::before,
   font-size: 12px;
   line-height: 1.5;
 }
+
+#alternativeConfirmButton[hidden] { display: none; }

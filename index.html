@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=97" />
+    <link rel="stylesheet" href="/styles.css?v=98" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -558,6 +558,10 @@
             <input id="importWithAttachments" type="checkbox" checked aria-describedby="importAttachmentsHint" />
             <span class="import-option-copy"><strong>Скачать вложения в браузер</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
           </label>
+          <label class="local-import-option" id="importNumberingChoice" hidden>
+            <input id="importPreserveNumbers" type="checkbox" checked aria-describedby="importNumberingHint" />
+            <span class="import-option-copy"><strong>Сохранить исходную нумерацию</strong><small id="importNumberingHint">Включится ручная нумерация: номера можно редактировать, удаление строк их не изменит. Снимите флажок, чтобы пересчитать номера автоматически.</small></span>
+          </label>
           <section class="import-attachment-choices" id="importAttachmentChoices" aria-label="Выбор вложений по колонкам" hidden>
             <div class="import-choices-heading"><strong id="importChoicesTitle">Вложения по колонкам</strong><span id="importSelectionCount"></span></div>
             <div id="importColumnList"></div>
@@ -684,6 +688,7 @@
         <div class="confirm-modal-body" id="confirmModalMessage"></div>
         <footer class="modal-footer">
           <button class="button button-ghost" id="cancelConfirmButton" type="button">Отмена</button>
+          <button class="button button-secondary" id="alternativeConfirmButton" type="button" hidden>Пересчитать</button>
           <button class="button button-primary" id="acceptConfirmButton" type="button">Подтвердить</button>
         </footer>
       </section>
@@ -740,7 +745,7 @@
             <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
               <fieldset class="numbering-settings">
                 <legend>Нумерация пунктов</legend>
-                <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. Номера автоматически обновляются при изменении порядка разделов и строк.</p>
+                <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. В автоматических режимах номера обновляются при изменении порядка разделов и строк.</p>
                 <label class="settings-toggle-card numbering-option">
                   <input type="radio" name="numberingMode" value="section" checked />
                   <span><strong>В каждом разделе с 1</strong><small>Каждый раздел начинается заново.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 1, 2, 3</span></span>
@@ -752,6 +757,10 @@
                 <label class="settings-toggle-card numbering-option">
                   <input type="radio" name="numberingMode" value="hierarchical" />
                   <span><strong>По номеру раздела и пункта</strong><small>Сначала номер раздела, затем номер пункта через точку.</small><span class="numbering-example">Раздел 1: 1.1, 1.2, 1.3 · Раздел 2: 2.1, 2.2, 2.3</span></span>
+                </label>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="numberingMode" value="manual" />
+                  <span><strong>Вручную — для ретеста</strong><small>Текущие номера сохранятся. Редактируйте их прямо в таблице: удаление и перенос строк не изменят остальные номера. Для новых строк задайте номер вручную.</small><span class="numbering-example">После удаления пункта 4: 1, 2, 3, 5</span></span>
                 </label>
               </fieldset>
             </section>
@@ -926,15 +935,15 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=6"></script>
+    <script src="/jira-markup-import.js?v=7"></script>
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
-    <script src="/checklist-numbering.js?v=2"></script>
-    <script src="/release-notes.js?v=16"></script>
+    <script src="/checklist-numbering.js?v=3"></script>
+    <script src="/release-notes.js?v=17"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=4"></script>
-    <script src="/app.js?v=99"></script>
+    <script src="/app.js?v=100"></script>
     <script src="/local-import-client.js?v=2"></script>
   </body>
 </html>

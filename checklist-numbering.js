@@ -1,6 +1,6 @@
 (function (root) {
   function normalizeMode(mode) {
-    return ["section", "continuous", "hierarchical"].includes(mode) ? mode : "section";
+    return ["section", "continuous", "hierarchical", "manual"].includes(mode) ? mode : "section";
   }
 
   // Number the whole document before filtering for preview or partial publication.
@@ -11,7 +11,7 @@
     let offset = 0;
     document.sections.forEach((section, sectionIndex) => {
       section.rows.forEach((row, rowIndex) => {
-        numbers.set(row.id, mode === "hierarchical"
+        numbers.set(row.id, mode === "manual" ? normalizeNumber(row.manualNumber) : mode === "hierarchical"
           ? `${sectionIndex + 1}.${rowIndex + 1}`
           : `${(mode === "continuous" ? offset : 0) + rowIndex + 1}.`);
       });
@@ -20,7 +20,40 @@
     return numbers;
   }
 
+  function normalizeNumber(value) {
+    return String(value ?? "").replace(/[\r\n\t]+/g, " ").trim();
+  }
+
+  function setMode(document, nextMode) {
+    const mode = normalizeMode(nextMode);
+    if (mode === "manual" && normalizeMode(document.numberingMode) !== "manual") {
+      const numbers = rowNumbers(document);
+      document.sections.forEach(section => section.rows.forEach(row => {
+        row.manualNumber = numbers.get(row.id);
+      }));
+    }
+    document.numberingMode = mode;
+  }
+
+  function hasSourceNumbers(document) {
+    return document.sections.some(section => section.rows.some(row => Object.hasOwn(row, "manualNumber")));
+  }
+
+  function configureImport(document, preserve, currentMode = "section") {
+    const hasNumbers = hasSourceNumbers(document);
+    const mode = normalizeMode(currentMode);
+    document.numberingMode = preserve && hasNumbers ? "manual"
+      : mode === "manual" && hasNumbers ? "section" : mode;
+    if (!preserve) document.sections.forEach(section => section.rows.forEach(row => delete row.manualNumber));
+    return document;
+  }
+
   function columnWidth(document) {
+    if (normalizeMode(document.numberingMode) === "manual") {
+      let length = 0;
+      for (const number of rowNumbers(document).values()) length = Math.max(length, number.length);
+      return Math.min(240, Math.max(80, length * 8 + 40));
+    }
     const mode = normalizeMode(document.numberingMode);
     let offset = 0;
     let length = 0;
@@ -38,7 +71,7 @@
     return `${index + 1}. ${section.title || "Раздел"}`;
   }
 
-  const api = { normalizeMode, rowNumbers, columnWidth, sectionTitle };
+  const api = { normalizeMode, normalizeNumber, setMode, hasSourceNumbers, configureImport, rowNumbers, columnWidth, sectionTitle };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ChecklistNumbering = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

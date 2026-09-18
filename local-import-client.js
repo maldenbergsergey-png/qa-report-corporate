@@ -88,7 +88,7 @@
     flushDraftFromDom();
     let candidate;
     if (batch.kind === "checklist") {
-      if (!await confirmImportReplacement()) throw new Error("Пользователь отменил замену чек-листа");
+      // Enabling reception authorizes replacement within this report-bound session.
       const attachments = batch.files.map(file => ({ id: file.id, filename: file.name }));
       const parsed = parseJiraMarkup(batch.content, attachments);
       const localized = await root.QaReportAttachments.localize(parsed, { attachments,
@@ -170,7 +170,7 @@
   stop.addEventListener("click", () => { endSession(); start.focus(); });
   copy.addEventListener("click", async () => {
     if (!session) return;
-    const instruction = `Заполни открытый отчёт QA Report через временный API. Подключение:\n${JSON.stringify(session.connection, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы и hash каждой ячейки.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf].\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
+    const instruction = `Заполни открытый отчёт QA Report через временный API. Подключение:\n${JSON.stringify(session.connection, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы и hash каждой ячейки.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf]. Полный чек-лист заменяет текущий целиком без дополнительного подтверждения, пока приём включён. Для дозагрузки результатов и файлов в существующие ячейки используй kind:"cells" с актуальными expectedHash; если меняешь весь чек-лист, отправляй его целиком, включая ранее принятые данные.\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
     try { await navigator.clipboard.writeText(instruction); showToast("Подключение и инструкции для агента скопированы"); }
     catch { message("Не удалось скопировать подключение. Разрешите доступ к буферу обмена"); }
   });

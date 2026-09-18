@@ -97,7 +97,7 @@
   function collectWikiTableRow(lines, startIndex, expectedCells) {
     let row = lines[startIndex].trim();
     let index = startIndex;
-    while (expectedCells && splitWikiRow(row).length < expectedCells && index + 1 < lines.length) {
+    while ((expectedCells ? splitWikiRow(row).length < expectedCells : !row.endsWith("|")) && index + 1 < lines.length) {
       const next = lines[index + 1];
       const trimmed = next.trim();
       if (/^h[1-6]\.\s+/i.test(trimmed) || trimmed.startsWith("|")) break;
@@ -310,7 +310,31 @@
     return match.certain ? match.status : "НЕ ПРОВЕРЕНО";
   }
 
-  function parseJiraMarkup(markup, attachments = []) {
+  // Keep raw cells only in the import preview so inferred number/status roles
+  // can be changed without losing text, formatting or attachment references.
+  function configureHeaderlessSection(section, roles = {}, attachments = []) {
+    const rawRows = section.headerlessRows;
+    const count = Math.max(...rawRows.map(row => row.values.length));
+    const uniform = rawRows.every(row => row.values.length === count);
+    const numberColumn = roles.numberColumn ?? (uniform && count > 1 && rawRows.every(row => /^\d+(?:\.\d+)*[.)]?$/.test(statusText(row.values[0]))));
+    const statusColumn = roles.statusColumn ?? (uniform && count > (numberColumn ? 2 : 1) &&
+      rawRows.some(row => statusText(row.values[count - 1])) && rawRows.every(row => matchStatus(row.values[count - 1]).certain));
+    const columns = Array.from({ length: count }, (_, index) => ({
+      id: `${section.id}-cell-${index}`, title: `Столбец ${index + 1}`, sourceIndex: index,
+      sourcePosition: index - (numberColumn ? 1 : 0),
+    })).filter(column => !(numberColumn && column.sourceIndex === 0) && !(statusColumn && column.sourceIndex === count - 1));
+    return { ...section, headerless: { numberColumn, statusColumn },
+      columns: columns.map(({ sourceIndex, ...column }) => column),
+      rows: rawRows.map(row => ({ id: row.id,
+        ...(numberColumn ? { manualNumber: statusText(row.values[0]) } : {}),
+        sourceStatus: statusText(statusColumn ? row.values[count - 1] : ""),
+        status: normalizeStatus(statusColumn ? row.values[count - 1] : ""),
+        cells: Object.fromEntries(columns.map(column => [column.id, wikiInlineToHtml(row.values[column.sourceIndex] || "", attachments)])),
+      })),
+    };
+  }
+
+  function parseJiraMarkup(markup, attachments = [], { allowHeaderlessRows = false } = {}) {
     const lines = String(markup || "").replace(/\r/g, "").split("\n");
     const imported = {
       reportId: randomUUID(),
@@ -336,13 +360,13 @@
       }
       const issue = line.match(/^\*?Задача:\*?\s*(.+)$/i);
       if (issue) continue;
-      const environment = line.match(/(?:Проверено\s+на|Окружение)\s*:?\s*([A-Za-zА-Яа-яЁё-]+)/i);
+      const environment = !line.startsWith("|") && line.match(/(?:Проверено\s+на|Окружение)\s*:?\s*([A-Za-zА-Яа-яЁё-]+)/i);
       if (environment) {
         const value = environment[1].toUpperCase();
         imported.environment = ["DEV", "STAGE", "PROD"].includes(value) ? value : "Локально";
         continue;
       }
-      const overall = line.match(/(?:ТЕСТ\s*[-—]|Статус\s*:)\s*(.+?)\*?$/i);
+      const overall = !line.startsWith("|") && line.match(/(?:ТЕСТ\s*[-—]|Статус\s*:)\s*(.+?)\*?$/i);
       if (overall) {
         imported.overallStatus = normalizeStatus(overall[1]);
         continue;
@@ -379,10 +403,21 @@
         pendingTitle = "";
         continue;
       }
+      if (allowHeaderlessRows && line.startsWith("|") && !headers) {
+        currentSection = { id: randomUUID(), title: stripSectionNumber(pendingTitle) || "Строки без заголовков",
+          collapsed: false, columns: [], rows: [], headerlessRows: [] };
+        imported.sections.push(currentSection);
+        headers = { numberIndex: -1, statusIndex: -1, columnCount: 0 };
+        pendingTitle = "";
+      }
       if (line.startsWith("|") && headers && currentSection) {
         const collected = collectWikiTableRow(lines, lineIndex, headers.columnCount);
         lineIndex = collected.index;
         const values = splitWikiRow(collected.row);
+        if (currentSection.headerlessRows) {
+          currentSection.headerlessRows.push({ id: randomUUID(), values });
+          continue;
+        }
         currentSection.rows.push({
           id: randomUUID(),
           ...(headers.numberIndex >= 0 ? { manualNumber: String(values[headers.numberIndex] || "").replace(/\{color:[^}]+\}|\{color\}/gi, "").trim().replace(/^([*_+])(.+)\1$/, "$2") } : {}),
@@ -402,6 +437,8 @@
       introLines.push(line);
     }
 
+    imported.sections = imported.sections.map(section => section.headerlessRows
+      ? configureHeaderlessSection(section, {}, attachments) : section);
     imported.sections.forEach((section) => {
       section.columns.forEach((column) => delete column.sourceIndex);
     });
@@ -416,5 +453,5 @@
     return String(title || "").replace(/^\s*\d{1,3}[.)]\s+(?=\S)/, "").trim();
   }
 
-  return { parseJiraMarkup, statusText, matchStatus, normalizeStatus, stripSectionNumber };
+  return { parseJiraMarkup, configureHeaderlessSection, statusText, matchStatus, normalizeStatus, stripSectionNumber };
 });

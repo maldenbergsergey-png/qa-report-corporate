@@ -35,6 +35,7 @@
     result.intro = state.keepIntro ? result.intro : "";
     if (state.resetStatuses) result.overallStatus = "НЕ ПРОВЕРЕНО";
     result.sections = result.sections.map(section => {
+      delete section.headerlessRows;
       section.columns = section.columns.filter(column => state.columns.get(key(section.id, column.id)) !== "omit");
       section.rows = section.rows.filter(row => state.selectedRows.has(row.id) && eligible(row, state)).map(row => {
         row.status = state.resetStatuses ? "НЕ ПРОВЕРЕНО" : mapped(row, state);
@@ -100,6 +101,7 @@
       const target = document.sections.find(s => s.id === placement.targetId);
       if (!target) throw new Error("Выберите раздел, в который нужно добавить пункты.");
       sectionIds.push(target.id);
+      const originalColumns = [...target.columns];
       for (const sourceSection of incoming) {
         const used = new Set();
         // Reserve explicit choices before matching the remaining columns by name.
@@ -113,7 +115,9 @@
             if (!destination) throw new Error("Столбец назначения больше не существует. Настройте соответствие заново.");
             if (used.has(destination.id)) throw new Error(`В разделе «${sourceSection.title || "Раздел"}» несколько столбцов направлены в «${destination.title}». Выберите разные столбцы.`);
           } else if (choice !== "new") {
-            destination = target.columns.find(c => titleKey(c.title) === titleKey(column.title) && !used.has(c.id) && !reserved.has(c.id));
+            destination = sourceSection.headerless ? originalColumns[column.sourcePosition]
+              : target.columns.find(c => titleKey(c.title) === titleKey(column.title) && !used.has(c.id) && !reserved.has(c.id));
+            if (destination && (used.has(destination.id) || reserved.has(destination.id))) destination = null;
           }
           if (!destination) {
             destination = { ...column, id: freshId() };

@@ -6017,7 +6017,7 @@ function renderImportChoices() {
   const configurator = document.getElementById("importConfigurator"); configurator.hidden = false;
   importWizard = window.QaReportImportWizard.mount(configurator, preparedImport.document, {
     attachments: preparedImport.attachments, comment: importSource === "comment", download: master.checked, currentMode: draft.numberingMode,
-    currentDocument: draft, defaultMode: hasReportDataToReplace() ? "sections" : "replace",
+    currentDocument: draft, defaultMode: preparedImport.document.sections.some(section => section.headerless) ? "rows" : hasReportDataToReplace() ? "sections" : "replace",
     onChange: summary => {
       importPlanSummary = summary; pendingImportedDraft = null; pendingImportErrors = [];
       const footer = elements.importModal.querySelector(".modal-footer > span");
@@ -6041,7 +6041,7 @@ async function analyzeImport() {
     const includeAttachments = importSource === "comment" && document.getElementById("importWithAttachments").checked;
     let attachmentRequest = {}, imported, importFiles = [];
     if (importSource === "markup") {
-      imported = parseJiraMarkup(elements.importMarkup.value);
+      imported = parseJiraMarkup(elements.importMarkup.value, [], { allowHeaderlessRows: true });
     } else {
       const commentUrl = validateJiraCommentUrl(elements.commentImportUrl.value);
       attachmentRequest = { commentUrl };

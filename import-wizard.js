@@ -15,10 +15,12 @@
     return template.content.textContent.replace(/\s+/g, " ").trim();
   }
   function mount(container, source, { attachments = [], comment = false, download = true, currentMode = "section", currentDocument = { sections: [], numberingMode: currentMode }, defaultMode = "replace", onChange }) {
-    const state = O.create(source), policy = { mode: comment && download ? "download" : "reference", images: true, overrides: new Map() };
+    let state = O.create(source);
+    const hasHeaderless = source.sections.some(section => section.headerless);
+    const policy = { mode: comment && download ? "download" : "reference", images: true, overrides: new Map() };
     const opened = new Set(), initialized = new Set();
     let targetDocument = JSON.parse(JSON.stringify(currentDocument));
-    const destination = { mode: defaultMode, afterId: "", targetId: "", columns: new Map() };
+    const destination = { mode: defaultMode, afterId: "", targetId: hasHeaderless && targetDocument.sections.length === 1 ? targetDocument.sections[0].id : "", columns: new Map() };
     const placement = () => ({ ...destination, columns: new Map(destination.columns), preserveNumbers: preserve });
     const selectedDocument = () => {
       const result = O.build(source, state);
@@ -37,7 +39,7 @@
       return index < 0 ? "Новые разделы · в конец чек-листа" : `Новые разделы · после «${sectionLabel(targetDocument.sections[index], index)}»`;
     };
     let tab = "rows", preserve = root.ChecklistNumbering.hasSourceNumbers(source), busy = false;
-    const numbers = new Map(source.sections.flatMap(section => section.rows.map((row, index) => [row.id, row.manualNumber ?? `${index + 1}.`])));
+    let numbers = new Map(source.sections.flatMap(section => section.rows.map((row, index) => [row.id, row.manualNumber ?? `${index + 1}.`])));
     const nameOf = (section, row) => plain(row.cells[section.columns[0]?.id]) || "Пустой пункт";
     const shortName = (section, row) => `${numbers.get(row.id)} ${nameOf(section, row)}`.trim();
     const options = [["keep", "Сохранить содержимое"], ["clear", "Оставить пустым"], ["omit", "Не импортировать"]];
@@ -78,8 +80,33 @@
       });
       return node;
     }
+    function changeHeaderlessRoles(section, role, enabled) {
+      const updated = root.QaReportJiraImport.configureHeaderlessSection(section, { ...section.headerless, [role]: enabled }, attachments);
+      source = { ...source, sections: source.sections.map(item => item.id === section.id ? updated : item) };
+      const next = O.create(source);
+      next.mapping.forEach((value, key) => { if (state.mapping.has(key)) next.mapping.set(key, state.mapping.get(key)); });
+      next.columns.forEach((value, key) => { if (state.columns.has(key)) next.columns.set(key, state.columns.get(key)); });
+      state = { ...state, mapping: next.mapping, columns: next.columns };
+      if ([...state.mapping.values()].some(value => !value)) opened.add("mapping");
+      numbers = new Map(source.sections.flatMap(item => item.rows.map((row, index) => [row.id, row.manualNumber ?? `${index + 1}.`])));
+      preserve = root.ChecklistNumbering.hasSourceNumbers(source);
+      destination.columns.clear();
+      changed(false);
+    }
+    function renderHeaderless(panel) {
+      if (!hasHeaderless) return;
+      panel.append(el("p", "import-help", "Заголовков нет. Проверьте, есть ли номер и статус; остальные столбцы сопоставляются с разделом по порядку. Соответствие можно изменить ниже."));
+      for (const section of source.sections.filter(item => item.headerless)) {
+        if (source.sections.length > 1) panel.append(el("strong", "import-preview-title", section.title));
+        panel.append(check("Первый столбец — номер пункта", `source-number-${section.id}`, section.headerless.numberColumn,
+          value => changeHeaderlessRoles(section, "numberColumn", value)));
+        panel.append(check("Последний столбец — статус", `source-status-${section.id}`, section.headerless.statusColumn,
+          value => changeHeaderlessRoles(section, "statusColumn", value)));
+      }
+    }
     function renderDestination(panel, result, plan) {
       const block = el("div", "import-destination");
+      renderHeaderless(block);
       block.append(field("Куда импортировать", select("destination-mode", "Куда импортировать", [
         ["sections", "Добавить новые разделы"], ["rows", "Добавить в существующий раздел"], ["replace", "Заменить чек-лист"],
       ], destination.mode, value => { destination.mode = value; changed(false); })));
@@ -95,7 +122,7 @@
         ], destination.targetId, value => { destination.targetId = value; destination.columns.clear(); changed(false); })));
         const target = targetDocument.sections.find(s => s.id === destination.targetId);
         if (target) {
-          block.append(el("p", "import-help", "Пункты добавятся в конец раздела. Столбцы с одинаковыми названиями сопоставляются автоматически."));
+          block.append(el("p", "import-help", hasHeaderless ? "Пункты добавятся в конец раздела. Проверьте соответствие столбцов без заголовков по примерам содержимого." : "Пункты добавятся в конец раздела. Столбцы с одинаковыми названиями сопоставляются автоматически."));
           if (plan?.newColumns.length) block.append(el("p", "import-help", `Новые столбцы: ${plan.newColumns.map(c => c.title).join(", ")}. В существующих пунктах они останутся пустыми.`));
           if (target.statusSort) block.append(el("p", "import-help", "В этом разделе включена сортировка: пункты будут показаны по статусу."));
           block.append(disclosure("destination-columns", "Настроить соответствие столбцов", body => {
@@ -104,17 +131,17 @@
               if (result.sections.length > 1) body.append(el("strong", "import-preview-title", section.title || "Раздел"));
               for (const column of section.columns) {
                 const mapping = plan?.mappings.find(m => m.sectionId === section.id && m.columnId === column.id);
-                const autoTitle = mapping && !destination.columns.has(O.key(section.id, column.id)) ? `${mapping.title}${plan.newColumns.some(c => c.id === mapping.targetId) ? " (новый)" : ""}` : "по названию";
+                const autoTitle = mapping && !destination.columns.has(O.key(section.id, column.id)) ? `${mapping.title}${plan.newColumns.some(c => c.id === mapping.targetId) ? " (новый)" : ""}` : section.headerless ? "по порядку" : "по названию";
                 const id = O.key(section.id, column.id);
                 body.append(field(column.title, select(`destination-column-${id}`, `Куда перенести «${column.title}», ${section.title}`, [
                   ["", `Автоматически → ${autoTitle}`], ["new", "Создать новый столбец"], ...target.columns.map(c => [c.id, c.title]),
                 ], destination.columns.get(id) || "", value => {
                   if (value) destination.columns.set(id, value); else destination.columns.delete(id);
                   changed(false);
-                })));
+                }), section.headerless ? plain(section.rows[0]?.cells[column.id]).slice(0, 140) || "Пустая ячейка" : ""));
               }
             }
-          }));
+          }, hasHeaderless));
         }
       }
       block.append(el("p", destination.mode === "replace" ? "import-validation" : "import-help",

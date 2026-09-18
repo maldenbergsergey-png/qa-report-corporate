@@ -25,16 +25,17 @@
     return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,"0")).join("");
   }
   function fragments(value) {
-    const result = [{ owner: value, field: "intro", location: "intro", sectionId: "intro", sectionTitle: "Описание", title: "Вложения в описании" }];
+    const result = [{ owner: value, field: "intro", location: "intro", sectionId: "intro", rowId: "intro", columnId: "intro", sectionTitle: "Описание", title: "Вложения в описании" }];
     for (const section of value.sections || []) for (const row of section.rows || []) {
-      for (const column of section.columns || []) result.push({ owner: row.cells, field: column.id, location: JSON.stringify([section.id,column.id]), sectionId: section.id, sectionTitle: section.title, title: column.title });
+      for (const column of section.columns || []) result.push({ owner: row.cells, field: column.id, location: JSON.stringify([section.id,column.id]), sectionId: section.id, rowId: row.id, columnId: column.id, sectionTitle: section.title, title: column.title });
     }
     return result;
   }
   function planHtml(html, attachments) {
     const template = document.createElement("template"); template.innerHTML = html || "";
     const items = [];
-    for (const node of template.content.querySelectorAll("img, .jira-image-placeholder, .jira-file-placeholder, a[href]")) {
+    for (const node of template.content.querySelectorAll("img, .jira-image-placeholder, .jira-file-placeholder, .jira-attachment-reference, a[href]")) {
+      if (node.tagName === "A" && node.querySelector("img")) continue;
       const name = node.dataset.jiraName || node.dataset.fileName || node.getAttribute("alt") || "Вложение";
       const id = node.dataset.jiraId || node.dataset.attachmentId;
       const href = node.getAttribute(node.tagName === "A" ? "href" : "src");
@@ -43,9 +44,9 @@
       const byName = attachments.filter(file => file.filename === name);
       const attachment = byId || byUrl || (byName.length === 1 ? byName[0] : null);
       if (node.tagName === "A" && !attachment) continue;
-      items.push({ target: node.closest(".cell-image, .cell-file") || node, attachment,
+      items.push({ target: node.closest(".cell-image, .cell-file") || (node.parentElement?.tagName === "A" && node.parentElement.textContent.trim() === "" ? node.parentElement : node), attachment,
         name: attachment?.filename || name, key: attachment ? `jira:${attachment.id}` : `missing:${name}`,
-        ambiguous: byName.length > 1, kind: node.tagName === "IMG" || node.classList.contains("jira-image-placeholder") ? "image" : "file" });
+        ambiguous: byName.length > 1, kind: node.tagName === "IMG" || node.classList.contains("jira-image-placeholder") || node.dataset.jiraKind === "image" || /^image\//.test(attachment?.mimeType || "") ? "image" : "file" });
     }
     return { template, items };
   }
@@ -62,19 +63,53 @@
     }
     return { total: all.size, groups: [...groups.values()].map(group => ({...group, columns:[...group.columns.values()].map(column => ({...column, keys:[...column.keys], files:[...column.files.values()], missing:column.missing.size}))})) };
   }
-  async function localize(documentValue, { attachments = [], load, include = true, locations = null, sourceIssueUrl = "", onProgress = () => {} }) {
+  // Scope keys are stable across row/section filtering, even for repeated files.
+  function scopeKey(kind, part, index) {
+    return JSON.stringify(kind === "section" ? [kind, part.sectionId]
+      : kind === "column" ? [kind, part.sectionId, part.columnId]
+      : kind === "row" ? [kind, part.sectionId, part.rowId]
+      : [kind, part.sectionId, part.rowId, part.columnId, index]);
+  }
+  function modeFor(part, item, index, policy) {
+    if (!policy.images && item.kind === "image") return "omit";
+    for (const scope of ["file", "row", "column", "section"]) {
+      const value = policy.overrides.get(scopeKey(scope, part, index));
+      if (value) return value;
+    }
+    return policy.mode;
+  }
+  function entries(value, attachments = [], policy = null) {
+    return fragments(value).map(part => ({ ...part, items: planHtml(part.owner?.[part.field], attachments).items.map((item, index) => ({
+      name: item.name, key: item.key, kind: item.kind, index, missing: !item.attachment,
+      mode: policy ? modeFor(part, item, index, policy) : "reference",
+    })) })).filter(part => part.items.length);
+  }
+  function removeExcluded(value, attachments, policy) {
+    const copy = JSON.parse(JSON.stringify(value));
+    for (const part of fragments(copy)) {
+      const plan = planHtml(part.owner?.[part.field], attachments);
+      plan.items.forEach((item, index) => { if (modeFor(part, item, index, policy) === "omit") item.target.remove(); });
+      part.owner[part.field] = plan.template.innerHTML;
+    }
+    return copy;
+  }
+  async function localize(documentValue, { attachments = [], load, include = true, locations = null, policy = null, sourceIssueUrl = "", onProgress = () => {} }) {
     const copy = JSON.parse(JSON.stringify(documentValue));
     const cache = new Map(), failures = new Map(), ids = new Map(); let loaded = 0, totalBytes = 0, completed = 0;
     const plans = fragments(copy).map(fragment => ({...fragment, ...planHtml(fragment.owner?.[fragment.field], attachments)}));
-    const chosen = part => include && (!locations || locations.has(part.location));
-    const total = new Set(plans.filter(chosen).flatMap(part => part.items.map(item => item.key))).size;
+    const mode = (part, item, index) => policy ? modeFor(part, item, index, policy)
+      : include && (!locations || locations.has(part.location)) ? "download" : "reference";
+    const total = new Set(plans.flatMap(part => part.items.filter((item, index) => mode(part, item, index) === "download").map(item => item.key))).size;
     const notify = () => onProgress({ completed, total, loaded, failed: failures.size });
     if (total) notify();
     for (const part of plans) {
-      for (const { target, attachment, name, key, ambiguous, kind } of part.items) {
+      for (const [index, item] of part.items.entries()) {
+        const { target, attachment, name, key, ambiguous, kind } = item;
+        const action = mode(part, item, index);
+        if (action === "omit") { target.remove(); continue; }
         if (!ids.has(key)) ids.set(key, crypto.randomUUID());
         const source = sourceIssueUrl && attachment ? { issueUrl: sourceIssueUrl, id: String(attachment.id), name, url: root.QaReportJiraReuse?.sourceUrl(attachment.content, sourceIssueUrl) || "", kind } : undefined;
-        if (!chosen(part)) {
+        if (action !== "download") {
           if (source) {
             const replacement = document.createElement("template"); replacement.innerHTML = reference({id:ids.get(key),name,type:attachment.mimeType,source}); target.replaceWith(replacement.content);
           } // Without source metadata, retain the original Jira markup reference.
@@ -102,5 +137,5 @@
     }
     return { document:copy, loaded, errors:[...failures.values()] };
   }
-  root.QaReportAttachments = { render, reference, dataUrl, hashBlob, inspect, localize };
+  root.QaReportAttachments = { render, reference, dataUrl, hashBlob, inspect, localize, entries, scopeKey, modeFor, removeExcluded };
 })(typeof window === "undefined" ? globalThis : window);

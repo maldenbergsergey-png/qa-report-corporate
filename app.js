@@ -383,7 +383,9 @@ let suppressHistory = false;
 let importSource = "markup";
 let pendingImportedDraft = null;
 let preparedImport = null;
-let importLocationSelection = new Set();
+let importWizard = null;
+let importPlanSummary = null;
+let importBusy = false;
 let dbPromise;
 let draggedCodeBlock = null;
 let draggedImageFigure = null;
@@ -4381,7 +4383,7 @@ function closePreview() {
 }
 
 function openImport() {
-  if (elements.applyImportButton.disabled) return;
+  if (importBusy) return;
   setImportBusy(false);
   resetImportPreview();
   elements.importMarkup.value = "";
@@ -4395,7 +4397,7 @@ function openImport() {
 }
 
 function closeImport() {
-  if (elements.applyImportButton.disabled) return;
+  if (importBusy) return;
   elements.importModal.hidden = true;
   syncBodyModalOverflow();
 }
@@ -5949,13 +5951,14 @@ function applyUploadedAttachments(uploaded) {
 }
 
 function setImportBusy(busy) {
-  elements.applyImportButton.disabled = busy;
+  importBusy = busy;
+  elements.applyImportButton.disabled = busy || Boolean(preparedImport && !importPlanSummary?.valid);
   elements.applyImportButton.setAttribute("aria-busy", String(busy));
   elements.applyImportButton.querySelector(".button-spinner").hidden = !busy;
-  elements.applyImportButton.querySelector(".button-label").textContent = busy ? (preparedImport ? "Импортируем…" : "Проверяем…") : (preparedImport ? "Импортировать" : "Продолжить");
-  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton, #changeImportSource, #importColumnList input, #importColumnList button")) {
-    control.disabled = busy || control.dataset.unavailable === "true";
-  }
+  elements.applyImportButton.querySelector(".button-label").textContent = busy ? (preparedImport ? "Импортируем…" : "Проверяем…")
+    : preparedImport ? `Импортировать ${importPlanSummary?.count || 0} ${window.QaReportImportOptions.itemWord(importPlanSummary?.count || 0)}` : "Продолжить";
+  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton, #changeImportSource")) control.disabled = busy;
+  importWizard?.setBusy(busy);
   if (!busy) document.getElementById("importProgress").hidden = true;
 }
 
@@ -5979,94 +5982,44 @@ function setImportProgress(label, completed, total) {
 }
 
 function resetImportPreview() {
-  preparedImport = null; pendingImportedDraft = null; importLocationSelection = new Set();
+  preparedImport = null; pendingImportedDraft = null; importWizard = null; importPlanSummary = null;
+  elements.importModal.querySelector(".modal-footer > span").classList.remove("import-footer-warning");
+  elements.importModal.querySelector(".modal-footer > span").textContent = "Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.";
   elements.importModal.classList.remove("has-import-preview");
   document.getElementById("importSourceSummary").hidden = true;
-  document.getElementById("importNumberingChoice").hidden = true;
   document.getElementById("importTitle").textContent = "Импорт чек-листа из Jira";
-  document.getElementById("importAttachmentsHint").textContent = "Изображения и файлы сохранятся в этом браузере";
-  document.getElementById("importAttachmentChoices").hidden = true;
+  const configurator = document.getElementById("importConfigurator"); configurator.hidden = true; configurator.replaceChildren();
   document.getElementById("importPreviewMeta").hidden = true;
-  const master = document.getElementById("importWithAttachments");
-  master.indeterminate = false; master.disabled = false; delete master.dataset.unavailable;
-  master.closest("label").hidden = importSource === "markup";
+  document.getElementById("importWithAttachments").closest("label").hidden = importSource === "markup";
   elements.importSummary.hidden = true; elements.importWarning.hidden = true;
-  if (!elements.applyImportButton.disabled) setImportBusy(false);
-}
-
-function syncImportSelection() {
-  if (!preparedImport) return;
-  if (importSource === "markup") {
-    document.getElementById("importSelectionCount").textContent = preparedImport.catalogue.total ? `Ссылок на вложения: ${preparedImport.catalogue.total}` : "Вложений нет";
-    pendingImportedDraft = null;
-    return;
-  }
-  const columns = preparedImport.catalogue.groups.flatMap(group => group.columns).filter(column => column.keys.length);
-  const selected = columns.filter(column => importLocationSelection.has(column.id));
-  const master = document.getElementById("importWithAttachments");
-  master.checked = columns.length > 0 && selected.length === columns.length;
-  master.indeterminate = selected.length > 0 && selected.length < columns.length;
-  const keys = new Set(selected.flatMap(column => column.keys));
-  document.getElementById("importSelectionCount").textContent = preparedImport.catalogue.total ? `К скачиванию: ${keys.size} из ${preparedImport.catalogue.total}` : "Вложений нет";
-  document.getElementById("importAttachmentsHint").textContent = keys.size ? "Скачиваем только выбранные колонки. Остальные файлы останутся в Jira." : "Файлы останутся на своих местах ссылками на Jira.";
-  pendingImportedDraft = null;
+  if (!importBusy) setImportBusy(false);
 }
 
 function renderImportChoices() {
-  const referencesOnly = importSource === "markup";
-  document.getElementById("importNumberingChoice").hidden = !ChecklistNumbering.hasSourceNumbers(preparedImport.document);
-  document.getElementById("importPreserveNumbers").checked = true;
-  const panel = document.getElementById("importAttachmentChoices");
-  const list = document.getElementById("importColumnList"); list.replaceChildren(); panel.hidden = false;
   elements.importModal.classList.add("has-import-preview");
-  document.getElementById("importTitle").textContent = !referencesOnly && preparedImport.catalogue.total ? "Выберите вложения" : "Чек-лист готов к импорту";
-  document.getElementById("importChoicesTitle").textContent = preparedImport.catalogue.total ? "Вложения по колонкам" : "Колонки чек-листа";
-  const sourceSummary = document.getElementById("importSourceSummary"); sourceSummary.hidden = false;
+  document.getElementById("importTitle").textContent = "Настроить импорт";
+  document.getElementById("importSourceSummary").hidden = false;
   const sourceTitle = document.getElementById("importSourceTitle");
   sourceTitle.textContent = importSource === "comment" ? `Комментарий Jira · ${preparedImport.document.issueUrl.split("/").pop()}` : "Из вставленной разметки";
   sourceTitle.title = importSource === "comment" ? elements.commentImportUrl.value : "";
-  for (const group of preparedImport.catalogue.groups) {
-    const section = document.createElement("fieldset"); section.className = "import-column-group";
-    const legend = document.createElement("legend"); legend.textContent = group.title || "Раздел"; section.append(legend);
-    for (const column of group.columns) {
-      const row = document.createElement(referencesOnly ? "div" : "label"); row.className = `import-column-choice${referencesOnly ? " is-reference-only" : ""}`;
-      const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.value = column.id;
-      checkbox.checked = importLocationSelection.has(column.id); checkbox.disabled = !column.keys.length;
-      if (!column.keys.length) checkbox.dataset.unavailable = "true";
-      const copy = document.createElement("span"); copy.className = "import-column-copy";
-      const title = document.createElement("strong"); title.textContent = column.title;
-      const files = document.createElement("small");
-      const names = column.files.map(file => file.name);
-      files.textContent = names.length ? names.slice(0,2).join(", ") + (names.length>2 ? ` и ещё ${names.length-2}` : "") : "Без вложений";
-      if (!referencesOnly && column.missing) files.textContent += ` · Недоступно: ${column.missing}`;
-      files.title = names.join("\n"); copy.append(title,files);
-      const count = document.createElement("span"); count.className = "import-column-count"; count.textContent = String(column.keys.length);
-      if (!referencesOnly) row.append(checkbox);
-      row.append(copy);
-      const item = document.createElement("div"); item.className = "import-column-item"; item.append(row);
-      if (names.length) {
-        const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "import-files-toggle";
-        toggle.textContent = `${names.length} ▾`; toggle.setAttribute("aria-expanded","false");
-        toggle.setAttribute("aria-label",`Показать файлы: ${column.title}`);
-        const details = document.createElement("ul"); details.className = "import-file-list"; details.hidden = true;
-        details.id = `import-files-${list.children.length}-${section.children.length}`; toggle.setAttribute("aria-controls",details.id);
-        for (const name of names) {const file = document.createElement("li");file.textContent = name;details.append(file);}
-        toggle.addEventListener("click",()=>{details.hidden=!details.hidden;toggle.setAttribute("aria-expanded",String(!details.hidden));toggle.textContent=`${names.length} ${details.hidden ? "▾":"▴"}`;});
-        item.append(toggle,details);
-      } else item.append(count);
-      section.append(item);
-      checkbox.addEventListener("change",()=>{if(checkbox.checked)importLocationSelection.add(column.id);else importLocationSelection.delete(column.id);syncImportSelection();});
-    }
-    list.append(section);
-  }
-  const master = document.getElementById("importWithAttachments");
-  master.dataset.unavailable = !referencesOnly && preparedImport.catalogue.total ? "false" : "true";
-  master.closest("label").hidden = referencesOnly || !preparedImport.catalogue.total;
-  const rows = preparedImport.document.sections.reduce((sum,section)=>sum+section.rows.length,0);
+  const rows = preparedImport.document.sections.reduce((sum, section) => sum + section.rows.length, 0);
   const meta = document.getElementById("importPreviewMeta"); meta.hidden = false;
-  meta.textContent = `Разделов: ${preparedImport.document.sections.length} · Строк: ${rows}`;
-  document.getElementById("importColumnHint").textContent = importSource === "markup" && preparedImport.catalogue.total ? "Ссылки сохранятся в исходных колонках без скачивания. В Jira они отобразятся, если файлы есть в целевой задаче." : "Текст всех колонок будет импортирован. Один и тот же файл скачивается один раз.";
-  syncImportSelection();
+  meta.textContent = `Найдено разделов: ${preparedImport.document.sections.length} · Пунктов: ${rows}`;
+  const master = document.getElementById("importWithAttachments"); master.closest("label").hidden = true;
+  const configurator = document.getElementById("importConfigurator"); configurator.hidden = false;
+  importWizard = window.QaReportImportWizard.mount(configurator, preparedImport.document, {
+    attachments: preparedImport.attachments, comment: importSource === "comment", download: master.checked, currentMode: draft.numberingMode,
+    onChange: summary => {
+      importPlanSummary = summary; pendingImportedDraft = null;
+      const footer = elements.importModal.querySelector(".modal-footer > span");
+      footer.textContent = summary.issue || `Выбрано ${summary.count} из ${summary.total} пунктов · Разделов: ${summary.result.sections.length}`;
+      footer.classList.toggle("import-footer-warning", !summary.valid);
+      footer.title = "Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.";
+      elements.importWarning.hidden = true;
+      setImportBusy(importBusy);
+    },
+  });
+  configurator.closest(".import-body").scrollTop = 0;
 }
 
 async function analyzeImport() {
@@ -6087,20 +6040,22 @@ async function analyzeImport() {
       imported.issueUrl = result.issueUrl || "";
       importFiles = result.attachments || [];
     }
-    const catalogue = window.QaReportAttachments.inspect(imported, importFiles);
-    preparedImport = {document:imported,attachments:importFiles,attachmentRequest,catalogue};
-    importLocationSelection = new Set(includeAttachments ? catalogue.groups.flatMap(group=>group.columns.filter(column=>column.keys.length).map(column=>column.id)) : []);
+    preparedImport = {document:imported,attachments:importFiles,attachmentRequest};
     renderImportChoices();
   } catch(error) {
     elements.importWarning.textContent = friendlyJiraError(error); elements.importWarning.hidden = false;
     preparedImport = null;
-  } finally {setImportBusy(false);pwaPendingOperations--;}
+  } finally {
+    setImportBusy(false); pwaPendingOperations--;
+    if (preparedImport) document.getElementById("importTab-rows")?.focus();
+  }
 }
 
 async function prepareImport() {
-  const {document:source,attachments,attachmentRequest} = preparedImport;
+  const {attachments,attachmentRequest} = preparedImport;
+  const source = importWizard.getDocument();
   const localized = await window.QaReportAttachments.localize(source, {
-    attachments, include:importSource === "comment" && importLocationSelection.size>0, locations:importLocationSelection, sourceIssueUrl:source.issueUrl || "",
+    attachments, policy:importWizard.getPolicy(), sourceIssueUrl:source.issueUrl || "",
     load:attachment=>jiraRequest("/api/jira/import-attachment",{...attachmentRequest,attachmentId:attachment.id},{binary:true}),
     onProgress:({completed,total})=>setImportProgress("Загрузка вложений",completed,total),
   });
@@ -6166,7 +6121,7 @@ async function applyImport(mode = "replace") {
     setImportProgress("Сохраняем в браузере…");
     elements.importSummary.hidden = true;
     await saveReportSnapshot("before-import");
-    ChecklistNumbering.configureImport(imported, document.getElementById("importPreserveNumbers").checked, draft.numberingMode);
+    ChecklistNumbering.configureImport(imported, importWizard.preserveNumbers(), draft.numberingMode);
     if (mode === "append") {
       if (imported.numberingMode === "manual") ChecklistNumbering.setMode(draft, "manual");
       draft.sections.push(...clone(imported.sections));
@@ -7890,11 +7845,3 @@ document.getElementById("resetDefaultColumns").addEventListener("click", () => {
 for (const input of [elements.importMarkup, elements.commentImportUrl]) {
   input.addEventListener("input", resetImportPreview);
 }
-document.getElementById("importWithAttachments").addEventListener("change", () => {
-  pendingImportedDraft = null;
-  if (!preparedImport) return;
-  const columns = preparedImport.catalogue.groups.flatMap(group=>group.columns).filter(column=>column.keys.length);
-  importLocationSelection = new Set(document.getElementById("importWithAttachments").checked ? columns.map(column=>column.id) : []);
-  for (const checkbox of document.querySelectorAll("#importColumnList input")) checkbox.checked = importLocationSelection.has(checkbox.value);
-  syncImportSelection();
-});

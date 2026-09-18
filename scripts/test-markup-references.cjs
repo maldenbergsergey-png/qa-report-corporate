@@ -92,13 +92,16 @@ async function main() {
   await page.click('#jiraMenuButton'); await page.click('#importButton');
   assert.equal(await page.locator('#importWithAttachments').isVisible(), false);
   await page.fill('#importMarkup', markup); await page.click('#applyImportButton');
-  await page.waitForFunction(() => !document.querySelector('#importAttachmentChoices').hidden && !document.querySelector('#applyImportButton').disabled);
-  assert.equal(await page.locator('#importTitle').textContent(), 'Чек-лист готов к импорту');
-  assert.equal(await page.locator('#importSelectionCount').textContent(), 'Ссылок на вложения: 5');
-  assert.equal(await page.locator('#importColumnList input').count(), 0);
-  assert.doesNotMatch(await page.locator('#importColumnList').textContent(), /Недоступно/);
-  await page.locator('.import-files-toggle').nth(1).click();
-  assert.ok(await page.locator('.import-file-list:not([hidden]) li').count());
+  await page.waitForFunction(() => !document.querySelector('#importConfigurator').hidden && !document.querySelector('#applyImportButton').disabled);
+  assert.equal(await page.locator('#importTitle').textContent(), 'Настроить импорт');
+  await page.click('#importTab-files');
+  assert.equal(await page.locator('[data-focus="file-mode"] option[value="download"]').count(), 0);
+  assert.equal(await page.locator('[data-focus="keep-images"]').isChecked(), true);
+  assert.equal(await page.evaluate(() => QaReportAttachments.inspect(importWizard.getDocument(), []).total), 5);
+  await page.locator('#importPanel-files details > summary').first().click();
+  await page.locator('#importPanel-files details details > summary').first().click();
+  assert.ok(await page.locator('.import-file-setting').count());
+  assert.doesNotMatch(await page.locator('#importPanel-files').textContent(), /файл недоступен/);
   if (output) {
     fs.mkdirSync(output, { recursive: true });
     await page.waitForFunction(() => getComputedStyle(document.querySelector('#toast')).opacity === '0');

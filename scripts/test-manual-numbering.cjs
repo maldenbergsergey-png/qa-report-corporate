@@ -63,6 +63,7 @@ async function main() {
     await page.click('#jiraMenuButton'); await page.click('#importButton');
     await page.fill('#importMarkup',text); await page.click('#applyImportButton');
     await page.waitForFunction(()=>preparedImport && !elements.applyImportButton.disabled);
+    await page.click('#importTab-data');
     assert.equal(await page.locator('#importNumberingChoice').isVisible(),true);
     await page.locator('#importPreserveNumbers').setChecked(preserve);
     if(output) {

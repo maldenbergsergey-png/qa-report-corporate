@@ -72,6 +72,7 @@ test("replacement and inbound import keep the open report; cancel performs no sa
       ctx.elements={applyImportButton:{disabled:false},importWarning:{hidden:true},importSummary:{hidden:true}};
       ctx.pwaPendingOperations=0;
       ctx.importSource="markup";
+      ctx.importWizard={preserveNumbers:()=>true};
       ctx.requestAnimationFrame=callback=>callback();
       ctx.setImportBusy=busy=>{ctx.elements.applyImportButton.disabled=busy;};
       ctx.setImportProgress=()=>{};

@@ -284,18 +284,30 @@
     return restoreProtectedBlocks(formatWikiText(source));
   }
 
+  function statusText(value) {
+    return String(value ?? "").replace(/\{color(?::[^}]+)?\}|[*_+]/gi, "")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  function matchStatus(value) {
+    const status = statusText(value).toUpperCase();
+    const aliases = {
+      "OK": ["OK", "ОК", "ПРОЙДЕНО", "ПРОЙДЕН", "УСПЕШНО", "PASSED", "PASS"],
+      "НЕ ОК": ["НЕ ОК", "НЕ OK", "НЕОК", "НА ДОРАБОТКУ", "FAILED", "FAIL", "ПРОВАЛЕНО", "ПРОВАЛЕН"],
+      "ПОЧТИ ОК": ["ПОЧТИ ОК", "ПОЧТИ OK"],
+      "ЧАСТИЧНО ПРОВЕРЕНО": ["ЧАСТИЧНО ПРОВЕРЕНО", "PARTIALLY TESTED"],
+      "ТРЕБУЕТ УТОЧНЕНИЯ": ["ТРЕБУЕТ УТОЧНЕНИЯ"],
+      "НЕ ПРОВЕРЕНО": ["", "НЕ ПРОВЕРЕНО", "НЕ ВЫПОЛНЯЛОСЬ", "НЕ ЗАПУСКАЛОСЬ", "NOT RUN", "UNTESTED", "NOT TESTED"],
+    };
+    for (const [canonical, values] of Object.entries(aliases)) {
+      if (values.includes(status)) return { status: canonical, certain: true };
+    }
+    return { status: ["НЕ ПРОЙДЕНО", "НЕ ПРОЙДЕН"].includes(status) ? "НЕ ОК" : "", certain: false };
+  }
+
   function normalizeStatus(value) {
-    const status = String(value || "")
-      .replace(/\{color:[^}]+\}|\{color\}|[*_+]/g, "")
-      .trim()
-      .toUpperCase();
-    if (status === "OK" || status === "ОК") return "OK";
-    if (["НЕ ОК", "НЕ OK", "НЕОК"].includes(status)) return "НЕ ОК";
-    if (["НА ДОРАБОТКУ", "FAILED", "FAIL"].includes(status)) return "НЕ ОК";
-    if (["ПОЧТИ ОК", "ПОЧТИ OK"].includes(status)) return "ПОЧТИ ОК";
-    if (status === "ЧАСТИЧНО ПРОВЕРЕНО") return status;
-    if (status === "ТРЕБУЕТ УТОЧНЕНИЯ") return status;
-    return "НЕ ПРОВЕРЕНО";
+    const match = matchStatus(value);
+    return match.certain ? match.status : "НЕ ПРОВЕРЕНО";
   }
 
   function parseJiraMarkup(markup, attachments = []) {
@@ -346,7 +358,7 @@
         tableNumber += 1;
         const rawHeaders = splitWikiRow(line).map((header) => header.replace(/\\!=/g, "!=").trim());
         const numberIndex = rawHeaders.findIndex((header) => /^(номер|№|nº)$/i.test(header));
-        const statusIndex = rawHeaders.findIndex((header) => /статус/i.test(header));
+        const statusIndex = rawHeaders.findIndex((header) => /статус|^test status$|^status$/i.test(statusText(header)));
         const columns = rawHeaders
           .map((title, index) => ({ title, index }))
           .filter(({ index }) => index !== numberIndex && index !== statusIndex)
@@ -374,6 +386,7 @@
         currentSection.rows.push({
           id: randomUUID(),
           ...(headers.numberIndex >= 0 ? { manualNumber: String(values[headers.numberIndex] || "").replace(/\{color:[^}]+\}|\{color\}/gi, "").trim().replace(/^([*_+])(.+)\1$/, "$2") } : {}),
+          sourceStatus: statusText(headers.statusIndex >= 0 ? values[headers.statusIndex] : ""),
           status: normalizeStatus(headers.statusIndex >= 0 ? values[headers.statusIndex] : ""),
           cells: Object.fromEntries(
             currentSection.columns.map((column) => [
@@ -403,5 +416,5 @@
     return String(title || "").replace(/^\s*\d{1,3}[.)]\s+(?=\S)/, "").trim();
   }
 
-  return { parseJiraMarkup, normalizeStatus, stripSectionNumber };
+  return { parseJiraMarkup, statusText, matchStatus, normalizeStatus, stripSectionNumber };
 });

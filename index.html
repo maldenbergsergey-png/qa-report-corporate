@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=98" />
+    <link rel="stylesheet" href="/styles.css?v=100" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -536,7 +536,7 @@
             <p>
               Скопируйте содержимое комментария из режима Jira «Текст». Таблицы, разделы,
               статусы и форматирование будут преобразованы в редактируемый отчёт.
-              Ссылки на вложения сохранятся без скачивания файлов.
+              На следующем шаге можно выбрать пункты, очистить столбцы и исключить изображения. Файлы из разметки не скачиваются.
             </p>
             <textarea
               id="importMarkup"
@@ -550,7 +550,7 @@
               <input id="commentImportUrl" type="url" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
             </label>
             <p>
-              Вставьте ссылку на комментарий Jira. На следующем шаге выберите, из каких колонок скачать вложения.
+              Вставьте ссылку на комментарий Jira. На следующем шаге выберите пункты, содержимое столбцов и вложения.
             </p>
           </div>
           <div id="importSourceSummary" class="import-source-summary" hidden><span class="import-source-copy"><span id="importSourceTitle"></span><span id="importPreviewMeta" class="import-preview-meta" role="status" hidden></span></span><button type="button" id="changeImportSource" class="text-button">Изменить</button></div>
@@ -558,15 +558,7 @@
             <input id="importWithAttachments" type="checkbox" checked aria-describedby="importAttachmentsHint" />
             <span class="import-option-copy"><strong>Скачать вложения в браузер</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
           </label>
-          <label class="local-import-option" id="importNumberingChoice" hidden>
-            <input id="importPreserveNumbers" type="checkbox" checked aria-describedby="importNumberingHint" />
-            <span class="import-option-copy"><strong>Сохранить исходную нумерацию</strong><small id="importNumberingHint">Включится ручная нумерация: номера можно редактировать, удаление строк их не изменит. Снимите флажок, чтобы пересчитать номера автоматически.</small></span>
-          </label>
-          <section class="import-attachment-choices" id="importAttachmentChoices" aria-label="Выбор вложений по колонкам" hidden>
-            <div class="import-choices-heading"><strong id="importChoicesTitle">Вложения по колонкам</strong><span id="importSelectionCount"></span></div>
-            <div id="importColumnList"></div>
-            <p id="importColumnHint" class="import-column-hint"></p>
-          </section>
+          <div id="importConfigurator" hidden></div>
           <div class="import-warning" id="importWarning" hidden></div>
           <div class="import-summary" id="importSummary" hidden></div>
         </div>
@@ -935,15 +927,17 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=7"></script>
+    <script src="/jira-markup-import.js?v=9"></script>
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=17"></script>
+    <script src="/release-notes.js?v=18"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
-    <script src="/attachment-import.js?v=4"></script>
-    <script src="/app.js?v=100"></script>
+    <script src="/attachment-import.js?v=5"></script>
+    <script src="/import-options.js?v=2"></script>
+    <script src="/import-wizard.js?v=2"></script>
+    <script src="/app.js?v=102"></script>
     <script src="/local-import-client.js?v=2"></script>
   </body>
 </html>

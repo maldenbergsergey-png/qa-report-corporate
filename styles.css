@@ -5162,3 +5162,85 @@ body.pin-number-columns .section-header-table .number-header::before,
 }
 
 #alternativeConfirmButton[hidden] { display: none; }
+
+/* Import configuration uses the editor's controls, colors and disclosure pattern. */
+#importConfigurator { display: grid; gap: 16px; min-width: 0; }
+#importConfigurator[hidden], .import-config-panel[hidden] { display: none; }
+.import-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.import-preset { display: grid; align-content: start; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+.import-preset strong { font-size: 14px; }
+.import-preset small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.import-preset[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.import-preset:hover { border-color: var(--primary); }
+.import-config-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--line); }
+.import-config-tab { padding: 12px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 14px; font-weight: 600; }
+.import-config-tab[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); }
+.import-config-panel { display: grid; gap: 14px; min-width: 0; }
+#importConfigurator :is(button, select, summary):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+#importConfigurator input[type="checkbox"] { width: 18px; height: 18px; margin: 0; flex: 0 0 18px; accent-color: var(--primary); cursor: pointer; }
+.import-check { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; font-size: 14px; }
+.import-check > span { overflow-wrap: anywhere; }
+.import-inline-heading, .import-row-tools, .import-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.import-inline-heading { font-size: 13px; }
+#importConfigurator .button-ghost { min-height: 32px; padding: 6px 8px; font-size: 12px; color: var(--primary); }
+.import-status-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-status-chip { display: inline-flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 12px; }
+.import-status-chip:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.import-row-tools { justify-content: flex-end; flex-wrap: wrap; gap: 4px 8px; }
+.import-row-tools > span { margin-right: auto; }
+.import-section-card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.import-section-heading { padding: 10px 14px; background: var(--canvas); }
+.import-section-heading .import-check { font-weight: 600; flex: 1; }
+.import-count { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.import-disclosure { min-width: 0; border: 1px solid var(--line); border-radius: 8px; }
+.import-disclosure > summary { padding: 12px 14px; color: var(--ink); font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+.import-disclosure > summary:hover { background: var(--canvas); }
+.import-disclosure-body { padding: 0 14px 14px; display: grid; gap: 12px; min-width: 0; }
+.import-disclosure:not([open]) > .import-disclosure-body { display: none; }
+.import-section-card > .import-disclosure { border: 0; }
+.import-section-card .import-disclosure-body { gap: 0; padding: 0 8px 8px; }
+.import-row-choice { display: flex; align-items: center; gap: 10px; padding: 11px 6px; border-top: 1px solid var(--line); cursor: pointer; }
+.import-row-choice:hover { background: var(--canvas); }
+.import-row-copy { display: grid; grid-template-columns: minmax(24px, auto) minmax(0, 1fr) auto; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
+.import-row-number { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; max-width: 90px; }
+.import-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.import-row-status { color: var(--muted); font-size: 11px; text-align: right; }
+#importModal .import-help { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
+.import-setting { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 42%); gap: 12px; align-items: center; min-width: 0; }
+.import-setting-copy { display: grid; gap: 5px; overflow-wrap: anywhere; }
+.import-setting-copy strong { font-size: 13px; font-weight: 500; }
+.import-setting-copy small { font-size: 12px; color: var(--muted); line-height: 1.5; }
+#importConfigurator .import-select { width: 100%; min-width: 0; min-height: 38px; padding: 8px 28px 8px 10px; border: 1px solid var(--line); border-radius: 7px; background-color: var(--surface); color: var(--ink); font: inherit; font-size: 12px; text-overflow: ellipsis; }
+.import-data-column { display: grid; gap: 10px; }
+.import-data-column + .import-data-column { border-top: 1px solid var(--line); padding-top: 14px; }
+.import-data-column .import-disclosure, .import-file-setting { border-left: 2px solid var(--line); border-top: 0; border-bottom: 0; border-right: 0; border-radius: 0; }
+.import-file-setting { padding-left: 12px; }
+.import-plan-summary { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 16px; }
+.import-plan-summary strong { font-size: 14px; }
+.import-plan-summary small { font-size: 12px; color: var(--muted); line-height: 1.5; }
+#importModal .import-validation { font-size: 13px; color: var(--orange); margin: 0; }
+.import-disclosure.needs-mapping { border-color: var(--orange); }
+#importModal .import-empty { padding: 18px; margin: 0; text-align: center; color: var(--muted); font-size: 13px; background: var(--canvas); border-radius: 8px; }
+.import-preview-scroll { overflow: auto; max-height: 360px; border: 1px solid var(--line); border-radius: 6px; }
+.import-result-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.import-result-table :is(th, td) { padding: 10px; text-align: left; border: 1px solid var(--line); min-width: 100px; max-width: 340px; overflow-wrap: anywhere; white-space: normal; }
+.import-result-table th { background: var(--canvas); position: sticky; top: 0; }
+.import-preview-title { font-size: 13px; }
+#importModal input:disabled, #importModal select:disabled, #importModal button:disabled { cursor: not-allowed; }
+#applyImportButton[aria-busy="true"] { cursor: wait; }
+@media (max-width: 600px) {
+  .import-presets { gap: 8px; }
+  .import-preset { padding: 12px; }
+  .import-config-tabs { gap: 16px; }
+  .import-config-tab { font-size: 12px; }
+  .import-setting { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .import-row-copy { grid-template-columns: 30px minmax(0, 1fr); gap: 4px 8px; }
+  .import-row-status { grid-column: 2; text-align: left; }
+  .import-status-chip { padding: 8px; font-size: 11px; }
+  #importModal .modal-actions, #applyImportButton { min-width: 0; }
+}
+
+#importModal #applyImportButton:disabled { opacity: .5; }
+
+.import-filter-shortcuts { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: flex-end; }
+#importModal .modal-footer > .import-footer-warning { color: var(--orange); }

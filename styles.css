@@ -3576,7 +3576,7 @@ body.resizing-code * {
     padding-left: 2px;
   }
 
-  .header-report-actions .header-action-group:first-child .header-action:nth-child(2) {
+  .header-report-actions #historyButton {
     display: none;
   }
 
@@ -5244,3 +5244,14 @@ body.pin-number-columns .section-header-table .number-header::before,
 
 .import-filter-shortcuts { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: flex-end; }
 #importModal .modal-footer > .import-footer-warning { color: var(--orange); }
+
+/* Import destinations expand only the settings needed for the selected action. */
+.import-destination { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--canvas); }
+.import-destination .import-disclosure { background: var(--surface); }
+.toast.visible:has(button) { pointer-events: auto; }
+.toast:not(.visible) button { visibility: hidden; }
+.toast button { display: inline-block; margin-left: 12px; padding: 4px 0; border: 0; background: transparent; color: white; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.toast button:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
+@keyframes import-row-highlight { from { background-color: color-mix(in srgb, var(--primary) 18%, var(--surface)); } }
+@media (prefers-reduced-motion: reduce) { tr.import-added > td { animation: none; outline: 1px solid var(--primary); } }

@@ -386,6 +386,8 @@ let preparedImport = null;
 let importWizard = null;
 let importPlanSummary = null;
 let importBusy = false;
+let importContext = null;
+let pendingImportErrors = [];
 let dbPromise;
 let draggedCodeBlock = null;
 let draggedImageFigure = null;
@@ -4382,8 +4384,12 @@ function closePreview() {
   syncBodyModalOverflow();
 }
 
-function openImport() {
+function openImport(source = "markup") {
   if (importBusy) return;
+  importSource = source;
+  document.querySelectorAll(".import-source-tab").forEach(tab => tab.classList.toggle("active", tab.dataset.importSource === source));
+  elements.markupImportPane.hidden = source !== "markup";
+  elements.commentImportPane.hidden = source !== "comment";
   setImportBusy(false);
   resetImportPreview();
   elements.importMarkup.value = "";
@@ -4393,7 +4399,7 @@ function openImport() {
   pendingImportedDraft = null;
   elements.importModal.hidden = false;
   syncBodyModalOverflow();
-  if (importSource === "markup") elements.importMarkup.focus();
+  (importSource === "markup" ? elements.importMarkup : elements.commentImportUrl).focus();
 }
 
 function closeImport() {
@@ -5956,7 +5962,7 @@ function setImportBusy(busy) {
   elements.applyImportButton.setAttribute("aria-busy", String(busy));
   elements.applyImportButton.querySelector(".button-spinner").hidden = !busy;
   elements.applyImportButton.querySelector(".button-label").textContent = busy ? (preparedImport ? "Импортируем…" : "Проверяем…")
-    : preparedImport ? `Импортировать ${importPlanSummary?.count || 0} ${window.QaReportImportOptions.itemWord(importPlanSummary?.count || 0)}` : "Продолжить";
+    : preparedImport ? `${importPlanSummary?.mode === "replace" ? "Заменить чек-лист" : `Добавить ${importPlanSummary?.count || 0} ${window.QaReportImportOptions.itemWord(importPlanSummary?.count || 0)}`}` : "Продолжить";
   for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton, #changeImportSource")) control.disabled = busy;
   importWizard?.setBusy(busy);
   if (!busy) document.getElementById("importProgress").hidden = true;
@@ -5982,12 +5988,12 @@ function setImportProgress(label, completed, total) {
 }
 
 function resetImportPreview() {
-  preparedImport = null; pendingImportedDraft = null; importWizard = null; importPlanSummary = null;
+  preparedImport = null; pendingImportedDraft = null; importWizard = null; importPlanSummary = null; importContext = null; pendingImportErrors = [];
   elements.importModal.querySelector(".modal-footer > span").classList.remove("import-footer-warning");
-  elements.importModal.querySelector(".modal-footer > span").textContent = "Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.";
+  elements.importModal.querySelector(".modal-footer > span").textContent = "На следующем шаге выберите, куда добавить пункты, или замените чек-лист.";
   elements.importModal.classList.remove("has-import-preview");
   document.getElementById("importSourceSummary").hidden = true;
-  document.getElementById("importTitle").textContent = "Импорт чек-листа из Jira";
+  document.getElementById("importTitle").textContent = "Импорт чек-листа";
   const configurator = document.getElementById("importConfigurator"); configurator.hidden = true; configurator.replaceChildren();
   document.getElementById("importPreviewMeta").hidden = true;
   document.getElementById("importWithAttachments").closest("label").hidden = importSource === "markup";
@@ -5996,6 +6002,8 @@ function resetImportPreview() {
 }
 
 function renderImportChoices() {
+  flushDraftFromDom();
+  importContext = { reportId: draft.reportId, snapshot: serializeDraft() };
   elements.importModal.classList.add("has-import-preview");
   document.getElementById("importTitle").textContent = "Настроить импорт";
   document.getElementById("importSourceSummary").hidden = false;
@@ -6009,12 +6017,13 @@ function renderImportChoices() {
   const configurator = document.getElementById("importConfigurator"); configurator.hidden = false;
   importWizard = window.QaReportImportWizard.mount(configurator, preparedImport.document, {
     attachments: preparedImport.attachments, comment: importSource === "comment", download: master.checked, currentMode: draft.numberingMode,
+    currentDocument: draft, defaultMode: hasReportDataToReplace() ? "sections" : "replace",
     onChange: summary => {
-      importPlanSummary = summary; pendingImportedDraft = null;
+      importPlanSummary = summary; pendingImportedDraft = null; pendingImportErrors = [];
       const footer = elements.importModal.querySelector(".modal-footer > span");
-      footer.textContent = summary.issue || `Выбрано ${summary.count} из ${summary.total} пунктов · Разделов: ${summary.result.sections.length}`;
+      footer.textContent = summary.issue || `${summary.destinationText} · Пунктов: ${summary.count}`;
       footer.classList.toggle("import-footer-warning", !summary.valid);
-      footer.title = "Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.";
+      footer.title = footer.textContent;
       elements.importWarning.hidden = true;
       setImportBusy(importBusy);
     },
@@ -6023,6 +6032,7 @@ function renderImportChoices() {
 }
 
 async function analyzeImport() {
+  const reportIdAtStart = draft.reportId;
   setImportBusy(true); pwaPendingOperations++;
   elements.importWarning.hidden = true;
   setImportProgress(importSource === "comment" ? "Разбираем комментарий Jira…" : "Разбираем чек-лист…");
@@ -6040,6 +6050,7 @@ async function analyzeImport() {
       imported.issueUrl = result.issueUrl || "";
       importFiles = result.attachments || [];
     }
+    if (draft.reportId !== reportIdAtStart) throw new Error("Открыт другой отчёт. Повторите импорт в нужном отчёте.");
     preparedImport = {document:imported,attachments:importFiles,attachmentRequest};
     renderImportChoices();
   } catch(error) {
@@ -6059,7 +6070,7 @@ async function prepareImport() {
     load:attachment=>jiraRequest("/api/jira/import-attachment",{...attachmentRequest,attachmentId:attachment.id},{binary:true}),
     onProgress:({completed,total})=>setImportProgress("Загрузка вложений",completed,total),
   });
-  pendingImportedDraft = localized.document;
+  pendingImportedDraft = localized.document; pendingImportErrors = localized.errors;
   elements.importWarning.hidden = !localized.errors.length; elements.importWarning.textContent = localized.errors.join("\n");
   return localized.document;
 }
@@ -6100,48 +6111,108 @@ function importedDraftInCurrentReport(imported) {
   });
 }
 
-async function applyImport(mode = "replace") {
+function checkImportContext() {
+  if (!importContext) return;
+  flushDraftFromDom();
+  if (draft.reportId !== importContext.reportId) throw new Error("Открыт другой отчёт. Закройте импорт и повторите его в нужном отчёте.");
+  if (serializeDraft() !== importContext.snapshot) {
+    importContext.snapshot = serializeDraft();
+    importWizard.refreshCurrent(draft);
+    throw new Error("Чек-лист изменился. Предпросмотр обновлён — проверьте место вставки, столбцы и номера перед импортом.");
+  }
+}
+
+function recordImportHistory(before) {
+  clearTimeout(historyTimer);
+  if (historyCurrent !== before) undoStack.push(historyCurrent);
+  undoStack.push(before);
+  if (undoStack.length > 100) undoStack.splice(0, undoStack.length - 100);
+  historyCurrent = serializeDraft();
+  redoStack = [];
+  updateHistoryButtons();
+}
+
+function showImportResult(message, rowIds) {
+  const ids = new Set(rowIds);
+  const rows = [...elements.sections.querySelectorAll("tr[data-row-id]")].filter(row => ids.has(row.dataset.rowId));
+  rows.forEach(row => row.classList.add("import-added"));
+  rows[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => rows.forEach(row => row.classList.remove("import-added")), 3500);
+  showToast(message, 8000);
+  const reportId = draft.reportId, snapshot = serializeDraft();
+  const button = document.createElement("button"); button.type = "button"; button.textContent = "Отменить";
+  button.addEventListener("click", () => {
+    flushDraftFromDom();
+    if (draft.reportId !== reportId || serializeDraft() !== snapshot) {
+      showToast("После импорта появились изменения. Используйте «Отменить» в хедере, чтобы отменить их по порядку.", 7000); return;
+    }
+    undo(); showToast("Импорт отменён");
+  });
+  elements.toast.append(button);
+}
+
+async function applyImport() {
   if (elements.applyImportButton.disabled) return;
   if (!pendingImportedDraft && !preparedImport) return analyzeImport();
   const reportIdAtStart = draft.reportId;
+  let applied = false;
   setImportBusy(true);
   elements.importSummary.hidden = true;
   if (!pendingImportedDraft) elements.importWarning.hidden = true;
-  setImportProgress(importSource === "comment" ? "Получаем комментарий из Jira…" : "Подготавливаем чек-лист…");
+  setImportProgress("Подготавливаем чек-лист…");
   pwaPendingOperations++;
   try {
+    checkImportContext();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const imported = pendingImportedDraft || (await prepareImport());
     document.getElementById("importProgress").hidden = true;
-    if (!elements.importWarning.hidden && !await askConfirmation(
-      elements.importWarning.textContent + "\nСсылки на остальные вложения сохранятся без скачивания. Продолжить импорт?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
+    if (pendingImportErrors.length && !await askConfirmation(
+      pendingImportErrors.join("\n") + "\nСсылки на остальные вложения сохранятся без скачивания. Продолжить импорт?", { title: "Часть вложений недоступна", confirmText: "Продолжить" },
     )) return;
-    if (mode !== "append" && !await confirmImportReplacement()) return;
+    const placement = importWizard.getPlacement();
+    if (placement.mode === "replace" && !await confirmImportReplacement()) return;
+    checkImportContext();
     if (draft.reportId !== reportIdAtStart) throw new Error("Открыт другой отчёт. Повторите импорт в нужном отчёте");
     setImportProgress("Сохраняем в браузере…");
-    elements.importSummary.hidden = true;
     await saveReportSnapshot("before-import");
-    ChecklistNumbering.configureImport(imported, importWizard.preserveNumbers(), draft.numberingMode);
-    if (mode === "append") {
-      if (imported.numberingMode === "manual") ChecklistNumbering.setMode(draft, "manual");
-      draft.sections.push(...clone(imported.sections));
-      if (imported.intro) draft.intro += imported.intro;
+    checkImportContext();
+    flushDraftFromDom();
+    const before = serializeDraft();
+    let candidate, rowIds;
+    if (placement.mode === "replace") {
+      ChecklistNumbering.configureImport(imported, importWizard.preserveNumbers(), draft.numberingMode);
+      candidate = importedDraftInCurrentReport(imported);
+      rowIds = candidate.sections.flatMap(s => s.rows.map(r => r.id));
     } else {
-      draft = importedDraftInCurrentReport(imported);
+      const plan = window.QaReportImportOptions.planAddition(draft, imported, placement, () => crypto.randomUUID());
+      candidate = plan.document; rowIds = plan.rowIds;
     }
+    clearTimeout(saveTimer); clearTimeout(historyTimer);
+    draft = candidate; applied = true;
     render();
-    scheduleHistoryCommit();
-    if (await saveDraft() === false) return;
+    flushDraftFromDom();
+    draft = normalizeDraft(draft);
+    recordImportHistory(before);
+    hasUnsavedLocalChanges = true;
+    if (await saveDraft() === false) {
+      showToast("Чек-лист изменился при сохранении. Проверьте открытую версию перед повторным импортом.", 9000); return;
+    }
     await saveReportSnapshot("import-complete");
     renderEnvironmentOptions(draft.environment);
     updateChecklistUrl(draft.publicId);
-    setImportBusy(false);
-    closeImport();
-    showToast(`Импортировано таблиц: ${imported.sections.length}`);
+    showImportResult(placement.mode === "replace" ? `Чек-лист заменён · Пунктов: ${rowIds.length}`
+      : `Добавлено пунктов: ${rowIds.length}${placement.mode === "sections" ? ` · Разделов: ${imported.sections.length}` : ""}`, rowIds);
   } catch (error) {
-    showToast(`Не удалось импортировать: ${error.message}`, 9000);
+    if (applied) showToast(`Импорт применён, но сохранить его полностью не удалось: ${error.message}. Проверьте сохранение; импорт можно отменить.`, 12000);
+    else {
+      elements.importWarning.textContent = error.message; elements.importWarning.hidden = false;
+    }
   } finally {
     setImportBusy(false);
+    if (applied) {
+      closeImport();
+      pendingImportedDraft = null; preparedImport = null;
+    }
     pwaPendingOperations--;
   }
 }
@@ -7330,9 +7401,10 @@ elements.modalCopyVisualButton.addEventListener("click", copyVisualReport);
 elements.modalSaveMarkupButton.addEventListener("click", savePreviewMarkupToDraft);
 elements.closePreviewButton.addEventListener("click", closePreview);
 elements.clearButton.addEventListener("click", resetDraft);
-elements.importButton.addEventListener("click", openImport);
+elements.importButton.addEventListener("click", () => openImport("markup"));
+document.getElementById("importCommentButton").addEventListener("click", () => openImport("comment"));
 elements.closeImportButton.addEventListener("click", closeImport);
-elements.applyImportButton.addEventListener("click", () => applyImport("replace"));
+elements.applyImportButton.addEventListener("click", () => applyImport());
 elements.closeMediaViewerButton.addEventListener("click", closeMediaViewer);
 elements.closeCodeEditorButton.addEventListener("click", () => closeCodeEditor());
 elements.saveCodeButton.addEventListener("click", saveCodeChanges);

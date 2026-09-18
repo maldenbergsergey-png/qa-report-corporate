@@ -14,9 +14,28 @@
     template.content.querySelectorAll("br, p, li").forEach(node => node.append(document.createTextNode(" ")));
     return template.content.textContent.replace(/\s+/g, " ").trim();
   }
-  function mount(container, source, { attachments = [], comment = false, download = true, currentMode = "section", onChange }) {
+  function mount(container, source, { attachments = [], comment = false, download = true, currentMode = "section", currentDocument = { sections: [], numberingMode: currentMode }, defaultMode = "replace", onChange }) {
     const state = O.create(source), policy = { mode: comment && download ? "download" : "reference", images: true, overrides: new Map() };
     const opened = new Set(), initialized = new Set();
+    let targetDocument = JSON.parse(JSON.stringify(currentDocument));
+    const destination = { mode: defaultMode, afterId: "", targetId: "", columns: new Map() };
+    const placement = () => ({ ...destination, columns: new Map(destination.columns), preserveNumbers: preserve });
+    const selectedDocument = () => {
+      const result = O.build(source, state);
+      if (destination.mode !== "replace") result.intro = "";
+      return result;
+    };
+    const sectionLabel = (section, index) => `${index + 1}. ${section.title || "Раздел"}`;
+    const destinationText = () => {
+      if (destination.mode === "replace") return "Содержимое текущего чек-листа будет заменено";
+      if (destination.mode === "rows") {
+        const index = targetDocument.sections.findIndex(s => s.id === destination.targetId);
+        return index < 0 ? "Выберите раздел назначения" : `В раздел «${sectionLabel(targetDocument.sections[index], index)}» · в конец`;
+      }
+      if (destination.afterId === "start") return "Новые разделы · в начало чек-листа";
+      const index = targetDocument.sections.findIndex(s => s.id === destination.afterId);
+      return index < 0 ? "Новые разделы · в конец чек-листа" : `Новые разделы · после «${sectionLabel(targetDocument.sections[index], index)}»`;
+    };
     let tab = "rows", preserve = root.ChecklistNumbering.hasSourceNumbers(source), busy = false;
     const numbers = new Map(source.sections.flatMap(section => section.rows.map((row, index) => [row.id, row.manualNumber ?? `${index + 1}.`])));
     const nameOf = (section, row) => plain(row.cells[section.columns[0]?.id]) || "Пустой пункт";
@@ -58,6 +77,50 @@
         if (node.open) { opened.add(id); populate(); } else opened.delete(id);
       });
       return node;
+    }
+    function renderDestination(panel, result, plan) {
+      const block = el("div", "import-destination");
+      block.append(field("Куда импортировать", select("destination-mode", "Куда импортировать", [
+        ["sections", "Добавить новые разделы"], ["rows", "Добавить в существующий раздел"], ["replace", "Заменить чек-лист"],
+      ], destination.mode, value => { destination.mode = value; changed(false); })));
+      if (destination.mode === "sections") {
+        block.append(field("Место вставки", select("destination-after", "Место вставки", [
+          ["", "В конец чек-листа"], ["start", "В начало чек-листа"],
+          ...targetDocument.sections.map((s, index) => [s.id, `После «${sectionLabel(s, index)}»`]),
+        ], destination.afterId, value => { destination.afterId = value; changed(false); })));
+        if (plan?.duplicateTitles.length) block.append(el("p", "import-help", "Названия уже встречаются: " + [...new Set(plan.duplicateTitles)].join(", ") + ". Будут добавлены отдельные разделы."));
+      } else if (destination.mode === "rows") {
+        block.append(field("Раздел назначения", select("destination-section", "Раздел назначения", [
+          ["", "Выберите раздел…"], ...targetDocument.sections.map((s, index) => [s.id, sectionLabel(s, index)]),
+        ], destination.targetId, value => { destination.targetId = value; destination.columns.clear(); changed(false); })));
+        const target = targetDocument.sections.find(s => s.id === destination.targetId);
+        if (target) {
+          block.append(el("p", "import-help", "Пункты добавятся в конец раздела. Столбцы с одинаковыми названиями сопоставляются автоматически."));
+          if (plan?.newColumns.length) block.append(el("p", "import-help", `Новые столбцы: ${plan.newColumns.map(c => c.title).join(", ")}. В существующих пунктах они останутся пустыми.`));
+          if (target.statusSort) block.append(el("p", "import-help", "В этом разделе включена сортировка: пункты будут показаны по статусу."));
+          block.append(disclosure("destination-columns", "Настроить соответствие столбцов", body => {
+            body.append(el("p", "import-help", "Каждый столбец источника переносится целиком. Выберите существующий столбец или создайте новый."));
+            for (const section of result.sections) {
+              if (result.sections.length > 1) body.append(el("strong", "import-preview-title", section.title || "Раздел"));
+              for (const column of section.columns) {
+                const mapping = plan?.mappings.find(m => m.sectionId === section.id && m.columnId === column.id);
+                const autoTitle = mapping && !destination.columns.has(O.key(section.id, column.id)) ? `${mapping.title}${plan.newColumns.some(c => c.id === mapping.targetId) ? " (новый)" : ""}` : "по названию";
+                const id = O.key(section.id, column.id);
+                body.append(field(column.title, select(`destination-column-${id}`, `Куда перенести «${column.title}», ${section.title}`, [
+                  ["", `Автоматически → ${autoTitle}`], ["new", "Создать новый столбец"], ...target.columns.map(c => [c.id, c.title]),
+                ], destination.columns.get(id) || "", value => {
+                  if (value) destination.columns.set(id, value); else destination.columns.delete(id);
+                  changed(false);
+                })));
+              }
+            }
+          }));
+        }
+      }
+      block.append(el("p", destination.mode === "replace" ? "import-validation" : "import-help",
+        destination.mode === "replace" ? "Разделы и данные текущего чек-листа будут заменены. Перед заменой запросим подтверждение."
+          : "Текущие пункты, результаты и реквизиты отчёта сохранятся. Добавление можно отменить одним действием."));
+      panel.append(block);
     }
     function mappingPanel(panel) {
       const counts = new Map();
@@ -130,12 +193,15 @@
     function renderData(panel, result) {
       const numbering = check("", "preserve-numbers", preserve, value => { preserve = value; changed(false); }, "local-import-option");
       numbering.id = "importNumberingChoice"; numbering.querySelector("input").id = "importPreserveNumbers";
-      numbering.hidden = !root.ChecklistNumbering.hasSourceNumbers(source);
+      numbering.hidden = !root.ChecklistNumbering.hasSourceNumbers(source) || (destination.mode !== "replace" && targetDocument.numberingMode !== "manual");
       numbering.lastElementChild.className = "import-option-copy";
-      numbering.lastElementChild.append(el("strong", "", "Сохранить исходные номера"), el("small", "", "Включится ручная нумерация. Например, пункты 3, 8 и 14 сохранят свои номера после отбора."));
+      numbering.lastElementChild.append(el("strong", "", "Сохранить исходные номера"), el("small", "", destination.mode === "replace" ? "Включится ручная нумерация. Например, пункты 3, 8 и 14 сохранят свои номера после отбора." : "Исходные номера сохранятся только у добавляемых пунктов. Снимите флажок, чтобы оставить их пустыми."));
       panel.append(numbering);
+      if (destination.mode !== "replace") panel.append(el("p", "import-help", targetDocument.numberingMode === "manual"
+        ? "Ручная нумерация текущего чек-листа сохранится. Пункты без исходного номера получат пустой номер."
+        : "Номера добавляемых пунктов рассчитываются по правилам текущего чек-листа. Итоговые номера видны в предпросмотре."));
       panel.append(field("Статусы после импорта", select("reset-statuses", "Статусы после импорта", [["keep", "Сохранить исходные"], ["reset", "Установить НЕ ПРОВЕРЕНО"]], state.resetStatuses ? "reset" : "keep", value => { state.resetStatuses = value === "reset"; changed(); }), "Фильтр пунктов всегда использует статусы из источника."));
-      if (plain(source.intro)) panel.append(check("Переносить описание отчёта", "keep-intro", state.keepIntro, value => { state.keepIntro = value; changed(); }));
+      if (destination.mode === "replace" && plain(source.intro)) panel.append(check("Переносить описание отчёта", "keep-intro", state.keepIntro, value => { state.keepIntro = value; changed(); }));
       panel.append(el("p", "import-help", "Для каждого столбца выберите действие. «Оставить пустым» сохранит столбец для нового заполнения и уберёт его старые вложения."));
       if (state.preset === "retest" && ![...state.columns.values()].includes("clear")) panel.append(el("p", "import-help", "Столбец фактического результата не распознан. Выберите нужный столбец и действие «Оставить пустым»."));
       for (const section of source.sections) {
@@ -198,17 +264,29 @@
     }
     function renderPreview(panel, result) {
       const prepared = A.removeExcluded(result, attachments, policy);
-      root.ChecklistNumbering.configureImport(prepared, preserve, currentMode);
-      const labels = root.ChecklistNumbering.rowNumbers(prepared);
-      if (plain(prepared.intro)) panel.append(el("p", "", plain(prepared.intro)));
-      for (const section of prepared.sections) {
+      let resultDocument = prepared, addedIds;
+      if (destination.mode === "replace") root.ChecklistNumbering.configureImport(prepared, preserve, targetDocument.numberingMode);
+      else {
+        try {
+          const plan = O.planAddition(targetDocument, prepared, placement());
+          resultDocument = plan.document; addedIds = new Set(plan.rowIds);
+        } catch (error) { panel.append(el("p", "import-validation", error.message)); return; }
+      }
+      const labels = root.ChecklistNumbering.rowNumbers(resultDocument);
+      panel.append(el("p", "import-help", destinationText()));
+      if (destination.mode !== "replace") panel.append(el("p", "import-help", "Показаны только добавляемые пункты с итоговыми столбцами и номерами."));
+      if (destination.mode === "replace" && plain(prepared.intro)) panel.append(el("p", "", plain(prepared.intro)));
+      for (const section of resultDocument.sections) {
+        const visibleRows = root.QaReportTable ? root.QaReportTable.visibleRows(section) : section.rows;
+        const rows = addedIds ? visibleRows.filter(row => addedIds.has(row.id)) : visibleRows;
+        if (!rows.length) continue;
         panel.append(el("strong", "import-preview-title", section.title || "Раздел"));
         const scroll = el("div", "import-preview-scroll"), table = el("table", "import-result-table");
         const head = el("thead"), header = el("tr");
         for (const name of ["№", ...section.columns.map(c => c.title), "Статус"]) header.append(el("th", "", name));
         head.append(header); table.append(head);
         const body = el("tbody");
-        for (const row of section.rows) {
+        for (const row of rows) {
           const line = el("tr"); line.append(el("td", "", labels.get(row.id)));
           for (const column of section.columns) line.append(el("td", "", plain(row.cells[column.id]) || "—"));
           line.append(el("td", "", row.status || "Не сопоставлен")); body.append(line);
@@ -219,16 +297,25 @@
     }
     function render() {
       const active = document.activeElement?.dataset.focus, scroll = container.closest(".import-body").scrollTop;
-      const summary = O.summary(source, state), entries = A.entries(summary.result, attachments, policy);
+      const summary = O.summary(source, state);
+      summary.result = selectedDocument();
+      let plan, placementIssue = "";
+      if (destination.mode !== "replace") {
+        try { plan = O.planAddition(targetDocument, summary.result, placement()); }
+        catch (error) { placementIssue = error.message; }
+      }
+      const entries = A.entries(summary.result, attachments, policy);
       const downloads = new Set(entries.flatMap(p => p.items.filter(i => i.mode === "download").map(i => i.key))).size;
       const omitted = entries.reduce((n, p) => n + p.items.filter(i => i.mode === "omit").length, 0);
       container.replaceChildren();
-      const presets = el("div", "import-presets"); presets.setAttribute("aria-label", "Настройка импорта");
-      for (const [value, title, help] of [["source", "Как в источнике", "Содержимое и статусы сохраняются"], ["retest", "Для повторного тестирования", "Пустой фактический результат и новые статусы"]]) {
-        const node = button("", `preset-${value}`, () => { O.preset(source, state, value); preserve = root.ChecklistNumbering.hasSourceNumbers(source); changed(false); }, "import-preset");
-        node.setAttribute("aria-pressed", String(state.preset === value)); node.append(el("strong", "", title), el("small", "", help)); presets.append(node);
-      }
-      container.append(presets);
+      renderDestination(container, summary.result, plan);
+      container.append(field("Содержимое", select("content-preset", "Содержимое после импорта", [
+        ["source", "Как в источнике"], ["retest", "Для повторного тестирования"],
+        ...(state.preset === "custom" ? [["custom", "Свои настройки"]] : []),
+      ], state.preset, value => {
+        if (value === "custom") return;
+        O.preset(source, state, value); preserve = root.ChecklistNumbering.hasSourceNumbers(source); changed(false);
+      }), state.preset === "retest" ? "Фактический результат будет очищен, статусы — НЕ ПРОВЕРЕНО." : "Выберите пункты ниже. Столбцы и вложения можно настроить отдельно."));
       const tabs = el("div", "import-config-tabs"); tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Параметры импорта");
       const panels = [];
       for (const [value, title] of [["rows", "Пункты"], ["data", "Столбцы и данные"], ["files", "Вложения"]]) {
@@ -247,18 +334,18 @@
       }
       container.append(tabs, ...panels);
       const status = el("div", "import-plan-summary"); status.setAttribute("role", "status");
-      const detail = [`Разделов: ${summary.result.sections.length}`, ...(state.resetStatuses ? ["статусы → НЕ ПРОВЕРЕНО"] : []),
+      const detail = [destinationText(), ...(plan?.newColumns.length ? [`новых столбцов: ${plan.newColumns.length}`] : []), `Разделов в источнике: ${summary.result.sections.length}`, ...(state.resetStatuses ? ["статусы → НЕ ПРОВЕРЕНО"] : []),
         ...([...state.columns.values()].includes("clear") ? ["выбранные столбцы будут очищены"] : []),
         ...(downloads ? [`к скачиванию: ${downloads}`] : []), ...(omitted ? [`вложений исключено: ${omitted}`] : [])];
       status.append(el("strong", "", `Выбрано ${summary.count} из ${summary.total} пунктов`), el("small", "", detail.join(" · ")));
       container.append(status);
-      const issue = summary.unresolved ? "Сопоставьте неизвестные статусы на вкладке «Пункты»." : !summary.count ? "Выберите хотя бы один пункт для импорта." : summary.emptyColumns ? "В каждом выбранном разделе нужен хотя бы один содержательный столбец." : "";
+      const issue = placementIssue || (summary.unresolved ? "Сопоставьте неизвестные статусы на вкладке «Пункты»." : !summary.count ? "Выберите хотя бы один пункт для импорта." : summary.emptyColumns ? "В каждом выбранном разделе нужен хотя бы один содержательный столбец." : "");
       if (issue) container.append(el("p", "import-validation", issue));
       container.append(disclosure("preview", "Предпросмотр результата", body => renderPreview(body, summary.result)));
       setBusy(busy);
       if (active) [...container.querySelectorAll("[data-focus]")].find(node => node.dataset.focus === active)?.focus({ preventScroll: true });
       container.closest(".import-body").scrollTop = scroll;
-      onChange({ ...summary, valid: !issue, issue, preserve, downloads });
+      onChange({ ...summary, valid: !issue, issue, preserve, downloads, mode: destination.mode, destinationText: destinationText() });
     }
     function setBusy(value) {
       busy = value;
@@ -266,7 +353,8 @@
       container.inert = busy;
     }
     render();
-    return { getDocument: () => O.build(source, state), getPolicy: () => policy, preserveNumbers: () => preserve, setBusy };
+    return { getDocument: selectedDocument, getPolicy: () => policy, preserveNumbers: () => preserve, getPlacement: placement,
+      refreshCurrent(document) { targetDocument = JSON.parse(JSON.stringify(document)); render(); }, setBusy };
   }
   root.QaReportImportWizard = { mount };
 })(window);

@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=100" />
+    <link rel="stylesheet" href="/styles.css?v=102" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -115,6 +115,10 @@
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
               <span>Новый</span>
             </button>
+            <button class="header-action" id="importButton" type="button" title="Импорт чек-листа" aria-label="Импорт чек-листа" aria-haspopup="dialog" aria-controls="importModal">
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg>
+              <span>Импорт</span>
+            </button>
             <button class="header-action" id="historyButton" type="button">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
               <span>История</span>
@@ -159,9 +163,9 @@
               <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
             <div class="header-dropdown-menu" id="jiraMenu" role="menu" hidden>
-              <button class="header-dropdown-item" id="importButton" type="button" role="menuitem">
+              <button class="header-dropdown-item" id="importCommentButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg>
-                <span>Загрузить из Jira</span>
+                <span>Отчёт из комментария</span>
               </button>
               <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
                 <svg class="ui-icon primary-action-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
@@ -523,20 +527,20 @@
         <header class="modal-header">
           <div>
             <div class="eyebrow">Импорт</div>
-            <h2 id="importTitle">Импорт чек-листа из Jira</h2>
+            <h2 id="importTitle">Импорт чек-листа</h2>
           </div>
           <button class="icon-button" id="closeImportButton" type="button" aria-label="Закрыть импорт">×</button>
         </header>
         <div class="import-body">
           <div class="import-source-tabs">
             <button class="import-source-tab active" data-import-source="markup" type="button">Разметка</button>
-            <button class="import-source-tab" data-import-source="comment" type="button">Ссылка на комментарий</button>
+            <button class="import-source-tab" data-import-source="comment" type="button">Комментарий Jira</button>
           </div>
           <div id="markupImportPane" class="import-pane">
             <p>
-              Скопируйте содержимое комментария из режима Jira «Текст». Таблицы, разделы,
-              статусы и форматирование будут преобразованы в редактируемый отчёт.
-              На следующем шаге можно выбрать пункты, очистить столбцы и исключить изображения. Файлы из разметки не скачиваются.
+              Вставьте готовый чек-лист от ИИ или из другого источника в формате Jira Wiki Markup.
+              Таблицы, разделы, статусы и форматирование превратятся в редактируемый чек-лист.
+              Подключение к Jira не требуется. На следующем шаге выберите пункты и место добавления.
             </p>
             <textarea
               id="importMarkup"
@@ -567,7 +571,7 @@
           <div class="import-progress-bar is-indeterminate" id="importProgressBar" role="progressbar" aria-labelledby="importProgressLabel" aria-valuemin="0"><span></span></div>
         </div>
         <footer class="modal-footer">
-          <span>Импорт в текущий чек-лист. Перед заменой заполненных данных запросим подтверждение.</span>
+          <span>На следующем шаге выберите, куда добавить пункты, или замените чек-лист.</span>
           <div class="modal-actions">
             <button class="button button-primary" id="applyImportButton" type="button"><span class="button-spinner" aria-hidden="true" hidden></span><span class="button-label">Продолжить</span></button>
           </div>
@@ -931,13 +935,13 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=18"></script>
+    <script src="/release-notes.js?v=20"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
-    <script src="/import-options.js?v=2"></script>
-    <script src="/import-wizard.js?v=2"></script>
-    <script src="/app.js?v=102"></script>
+    <script src="/import-options.js?v=4"></script>
+    <script src="/import-wizard.js?v=4"></script>
+    <script src="/app.js?v=104"></script>
     <script src="/local-import-client.js?v=2"></script>
   </body>
 </html>

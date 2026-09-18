@@ -56,5 +56,84 @@
       unresolved: [...state.mapping.values()].filter(value => !value).length,
       emptyColumns: result.sections.some(section => !section.columns.length) };
   }
-  return { statuses, itemWord, key, sourceStatus, create, preset, mapped, eligible, build, summary };
+  const titleKey = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  // Build the complete candidate without mutating either document. Preview and
+  // commit use the same plan, including column mapping and final row order.
+  function planAddition(current, source, placement, createId) {
+    const document = JSON.parse(JSON.stringify(current));
+    const incoming = JSON.parse(JSON.stringify(source.sections));
+    const rowIds = [], sectionIds = [], mappings = [], newColumns = [];
+    const usedIds = new Set(document.sections.flatMap(s => [s.id, ...s.columns.map(c => c.id), ...s.rows.map(r => r.id)]));
+    let serial = 0;
+    const freshId = () => {
+      let id;
+      do { id = createId ? createId() : `import-preview-${++serial}`; } while (usedIds.has(id));
+      usedIds.add(id); return id;
+    };
+    const prepareRow = row => {
+      row.id = freshId(); rowIds.push(row.id); delete row.sourceStatus;
+      if (document.numberingMode !== "manual" || !placement.preserveNumbers) delete row.manualNumber;
+      return row;
+    };
+    const duplicateTitles = incoming.filter(s => document.sections.some(existing => titleKey(existing.title) === titleKey(s.title)))
+      .map(s => s.title || "Раздел");
+    if (placement.mode === "sections") {
+      let index = document.sections.length;
+      if (placement.afterId === "start") index = 0;
+      else if (placement.afterId) {
+        index = document.sections.findIndex(s => s.id === placement.afterId);
+        if (index < 0) throw new Error("Раздел для вставки больше не существует. Выберите место заново.");
+        index++;
+      }
+      for (const section of incoming) {
+        section.id = freshId(); sectionIds.push(section.id); section.collapsed = false;
+        const columns = new Map(section.columns.map(c => [c.id, freshId()]));
+        section.columns.forEach(c => { c.id = columns.get(c.id); });
+        section.rows.forEach(row => {
+          prepareRow(row);
+          row.cells = Object.fromEntries([...columns].map(([from, to]) => [to, row.cells[from] || ""]));
+        });
+      }
+      document.sections.splice(index, 0, ...incoming);
+    } else if (placement.mode === "rows") {
+      const target = document.sections.find(s => s.id === placement.targetId);
+      if (!target) throw new Error("Выберите раздел, в который нужно добавить пункты.");
+      sectionIds.push(target.id);
+      for (const sourceSection of incoming) {
+        const used = new Set();
+        // Reserve explicit choices before matching the remaining columns by name.
+        const reserved = new Set(sourceSection.columns.map(c => placement.columns?.get(key(sourceSection.id, c.id)))
+          .filter(id => id && id !== "new"));
+        const pairs = sourceSection.columns.map(column => {
+          const choice = placement.columns?.get(key(sourceSection.id, column.id));
+          let destination;
+          if (choice && choice !== "new") {
+            destination = target.columns.find(c => c.id === choice);
+            if (!destination) throw new Error("Столбец назначения больше не существует. Настройте соответствие заново.");
+            if (used.has(destination.id)) throw new Error(`В разделе «${sourceSection.title || "Раздел"}» несколько столбцов направлены в «${destination.title}». Выберите разные столбцы.`);
+          } else if (choice !== "new") {
+            destination = target.columns.find(c => titleKey(c.title) === titleKey(column.title) && !used.has(c.id) && !reserved.has(c.id));
+          }
+          if (!destination) {
+            destination = { ...column, id: freshId() };
+            target.columns.push(destination); newColumns.push(destination);
+            target.rows.forEach(row => { row.cells[destination.id] = ""; });
+          }
+          used.add(destination.id);
+          mappings.push({ sectionId: sourceSection.id, columnId: column.id, targetId: destination.id, title: destination.title });
+          return [column.id, destination.id];
+        });
+        for (const row of sourceSection.rows) {
+          prepareRow(row);
+          const cells = Object.fromEntries(target.columns.map(c => [c.id, ""]));
+          pairs.forEach(([from, to]) => { cells[to] = row.cells[from] || ""; });
+          target.rows.push({ ...row, cells });
+        }
+      }
+      target.collapsed = false;
+    } else throw new Error("Выберите способ добавления пунктов.");
+    return { document, rowIds, sectionIds, mappings, newColumns, duplicateTitles };
+  }
+  return { statuses, itemWord, key, sourceStatus, create, preset, mapped, eligible, build, summary, planAddition };
 });

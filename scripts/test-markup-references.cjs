@@ -89,11 +89,12 @@ async function main() {
     assert.match(section.rows[1].cells[section.columns[3].id], /href="https:\/\/docs.example\/path"/);
     return result.wiki;
   };
-  await page.click('#jiraMenuButton'); await page.click('#importButton');
+  await page.click('#importButton');
   assert.equal(await page.locator('#importWithAttachments').isVisible(), false);
   await page.fill('#importMarkup', markup); await page.click('#applyImportButton');
   await page.waitForFunction(() => !document.querySelector('#importConfigurator').hidden && !document.querySelector('#applyImportButton').disabled);
   assert.equal(await page.locator('#importTitle').textContent(), 'Настроить импорт');
+  await page.selectOption('[data-focus="destination-mode"]', 'replace');
   await page.click('#importTab-files');
   assert.equal(await page.locator('[data-focus="file-mode"] option[value="download"]').count(), 0);
   assert.equal(await page.locator('[data-focus="keep-images"]').isChecked(), true);

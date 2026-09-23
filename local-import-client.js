@@ -27,7 +27,19 @@
     }
     return next;
   }
-  root.QaLocalImport = { cellHash, applyCells };
+  const metadataFields = ["issueUrl", "environment", "overallStatus", "intro"];
+  async function applyMetadata(original, candidate, updates) {
+    const next = JSON.parse(JSON.stringify(candidate));
+    for (const [field, update] of Object.entries(updates || {})) {
+      if (!metadataFields.includes(field)) throw new Error("Неизвестное поле metadata");
+      if (update.expectedHash !== await cellHash(original[field])) throw new Error(`Поле «${field}» изменилось. Получите новый контекст и повторите пакет`);
+      next[field] = field === "intro"
+        ? (update.value ? `<p>${escape(update.value).replace(/\r?\n/g, "<br>")}</p>` : "")
+        : field === "environment" ? update.value.trim() || "Не указано" : update.value.trim();
+    }
+    return next;
+  }
+  root.QaLocalImport = { cellHash, applyCells, applyMetadata };
   if (typeof document === "undefined") return;
   const panel = document.getElementById("localImportModal");
   if (!panel) return;
@@ -54,7 +66,10 @@
     flushDraftFromDom();
     const value = clone(draft);
     const text = html => { const template = document.createElement("template"); template.innerHTML = html || ""; return template.content.textContent || ""; };
-    return { reportId: value.reportId, title: value.sections[0]?.title || "Отчёт", sections: await Promise.all(value.sections.map(async section => ({
+    const metadata = Object.fromEntries(await Promise.all(metadataFields.map(async field => [field, {
+      text: field === "intro" ? text(value[field]) : value[field] || "", hash: await cellHash(value[field]),
+    }])));
+    return { reportId: value.reportId, metadata, title: value.sections[0]?.title || "Отчёт", sections: await Promise.all(value.sections.map(async section => ({
       id: section.id, title: section.title, columns: section.columns.map(column => ({ id: column.id, title: column.title })),
       rows: await Promise.all(section.rows.map(async row => ({ id: row.id, status: row.status, cells: Object.fromEntries(await Promise.all(section.columns.map(async column => [column.id, { text: text(row.cells[column.id]), hash: await cellHash(row.cells[column.id], row.status) }])))}))),
     }))) };
@@ -97,13 +112,15 @@
       if (localized.errors.length) throw new Error(localized.errors.join("; "));
       candidate = importedDraftInCurrentReport(localized.document);
       if (batch.title && candidate.sections[0]) candidate.sections[0].title = stripSectionNumber(String(batch.title));
-    } else candidate = await applyCells(draft, batch.updates, files);
+    } else candidate = batch.kind === "cells" ? await applyCells(draft, batch.updates, files) : clone(draft);
     if (session !== current || draft.reportId !== current.reportId) throw new Error("Сессия отчёта изменилась");
     // Verify again with editing frozen; no keystroke can be lost during the IndexedDB transaction.
     const shell = document.querySelector(".app-shell"); const wasInert = shell.inert; shell.inert = true;
     try {
       flushDraftFromDom();
       if (batch.kind === "cells") candidate = await applyCells(draft, batch.updates, files);
+      if (batch.kind === "metadata") candidate = clone(draft);
+      candidate = await applyMetadata(draft, candidate, batch.metadata);
       candidate.localImportReceipts = [...(draft.localImportReceipts || []), receiptId].slice(-128);
       candidate.revision = (Number(draft.revision) || 0) + 1;
       candidate.updatedAt = new Date().toISOString(); candidate.lastSavedBy = tabId; candidate.lastSavedClientId = reportClientId;
@@ -121,7 +138,7 @@
     const current = session;
     if (draft.reportId !== current.reportId) { await endSession("Открыт другой отчёт. Создайте новую сессию приёма"); return; }
     if (Date.now() >= current.expiresAt) { await endSession("Срок сессии истёк. Уже полученные файлы сохранены в браузере"); return; }
-    if (publishInProgress || pwaPendingOperations || document.activeElement?.isContentEditable || document.querySelector('.modal-backdrop:not([hidden]):not(#localImportModal)')) { timer = setTimeout(poll, 2500); return; }
+    if (publishInProgress || pwaPendingOperations || document.activeElement?.isContentEditable || document.activeElement?.matches?.("#issueUrl, #environment, #overallStatus") || document.querySelector('.modal-backdrop:not([hidden]):not(#localImportModal)')) { timer = setTimeout(poll, 2500); return; }
     busy = true;
     try {
       const result = await browserRequest(`/${current.id}/next`, {}, current);
@@ -170,7 +187,7 @@
   stop.addEventListener("click", () => { endSession(); start.focus(); });
   copy.addEventListener("click", async () => {
     if (!session) return;
-    const instruction = `Заполни открытый отчёт QA Report через временный API. Подключение:\n${JSON.stringify(session.connection, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы и hash каждой ячейки.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf]. Полный чек-лист заменяет текущий целиком без дополнительного подтверждения, пока приём включён. Для дозагрузки результатов и файлов в существующие ячейки используй kind:"cells" с актуальными expectedHash; если меняешь весь чек-лист, отправляй его целиком, включая ранее принятые данные.\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
+    const instruction = `Заполни открытый отчёт QA Report через временный API. Подключение:\n${JSON.stringify(session.connection, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы, hash каждой ячейки и context.metadata: issueUrl (ссылка или ключ задачи), environment (окружение или адрес стенда), overallStatus (общий Итог), intro (вводный текст); у каждого поля text и hash.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf]. Полный чек-лист заменяет текущий целиком без дополнительного подтверждения, пока приём включён. Для дозагрузки результатов и файлов в существующие ячейки используй kind:"cells" с актуальными expectedHash; если меняешь весь чек-лист, отправляй его целиком, включая ранее принятые данные.\nДля изменения полей отчёта: {id,kind:"metadata",metadata:{issueUrl:{value:"https://tasks.example.test/browse/QA-123",expectedHash:"hash поля issueUrl из context.metadata"},overallStatus:{value:"НЕ ОК",expectedHash:"hash поля overallStatus"}}}. Таким же способом передавай environment и intro. intro — обычный текст с переносами строк, без HTML. Итог: OK, НЕ ОК, ПОЧТИ ОК, НЕ ПРОВЕРЕНО, ЧАСТИЧНО ПРОВЕРЕНО, ТРЕБУЕТ УТОЧНЕНИЯ. Передавай только изменяемые поля; metadata можно добавить и в пакет cells или checklist — всё сохранится вместе. При конфликте весь пакет отклоняется.\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
     try { await navigator.clipboard.writeText(instruction); showToast("Подключение и инструкции для агента скопированы"); }
     catch { message("Не удалось скопировать подключение. Разрешите доступ к буферу обмена"); }
   });

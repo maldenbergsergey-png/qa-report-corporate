@@ -710,6 +710,7 @@ function isSavedByThisBrowser(candidate) {
 
 function setSaveStatus(status, { saving = false } = {}) {
   elements.saveState.classList.toggle("saving", saving);
+  elements.saveState.classList.toggle("save-error", status === "Ошибка сохранения");
   elements.saveState.querySelector("span:last-child").textContent = status;
 }
 
@@ -1302,21 +1303,41 @@ async function saveDraft() {
     draft.lastSavedBy = tabId;
     draft.lastSavedClientId = reportClientId;
   }
-  let localStorageSaved = true;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-  } catch {
-    // Большие отчёты с изображениями продолжают сохраняться в IndexedDB.
-    localStorageSaved = false;
-  }
-  hasUnsavedLocalChanges = false;
-  setSaveStatus("Сохранено");
-  saveReportSnapshot("autosave").catch(() => {
-    if (!localStorageSaved) setSaveStatus("Ошибка сохранения");
-  });
-  if (!applyingRemoteDraft) broadcastDraftUpdate();
+  const saving = persistLocalDraft();
   forceLocalDraftSave = false;
-  return true;
+  return saving.completion;
+}
+
+// localStorage is a fast copy; reports with attachments may fit only in IndexedDB.
+function persistLocalDraft() {
+  const snapshot = clone(draft);
+  const content = serializeDraft();
+  const isCurrent = () => draft.reportId === snapshot.reportId && draft.revision === snapshot.revision && serializeDraft() === content;
+  let localStorageSaved = false;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    localStorageSaved = true;
+  } catch {
+    // Wait for the durable fallback before reporting a storage failure.
+  }
+  hasUnsavedLocalChanges = !localStorageSaved;
+  setSaveStatus(localStorageSaved ? "Сохранено" : "Сохранение…", { saving: !localStorageSaved });
+  if (localStorageSaved && !applyingRemoteDraft) broadcastDraftUpdate();
+  const completion = saveReportSnapshot("autosave", snapshot).then(() => {
+    if (!localStorageSaved && isCurrent()) {
+      hasUnsavedLocalChanges = false;
+      setSaveStatus("Сохранено");
+      if (!applyingRemoteDraft) broadcastDraftUpdate();
+    }
+    return true;
+  }, () => {
+    if (!localStorageSaved && isCurrent()) {
+      hasUnsavedLocalChanges = true;
+      setSaveStatus("Ошибка сохранения");
+    }
+    return localStorageSaved;
+  });
+  return { localStorageSaved, completion };
 }
 
 function flushPendingDraftSave() {
@@ -1345,18 +1366,7 @@ function flushPendingDraftSave() {
     draft.lastSavedBy = tabId;
     draft.lastSavedClientId = reportClientId;
   }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-    hasUnsavedLocalChanges = false;
-    setSaveStatus("Сохранено");
-    if (!applyingRemoteDraft) broadcastDraftUpdate();
-    saveReportSnapshot("autosave").catch(() => {});
-    return true;
-  } catch {
-    setSaveStatus("Ошибка сохранения");
-    saveReportSnapshot("autosave").catch(() => {});
-    return false;
-  }
+  return persistLocalDraft().localStorageSaved;
 }
 
 function broadcastDraftUpdate() {

@@ -118,3 +118,34 @@ test("cell updates preserve other columns, attach actual bytes, escape text and 
   await assert.rejects(ctx.QaLocalImport.applyCells(doc,[update],new Map([["file",file]])),/изменилась/);
   assert.equal(doc.sections[0].rows[0].cells.actual,"User edit");
 });
+
+test("metadata uses the existing session queue, durable acknowledgement and idempotency", async () => {
+  const f = await fixture();
+  try {
+    const metadata = { issueUrl: { value: "https://tasks.example.test/browse/QA-123", expectedHash: "0".repeat(64) }, overallStatus: { value: "НЕ ОК", expectedHash: "1".repeat(64) } };
+    const body = JSON.stringify({ id: "metadata", kind: "metadata", metadata });
+    assert.equal((await f.agent("/batches", { method: "POST", body })).status, 202);
+    const next = await (await f.browser("/next")).json();
+    assert.deepEqual(next.batch.metadata, metadata);
+    assert.deepEqual(next.batch.files, []);
+    const context = { sections: [], metadata: { overallStatus: { text: "НЕ ОК", hash: "2".repeat(64) } } };
+    await f.browser("/ack", { method: "POST", body: JSON.stringify({ id: "metadata", status: "saved", context }) });
+    assert.deepEqual((await (await f.agent("/context")).json()).context.metadata, context.metadata);
+    assert.equal((await (await f.agent("/batches", { method: "POST", body })).json()).status, "saved");
+    assert.equal((await f.agent("/batches", { method: "POST", body: body.replace("НЕ ОК", "OK") })).status, 409);
+  } finally { await f.close(); }
+});
+
+test("metadata validates fields, hashes, statuses and URLs before queuing", () => {
+  const { validateBatch } = require("../local-import-server");
+  const field = value => ({ value, expectedHash: "0".repeat(64) });
+  for (const metadata of [undefined, null, [], {}, { reportId: field("other") }, { publicId: field("other") },
+    { issueUrl: field("javascript:alert(1)") }, { issueUrl: field("https://user:pass@example.test") },
+    { overallStatus: field("PASSED") }, { intro: { value: "No hash" } }, { environment: field(123) }, { intro: field("x".repeat(200001)) }]) {
+    assert.throws(() => validateBatch({ id: "invalid", kind: "metadata", metadata }, new Map()), { status: 400 });
+  }
+  for (const issueUrl of ["", "QA-123", "https://tasks.example.test/custom/123"]) {
+    assert.deepEqual(validateBatch({ id: "valid", kind: "metadata", metadata: { issueUrl: field(issueUrl) } }, new Map()), []);
+  }
+  assert.throws(() => validateBatch({ id: "bad-combined", kind: "checklist", format: "jira", content: "||Test||", metadata: { overallStatus: field("INVALID") } }, new Map()), { status: 400 });
+});

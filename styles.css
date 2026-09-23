@@ -265,6 +265,10 @@ button {
   background: #f5cd47;
 }
 
+.save-state.save-error .save-dot {
+  background: #e34949;
+}
+
 .header-report-actions,
 .header-integrations {
   display: flex;

@@ -35,6 +35,22 @@ function secretMatches(expected, actual) {
 }
 function validateBatch(input, files) {
   if (!input || !ID.test(input.id || "")) throw problem(400, "Нужен уникальный id пакета");
+  const metadata = input.metadata;
+  if (metadata !== undefined) {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || !Object.keys(metadata).length) throw problem(400, "metadata должен содержать изменяемые поля");
+    const limits = { issueUrl: 4096, environment: 4096, overallStatus: 40, intro: 200000 };
+    for (const [field, update] of Object.entries(metadata)) {
+      if (!Object.hasOwn(limits, field)) throw problem(400, "Неизвестное поле metadata");
+      if (!update || typeof update !== "object" || Array.isArray(update) || typeof update.value !== "string" || update.value.length > limits[field]) throw problem(400, "Некорректное значение metadata");
+      if (!/^[a-f0-9]{64}$/.test(update.expectedHash || "")) throw problem(400, "expectedHash должен быть взят из контекста поля");
+      if (field === "overallStatus" && !["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"].includes(update.value)) throw problem(400, "Неизвестный итоговый статус");
+      if (field === "issueUrl" && update.value.trim() && !/^[a-z][a-z0-9_]*-\d+$/i.test(update.value.trim())) {
+        let url;
+        try { url = new URL(update.value); } catch { throw problem(400, "Укажите HTTP(S)-ссылку или ключ задачи"); }
+        if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw problem(400, "Укажите HTTP(S)-ссылку без логина и пароля");
+      }
+    }
+  }
   const ids = new Set();
   if (input.kind === "checklist") {
     if (input.format !== "jira" || typeof input.content !== "string" || !input.content.trim()) throw problem(400, "Нужна Jira-разметка чек-листа");
@@ -55,7 +71,9 @@ function validateBatch(input, files) {
       if (!Array.isArray(cell.attachmentIds || [])) throw problem(400, "attachmentIds должен быть массивом");
       for (const id of cell.attachmentIds || []) ids.add(id);
     }
-  } else throw problem(400, "kind: cells или checklist");
+  } else if (input.kind === "metadata") {
+    if (!metadata) throw problem(400, "Укажите metadata");
+  } else throw problem(400, "kind: cells, checklist или metadata");
   for (const id of ids) if (!ID.test(id) || !files.has(id) || files.get(id).batchId) throw problem(409, "Вложение отсутствует или уже использовано");
   return [...ids];
 }

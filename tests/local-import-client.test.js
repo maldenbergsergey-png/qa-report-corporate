@@ -139,3 +139,67 @@ for (const action of ["stop", "switch"]) test(`${action} during preparation prev
   assert.doesNotMatch(JSON.stringify(r.ctx.draft), /Не применять/);
   assert.equal(r.acknowledgements[0].status, "rejected");
 });
+
+function metadataUpdates(ctx, fields) {
+  return Promise.all(Object.entries(fields).map(async ([field, value]) => [field, {
+    value, expectedHash: await ctx.QaLocalImport.cellHash(ctx.draft[field]),
+  }])).then(Object.fromEntries);
+}
+
+test("metadata updates persist the task, environment, outcome and safe introduction without replacing rows", async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  const sections = JSON.stringify(r.ctx.draft.sections);
+  const metadata = await metadataUpdates(r.ctx, { issueUrl: "https://tasks.example.test/browse/QA-123", environment: "https://stage.example.test", overallStatus: "НЕ ОК", intro: "Build 8\n<script>alert(1)</script>" });
+  await r.receive({ id: "metadata", kind: "metadata", metadata, files: [] });
+  assert.equal(r.acknowledgements[0].status, "saved");
+  assert.equal(r.ctx.draft.issueUrl, metadata.issueUrl.value);
+  assert.equal(r.ctx.draft.environment, metadata.environment.value);
+  assert.equal(r.ctx.draft.overallStatus, "НЕ ОК");
+  assert.equal(r.ctx.draft.intro, "<p>Build 8<br>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
+  assert.equal(JSON.stringify(r.ctx.draft.sections), sections);
+  assert.equal(r.snapshots.at(-1).document.overallStatus, "НЕ ОК");
+  assert.equal(r.acknowledgements[0].context.metadata.overallStatus.text, "НЕ ОК");
+  assert.notEqual(r.acknowledgements[0].context.metadata.overallStatus.hash, metadata.overallStatus.expectedHash);
+  await r.receive({ id: "metadata", kind: "metadata", metadata, files: [] });
+  assert.equal(r.snapshots.length, 2, "retry is deduplicated");
+});
+
+for (const kind of ["metadata", "cells", "checklist"]) test(`${kind}: a metadata conflict rejects the whole batch and preserves a manual edit`, async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  const metadata = await metadataUpdates(r.ctx, { overallStatus: "НЕ ОК", intro: "Agent intro" });
+  r.ctx.draft.intro = "<p>User edited this</p>";
+  const before = JSON.stringify(r.ctx.draft);
+  const section = r.ctx.draft.sections[0], row = section.rows[0], columnId = section.columns[0].id;
+  const updates = [{ sectionId: section.id, rowId: row.id, columnId, status: "НЕ ОК", expectedHash: await r.ctx.QaLocalImport.cellHash(row.cells[columnId], row.status) }];
+  await r.receive({ ...checklist("conflict", "Replacement"), kind, metadata, updates });
+  assert.equal(r.acknowledgements[0].status, "rejected");
+  assert.match(r.acknowledgements[0].error, /intro.*изменилось/);
+  assert.equal(JSON.stringify(r.ctx.draft), before);
+  assert.equal(r.snapshots.length, 1);
+});
+
+test("checklist and metadata are saved atomically with explicit fields taking precedence", async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  const metadata = await metadataUpdates(r.ctx, { overallStatus: "НЕ ОК", intro: "Build 8" });
+  await r.receive({ ...checklist("combined", "New result"), metadata });
+  assert.equal(r.acknowledgements[0].status, "saved");
+  assert.equal(r.ctx.draft.overallStatus, "НЕ ОК");
+  assert.equal(r.ctx.draft.intro, "<p>Build 8</p>");
+  assert.match(JSON.stringify(r.ctx.draft.sections), /New result/);
+});
+
+test("editing report fields postpones agent updates until the user leaves the field", async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  const metadata = await metadataUpdates(r.ctx, { environment: "PROD" });
+  const batch = { id: "focused", kind: "metadata", metadata, files: [] };
+  r.ctx.document.activeElement = { matches: () => true };
+  await r.receive(batch);
+  assert.equal(r.acknowledgements.length, 0);
+  r.ctx.document.activeElement = null;
+  await r.receive(batch);
+  assert.equal(r.acknowledgements[0].status, "saved");
+});

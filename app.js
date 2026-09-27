@@ -5287,24 +5287,70 @@ function showAttachmentLimits(limits) {
   elements.imageButton.title = `Добавить вложение. ${hint.textContent}`;
 }
 
-async function refreshAttachmentLimits() {
-  // Fetch per target instead of retaining another Jira's limit after a report switch.
-  let limits = { ...window.QaReportAttachmentLimits.defaults };
+// Local insertion uses an advisory cache; publication still fetches fresh limits.
+let localAttachmentLimitCache = null;
+let localAppAttachmentLimits = { ...window.QaReportAttachmentLimits.defaults };
+
+function attachmentLimitContext() {
+  const issueUrl = elements.issueUrl.value.trim();
+  let request = null;
   try {
-    const response = await fetch("/api/health", { cache: "no-store", signal: AbortSignal.timeout(8000) });
-    if (response.ok) limits = { ...limits, ...(await response.json()).attachmentLimits };
-  } catch { /* Offline editing still uses the documented local limit. */ }
-  try {
-    const issue = parseIssueUrl(elements.issueUrl.value);
+    const issue = parseIssueUrl(issueUrl);
     const settings = {};
-    const result = await jiraRequest("/api/jira/attachment-manifest", {
-      ...settings, ...issue, limitsOnly: true,
-    }, { signal: AbortSignal.timeout(10000) });
-    limits = { ...limits, ...result.attachmentLimits };
-  } catch { /* Missing connection/metadata must not prevent local editing. */ }
-  attachmentLimits = limits;
-  showAttachmentLimits(limits);
-  return limits;
+    request = { ...settings, ...issue, limitsOnly: true };
+  } catch { /* A local report does not need a Jira connection. */ }
+  return {
+    key: JSON.stringify([draft.reportId, issueUrl, request?.baseUrl, request?.transport]),
+    request,
+  };
+}
+
+function getLocalAttachmentLimits() {
+  const context = attachmentLimitContext();
+  if (localAttachmentLimitCache?.key !== context.key) {
+    localAttachmentLimitCache = {
+      key: context.key, limits: { ...localAppAttachmentLimits }, checkedAt: 0, pending: null,
+    };
+    showAttachmentLimits(localAttachmentLimitCache.limits);
+  }
+  const entry = localAttachmentLimitCache;
+  if (!entry.pending && (!entry.checkedAt || Date.now() - entry.checkedAt >= 60000)) {
+    entry.pending = refreshAttachmentLimits(context, entry)
+      .catch(() => {})
+      .finally(() => { entry.pending = null; });
+  }
+  return { ...entry.limits };
+}
+
+async function refreshAttachmentLimits(context, entry) {
+  const isCurrent = () => localAttachmentLimitCache === entry && attachmentLimitContext().key === context.key;
+  await Promise.all([
+    (async () => {
+      try {
+        const response = await fetch("/api/health", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+        if (!response.ok) return;
+        const limits = (await response.json()).attachmentLimits || {};
+        // Only app-wide limits can carry over to a different report or Jira.
+        for (const key of ["appMaxFileBytes", "requestMaxBytes"]) {
+          if (Number.isSafeInteger(limits[key]) && limits[key] >= 0) {
+            localAppAttachmentLimits[key] = limits[key];
+            entry.limits[key] = limits[key];
+          }
+        }
+      } catch { /* Offline editing retains the last known local limits. */ }
+    })(),
+    (async () => {
+      if (!context.request) return;
+      try {
+        const result = await jiraRequest("/api/jira/attachment-manifest", context.request,
+          { signal: AbortSignal.timeout(10000) });
+        entry.limits = { ...entry.limits, ...result.attachmentLimits };
+      } catch { /* Unknown Jira limits are checked again before publication. */ }
+    })(),
+  ]);
+  entry.checkedAt = Date.now();
+  if (isCurrent()) showAttachmentLimits(entry.limits);
+  return entry.limits;
 }
 
 async function insertImages(files) {
@@ -5316,7 +5362,7 @@ async function insertImages(files) {
 async function insertImagesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
   const targetEditor = activeEditor;
-  const limits = await refreshAttachmentLimits();
+  const limits = getLocalAttachmentLimits();
   if (activeEditor !== targetEditor || !targetEditor.isConnected) {
     showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
     return;
@@ -5329,6 +5375,10 @@ async function insertImagesForPwa(files) {
       continue;
     }
     const dataUrl = await readFileAsDataUrl(file);
+    if (activeEditor !== targetEditor || !targetEditor.isConnected) {
+      showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
+      return;
+    }
     const attachmentId = crypto.randomUUID();
     insertHtmlAtCursor(
       `<figure class="cell-image" contenteditable="false" data-align="left"><img src="${dataUrl}" alt="" data-attachment-id="${attachmentId}" data-file-name="${escapeHtml(file.name)}" data-mime-type="${escapeHtml(file.type)}"></figure><p><br></p>`,
@@ -5384,7 +5434,7 @@ async function insertFiles(files) {
 async function insertFilesForPwa(files) {
   if (!activeEditor?.matches(".cell-editor, .intro-editor")) return;
   const targetEditor = activeEditor;
-  const limits = await refreshAttachmentLimits();
+  const limits = getLocalAttachmentLimits();
   if (activeEditor !== targetEditor || !targetEditor.isConnected) {
     showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
     return;
@@ -5398,6 +5448,10 @@ async function insertFilesForPwa(files) {
     }
     try {
       const dataUrl = await readFileAsDataUrl(file);
+      if (activeEditor !== targetEditor || !targetEditor.isConnected) {
+        showToast("Выбранная ячейка изменилась. Выберите файлы ещё раз.");
+        return;
+      }
       insertHtmlAtCursor(
         createFileCardHtml({
           id: crypto.randomUUID(),
@@ -5415,10 +5469,12 @@ async function insertFilesForPwa(files) {
 }
 
 async function insertAttachments(files) {
+  const targetEditor = activeEditor;
   const list = [...files];
   const images = list.filter(isImageLikeFile);
   const ordinaryFiles = list.filter((file) => !isImageLikeFile(file));
   if (images.length) await insertImages(images);
+  if (activeEditor !== targetEditor || !targetEditor?.isConnected) return;
   if (ordinaryFiles.length) await insertFiles(ordinaryFiles);
 }
 
@@ -6926,6 +6982,7 @@ function renderEnvironmentOptions(value = "") {
   }
 }
 
+elements.issueUrl.addEventListener("change", () => getLocalAttachmentLimits());
 elements.environment.addEventListener("change", () => renderEnvironmentOptions(elements.environment.value));
 elements.environment.addEventListener("focus", () => renderEnvironmentOptions());
 renderEnvironmentOptions();
@@ -7109,7 +7166,7 @@ elements.imageButton.addEventListener("pointerdown", () => {
 elements.imageButton.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  showAttachmentLimits(attachmentLimits);
+  showAttachmentLimits(getLocalAttachmentLimits());
   elements.imageInput.click();
 });
 elements.imageInput.addEventListener("change", async () => {
@@ -7221,6 +7278,7 @@ document.addEventListener("focusin", (event) => {
   if (event.target.matches(".intro-editor, .cell-editor")) {
     activeEditor = event.target;
     savedEditorRange = null;
+    getLocalAttachmentLimits();
   }
 });
 document.addEventListener("selectionchange", () => {
@@ -7811,6 +7869,7 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 render();
+getLocalAttachmentLimits();
 refreshObjectStorageUi();
 if (!routeChecklistPublicId()) updateChecklistUrl(draft.publicId);
 updateHistoryButtons();

@@ -1844,8 +1844,10 @@ async function checkServerDraftFreshness() {
   }
 }
 
-function scheduleSave() {
-  flushDraftFromDom();
+function scheduleSave({ collect = true } = {}) {
+  // Input handlers that already updated the current draft can skip the full scan.
+  // Structural operations keep the existing collection path.
+  if (collect) flushDraftFromDom();
   hasUnsavedLocalChanges = true;
   setSaveStatus("Сохранение…", { saving: true });
   clearTimeout(saveTimer);
@@ -2680,10 +2682,7 @@ function createRowElement(section, row, number) {
     editor.querySelectorAll("figcaption").forEach((caption) => caption.remove());
     row.cells[column.id] = editor.innerHTML;
     editor.addEventListener("input", () => {
-      row.cells[column.id] = cleanEditorHtml(editor);
-      // Saving normalizes draft objects; sync the live table before counting.
-      scheduleSave();
-      renderSummary();
+      updateCellFromEditor(section.id, row.id, column.id, editor);
     });
     td.append(editor);
     tr.append(td);
@@ -2764,6 +2763,17 @@ function createRowElement(section, row, number) {
     clearRowDragState();
   });
   return tr;
+}
+
+function updateCellFromEditor(sectionId, rowId, columnId, editor) {
+  // Autosave replaces draft objects. Resolve IDs instead of mutating a captured row.
+  const section = draft.sections.find((item) => item.id === sectionId);
+  const row = section?.rows.find((item) => item.id === rowId);
+  if (!row || !section.columns.some((column) => column.id === columnId)) return;
+  const hadContent = hasRowContent(row);
+  row.cells[columnId] = cleanEditorHtml(editor);
+  scheduleSave({ collect: false });
+  if (hadContent !== hasRowContent(row)) renderSummary();
 }
 
 function createStatusSelect(value) {
@@ -6923,16 +6933,18 @@ renderEnvironmentOptions();
 ["input", "change"].forEach((eventName) => {
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
     control.addEventListener(eventName, () => {
-      collectDocumentFields();
+      draft.issueUrl = elements.issueUrl.value;
+      draft.environment = elements.environment.value.trim() || "Не указано";
+      draft.overallStatus = elements.overallStatus.value;
       if (control === elements.overallStatus) setStatusClass(control, draft.overallStatus);
-      scheduleSave();
+      scheduleSave({ collect: false });
     });
   });
 });
 
 elements.introEditor.addEventListener("input", () => {
   draft.intro = cleanEditorHtml(elements.introEditor);
-  scheduleSave();
+  scheduleSave({ collect: false });
 });
 
 document.querySelectorAll("[data-command]").forEach((button) => {

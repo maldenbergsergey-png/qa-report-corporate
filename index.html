@@ -22,6 +22,8 @@
       <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
       <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></symbol>
+      <symbol id="icon-file-down" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M12 12v6m-3-3 3 3 3-3" /></symbol>
+      <symbol id="icon-sheet" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M3 9h18M3 15h18" /></symbol>
       <symbol id="icon-device" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></symbol>
       <symbol id="icon-import" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></symbol>
       <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></symbol>
@@ -180,27 +182,28 @@
           </div>
 
           <div class="header-dropdown">
-            <button class="header-dropdown-trigger" id="copyMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="copyMenu">
-              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
-              <span>Файл</span>
+            <button class="header-dropdown-trigger" id="copyMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="copyMenu" aria-label="Экспорт" title="Экспорт">
+              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
+              <span>Экспорт</span>
               <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
-            <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" hidden>
+            <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" aria-label="Экспорт" hidden>
               <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
-                <span>Сохранить полную копию .report</span>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-file-down"></use></svg>
+                <span>Сохранить копию (.report)</span>
               </button>
+              <div class="header-dropdown-divider" role="separator"></div>
               <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
-                <span>Скопировать HTML-разметку</span>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
+                <span>Копировать как HTML</span>
               </button>
               <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
-                <span>Скопировать Jira-разметку</span>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-copy"></use></svg>
+                <span>Копировать для Jira</span>
               </button>
               <button class="header-dropdown-item" id="exportXlsxButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
-                <span>Скачать Excel XLSX</span>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-sheet"></use></svg>
+                <span>Скачать Excel (.xlsx)</span>
               </button>
             </div>
           </div>
@@ -974,7 +977,7 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=28"></script>
+    <script src="/release-notes.js?v=29"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>

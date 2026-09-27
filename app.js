@@ -381,6 +381,8 @@ let historyCurrent = "";
 let historyTimer;
 let suppressHistory = false;
 let importSource = "markup";
+let selectedReportFile = null;
+let reportDragDepth = 0;
 let pendingImportedDraft = null;
 let preparedImport = null;
 let importWizard = null;
@@ -4404,27 +4406,85 @@ function closePreview() {
   syncBodyModalOverflow();
 }
 
-function openImport(source = "markup") {
-  if (importBusy) return;
+function selectImportSource(source) {
   importSource = source;
-  document.querySelectorAll(".import-source-tab").forEach(tab => tab.classList.toggle("active", tab.dataset.importSource === source));
+  document.querySelectorAll(".import-source-tab").forEach(tab => {
+    const active = tab.dataset.importSource === source;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  });
   elements.markupImportPane.hidden = source !== "markup";
   elements.commentImportPane.hidden = source !== "comment";
-  setImportBusy(false);
+  document.getElementById("reportImportPane").hidden = source !== "report";
   resetImportPreview();
+  reportDragDepth = 0;
+  document.getElementById("reportDropZone").classList.remove("is-dragover");
+  elements.importModal.querySelector(".import-body").scrollTop = 0;
+}
+
+function setSelectedReportFile(file, errorMessage = "") {
+  selectedReportFile = file;
+  document.getElementById("reportFileInput").value = "";
+  document.getElementById("selectedReportFile").hidden = !file;
+  const name = document.getElementById("selectedReportFileName");
+  name.textContent = file?.name || ""; name.title = file?.name || "";
+  document.getElementById("chooseReportFileButton").setAttribute("aria-label", file ? "Выбрать другой файл .report" : "Выбрать файл .report");
+  const error = document.getElementById("reportImportError");
+  error.textContent = errorMessage; error.hidden = !errorMessage;
+  setImportBusy(importBusy);
+}
+
+function selectReportFiles(files) {
+  if (importBusy || !files.length) return;
+  if (files.length !== 1) return setSelectedReportFile(null, "Выберите один файл формата .report");
+  const file = files[0];
+  if (!/\.report$/i.test(file.name)) return setSelectedReportFile(null, "Выберите файл формата .report");
+  setSelectedReportFile(file);
+}
+
+async function openSelectedReportFile() {
+  if (!selectedReportFile || importBusy) return;
+  const error = document.getElementById("reportImportError");
+  if (reportFileBusy || pwaPendingOperations || publishInProgress) {
+    error.textContent = "Дождитесь завершения текущей операции с отчётом."; error.hidden = false; return;
+  }
+  setImportBusy(true); reportFileBusy = true; pwaPendingOperations++;
+  error.hidden = true;
+  setImportProgress("Открываем отчёт…");
+  let message;
+  try {
+    message = await openReportFile(selectedReportFile, ({ completed, total }) => {
+      setImportProgress(total ? "Восстанавливаем вложения…" : "Восстанавливаем отчёт…", completed, total);
+    });
+  } catch (cause) {
+    error.textContent = cause.message || "Не удалось прочитать файл .report."; error.hidden = false;
+  } finally {
+    reportFileBusy = false; pwaPendingOperations--; setImportBusy(false);
+  }
+  if (message) {
+    closeImport(); showToast(message); elements.importButton.focus();
+  } else {
+    error.scrollIntoView({ block: "nearest" });
+    elements.applyImportButton.focus();
+  }
+}
+
+function openImport(source = "markup") {
+  if (importBusy) return;
+  setSelectedReportFile(null);
+  selectImportSource(source);
   elements.importMarkup.value = "";
   elements.commentImportUrl.value = "";
-  elements.importWarning.hidden = true;
-  elements.importSummary.hidden = true;
-  pendingImportedDraft = null;
   elements.importModal.hidden = false;
   syncBodyModalOverflow();
-  (importSource === "markup" ? elements.importMarkup : elements.commentImportUrl).focus();
+  (source === "report" ? document.getElementById("chooseReportFileButton") : source === "markup" ? elements.importMarkup : elements.commentImportUrl).focus();
 }
 
 function closeImport() {
   if (importBusy) return;
   elements.importModal.hidden = true;
+  setSelectedReportFile(null);
   syncBodyModalOverflow();
 }
 
@@ -6034,12 +6094,12 @@ function applyUploadedAttachments(uploaded) {
 
 function setImportBusy(busy) {
   importBusy = busy;
-  elements.applyImportButton.disabled = busy || Boolean(preparedImport && !importPlanSummary?.valid);
+  elements.applyImportButton.disabled = busy || (importSource === "report" ? !selectedReportFile : Boolean(preparedImport && !importPlanSummary?.valid));
   elements.applyImportButton.setAttribute("aria-busy", String(busy));
   elements.applyImportButton.querySelector(".button-spinner").hidden = !busy;
-  elements.applyImportButton.querySelector(".button-label").textContent = busy ? (preparedImport ? "Импортируем…" : "Проверяем…")
+  elements.applyImportButton.querySelector(".button-label").textContent = importSource === "report" ? (busy ? "Открываем…" : "Открыть отчёт") : busy ? (preparedImport ? "Импортируем…" : "Проверяем…")
     : preparedImport ? `${importPlanSummary?.mode === "replace" ? "Заменить чек-лист" : `Добавить ${importPlanSummary?.count || 0} ${window.QaReportImportOptions.itemWord(importPlanSummary?.count || 0)}`}` : "Продолжить";
-  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, #importWithAttachments, #closeImportButton, #changeImportSource")) control.disabled = busy;
+  for (const control of elements.importModal.querySelectorAll(".import-source-tab, .import-pane input, .import-pane textarea, .import-pane button, #importWithAttachments, #closeImportButton, #changeImportSource")) control.disabled = busy;
   importWizard?.setBusy(busy);
   if (!busy) document.getElementById("importProgress").hidden = true;
 }
@@ -6066,13 +6126,13 @@ function setImportProgress(label, completed, total) {
 function resetImportPreview() {
   preparedImport = null; pendingImportedDraft = null; importWizard = null; importPlanSummary = null; importContext = null; pendingImportErrors = [];
   elements.importModal.querySelector(".modal-footer > span").classList.remove("import-footer-warning");
-  elements.importModal.querySelector(".modal-footer > span").textContent = "На следующем шаге выберите, куда добавить пункты, или замените чек-лист.";
+  elements.importModal.querySelector(".modal-footer > span").textContent = importSource === "report" ? "Выберите файл и нажмите «Открыть отчёт»." : "На следующем шаге выберите, куда добавить пункты, или замените чек-лист.";
   elements.importModal.classList.remove("has-import-preview");
   document.getElementById("importSourceSummary").hidden = true;
   document.getElementById("importTitle").textContent = "Импорт чек-листа";
   const configurator = document.getElementById("importConfigurator"); configurator.hidden = true; configurator.replaceChildren();
   document.getElementById("importPreviewMeta").hidden = true;
-  document.getElementById("importWithAttachments").closest("label").hidden = importSource === "markup";
+  document.getElementById("importWithAttachments").closest("label").hidden = importSource !== "comment";
   elements.importSummary.hidden = true; elements.importWarning.hidden = true;
   if (!importBusy) setImportBusy(false);
 }
@@ -6229,6 +6289,7 @@ function showImportResult(message, rowIds) {
 
 async function applyImport() {
   if (elements.applyImportButton.disabled) return;
+  if (importSource === "report") return openSelectedReportFile();
   if (!pendingImportedDraft && !preparedImport) return analyzeImport();
   const reportIdAtStart = draft.reportId;
   let applied = false;
@@ -6830,7 +6891,7 @@ async function exportReportFile() {
     link.href = url; link.download = `${issueKeyFromUrl(snapshot.issueUrl) || "report"}_${stamp}.report`;
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    return `Полная копия подготовлена: ${result.count} вложений. Сохраните скачанный файл .report — его можно открыть в другом браузере через меню «Файл».`;
+    return `Полная копия подготовлена: ${result.count} вложений. Сохраните скачанный файл .report — его можно открыть в другом браузере через «Импорт» → «Файл .report».`;
   });
 }
 function portableHistoryRecord(value, reason, existing = {}) {
@@ -6841,41 +6902,58 @@ function portableHistoryRecord(value, reason, existing = {}) {
     createdAt: existing.createdAt || now, updatedAt: now, lastOpenedAt: now,
     reason, historyComment: existing.historyComment || "", document: clone(value), schemaVersion: 3 };
 }
-async function openReportFile(file) {
+async function openReportFile(file, onProgress) {
   if (!file) return;
-  await runReportFileOperation("Открыть репорт из файла", async onProgress => {
-    const imported = await window.QaReportFile.unpack(file, { onProgress });
-    const next = normalizeDraft({ ...imported.document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
-      publicId: createPublicId(), revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
-    const db = await openDatabase();
-    clearTimeout(saveTimer); clearTimeout(historyTimer); flushDraftFromDom();
-    const before = clone(draft), beforeContent = serializeDraft();
-    // Save both documents atomically before changing the editor or localStorage.
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction(REPORT_STORE, "readwrite"), store = transaction.objectStore(REPORT_STORE);
-      const request = store.get(before.reportId);
-      request.onsuccess = () => {
-        try {
-          store.put(portableHistoryRecord(before, "before-file-import", request.result));
-          store.put(portableHistoryRecord(next, "file-import"));
-        } catch { transaction.abort(); }
-      };
-      transaction.oncomplete = resolve;
-      transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить копию в браузере. Возможно, недостаточно места. Текущий отчёт остаётся открытым; исходный файл .report сохранён у вас."));
-    });
-    flushDraftFromDom();
-    if (draft.reportId !== before.reportId || serializeDraft() !== beforeContent) {
-      throw new Error("Текущий отчёт изменился во время открытия. Импортированная копия сохранена в истории; текущий отчёт остаётся открытым.");
-    }
-    applyDraftLocally(next); broadcastDraftUpdate();
-    return `Открыта отдельная копия: ${imported.count} вложений. Предыдущий отчёт сохранён в истории. Новые правки сохраняются в браузере; для обновления резервного файла скачайте полную копию ещё раз.`;
+  const imported = await window.QaReportFile.unpack(file, { onProgress });
+  const next = normalizeDraft({ ...imported.document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
+    publicId: createPublicId(), revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
+  const db = await openDatabase();
+  clearTimeout(saveTimer); clearTimeout(historyTimer); flushDraftFromDom();
+  const before = clone(draft), beforeContent = serializeDraft();
+  // Save both documents atomically before changing the editor or localStorage.
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(REPORT_STORE, "readwrite"), store = transaction.objectStore(REPORT_STORE);
+    const request = store.get(before.reportId);
+    request.onsuccess = () => {
+      try {
+        store.put(portableHistoryRecord(before, "before-file-import", request.result));
+        store.put(portableHistoryRecord(next, "file-import"));
+      } catch { transaction.abort(); }
+    };
+    transaction.oncomplete = resolve;
+    transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить копию в браузере. Возможно, недостаточно места. Текущий отчёт остаётся открытым; исходный файл .report сохранён у вас."));
   });
+  flushDraftFromDom();
+  if (draft.reportId !== before.reportId || serializeDraft() !== beforeContent) {
+    throw new Error("Текущий отчёт изменился во время открытия. Импортированная копия сохранена в истории; текущий отчёт остаётся открытым.");
+  }
+  applyDraftLocally(next); broadcastDraftUpdate();
+  return `Открыта отдельная копия: ${imported.count} вложений. Предыдущий отчёт сохранён в истории. Новые правки сохраняются в браузере; для обновления резервного файла скачайте полную копию ещё раз.`;
 }
 document.getElementById("exportReportButton").addEventListener("click", exportReportFile);
-document.getElementById("openReportButton").addEventListener("click", () => document.getElementById("reportFileInput").click());
-document.getElementById("reportFileInput").addEventListener("change", event => {
-  const file = event.target.files[0]; event.target.value = ""; openReportFile(file);
+document.getElementById("reportFileInput").addEventListener("change", event => selectReportFiles(event.target.files));
+document.getElementById("chooseReportFileButton").addEventListener("click", () => {
+  if (!importBusy) document.getElementById("reportFileInput").click();
 });
+document.getElementById("removeReportFileButton").addEventListener("click", () => {
+  if (importBusy) return;
+  setSelectedReportFile(null); document.getElementById("chooseReportFileButton").focus();
+});
+const reportDropZone = document.getElementById("reportDropZone");
+reportDropZone.addEventListener("click", event => {
+  if (!importBusy && event.target === reportDropZone) document.getElementById("reportFileInput").click();
+});
+for (const type of ["dragenter", "dragover", "dragleave", "drop"]) {
+  reportDropZone.addEventListener(type, event => {
+    event.preventDefault(); event.stopPropagation();
+    if (importBusy) return;
+    if (type === "dragenter") reportDragDepth++;
+    if (type === "dragover" && event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    if (type === "dragleave") reportDragDepth = Math.max(0, reportDragDepth - 1);
+    if (type === "drop") { reportDragDepth = 0; selectReportFiles(event.dataTransfer?.files || []); }
+    reportDropZone.classList.toggle("is-dragover", type === "dragover" || reportDragDepth > 0);
+  });
+}
 document.getElementById("closeReportFileButton").addEventListener("click", closeReportFileDialog);
 document.getElementById("reportFileModal").addEventListener("keydown", event => {
   if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeReportFileDialog(); }
@@ -7687,17 +7765,16 @@ document.getElementById("changeImportSource").addEventListener("click", () => {
   resetImportPreview();
   (importSource === "comment" ? elements.commentImportUrl : elements.importMarkup).focus();
 });
-document.querySelectorAll(".import-source-tab").forEach((tab) => {
+document.querySelectorAll(".import-source-tab").forEach((tab, index, tabs) => {
   tab.addEventListener("click", () => {
-    importSource = tab.dataset.importSource;
-    resetImportPreview();
-    document.querySelectorAll(".import-source-tab").forEach((item) => item.classList.remove("active"));
-    tab.classList.add("active");
-    elements.markupImportPane.hidden = importSource !== "markup";
-    elements.commentImportPane.hidden = importSource !== "comment";
-    elements.importWarning.hidden = true;
-    elements.importSummary.hidden = true;
-    pendingImportedDraft = null;
+    if (!importBusy) selectImportSource(tab.dataset.importSource);
+  });
+  tab.addEventListener("keydown", event => {
+    if (importBusy || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+      : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].click(); tabs[next].focus();
   });
 });
 elements.undoButton.addEventListener("click", undo);

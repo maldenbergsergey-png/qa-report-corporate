@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=105" />
+    <link rel="stylesheet" href="/styles.css?v=106" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -189,10 +189,6 @@
               <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
                 <span>Сохранить полную копию .report</span>
-              </button>
-              <button class="header-dropdown-item" id="openReportButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
-                <span>Открыть из файла .report</span>
               </button>
               <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
@@ -416,7 +412,6 @@
       <svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg>
     </button>
 
-    <input id="reportFileInput" type="file" accept=".report" hidden />
     <div class="modal-backdrop" id="reportFileModal" hidden>
       <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="reportFileTitle">
         <header class="modal-header"><h2 id="reportFileTitle">Полная копия репорта</h2></header>
@@ -555,12 +550,13 @@
           </div>
           <button class="icon-button" id="closeImportButton" type="button" aria-label="Закрыть импорт">×</button>
         </header>
+        <div class="import-source-tabs" role="tablist" aria-label="Способ импорта">
+            <button class="import-source-tab active" data-import-source="markup" id="importSource-markup" role="tab" aria-controls="markupImportPane" aria-selected="true" tabindex="0" type="button">Разметка</button>
+            <button class="import-source-tab" data-import-source="comment" id="importSource-comment" role="tab" aria-controls="commentImportPane" aria-selected="false" tabindex="-1" type="button">Комментарий Jira</button>
+            <button class="import-source-tab" data-import-source="report" id="importSource-report" role="tab" aria-controls="reportImportPane" aria-selected="false" tabindex="-1" type="button">Файл .report</button>
+        </div>
         <div class="import-body">
-          <div class="import-source-tabs">
-            <button class="import-source-tab active" data-import-source="markup" type="button">Разметка</button>
-            <button class="import-source-tab" data-import-source="comment" type="button">Комментарий Jira</button>
-          </div>
-          <div id="markupImportPane" class="import-pane">
+          <div id="markupImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-markup">
             <p>
               Вставьте чек-лист или отдельные строки без заголовков в формате Jira Wiki Markup.
               Таблицы, разделы, статусы и форматирование превратятся в редактируемый чек-лист.
@@ -572,7 +568,7 @@
               placeholder="||Номер||Проверка||ФР||Статус||Комментарий||&#10;|1.|Проверка...|Результат...|{color:#14892c}*OK*{color}| |"
             ></textarea>
           </div>
-          <div id="commentImportPane" class="import-pane" hidden>
+          <div id="commentImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-comment" hidden>
             <label class="field">
               <span>Ссылка на комментарий</span>
               <input id="commentImportUrl" type="url" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
@@ -580,6 +576,25 @@
             <p>
               Вставьте ссылку на комментарий Jira. На следующем шаге выберите пункты, содержимое столбцов и вложения.
             </p>
+          </div>
+          <div id="reportImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-report" hidden>
+            <p>Откройте ранее сохранённый файл QA Report. Текущий отчёт будет заменён данными из файла и сохранён в истории.</p>
+            <div id="reportDropZone" class="report-drop-zone">
+              <button id="chooseReportFileButton" class="report-file-picker" type="button">
+                <svg class="ui-icon report-upload-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
+                <strong>Перетащите файл .report сюда</strong>
+                <span>или выберите его на компьютере</span>
+                <span class="button button-secondary">Выбрать файл</span>
+                <small>Формат файла: .report</small>
+              </button>
+              <div id="selectedReportFile" class="report-selected-file" hidden>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
+                <span><strong id="selectedReportFileName"></strong><small>Файл выбран. Нажмите «Открыть отчёт».</small></span>
+                <button id="removeReportFileButton" class="icon-button" type="button" aria-label="Убрать выбранный файл">×</button>
+              </div>
+            </div>
+            <input id="reportFileInput" type="file" accept=".report" hidden />
+            <p id="reportImportError" class="import-warning" role="alert" hidden></p>
           </div>
           <div id="importSourceSummary" class="import-source-summary" hidden><span class="import-source-copy"><span id="importSourceTitle"></span><span id="importPreviewMeta" class="import-preview-meta" role="status" hidden></span></span><button type="button" id="changeImportSource" class="text-button">Изменить</button></div>
           <label class="local-import-option">
@@ -959,14 +974,14 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=27"></script>
+    <script src="/release-notes.js?v=28"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
     <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=109"></script>
+    <script src="/app.js?v=110"></script>
     <script src="/local-import-client.js?v=4"></script>
   </body>
 </html>

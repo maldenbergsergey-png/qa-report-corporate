@@ -5369,3 +5369,171 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   #importModal .import-source-tab { padding-inline: 2px; font-size: 11px; }
   #importModal #importSource-comment { flex-grow: 1.35; }
 }
+
+/* Compact header: one visual language across all themes. */
+.topbar {
+  height: 72px;
+  gap: 14px;
+  padding: 0 24px;
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+}
+.topbar .header-brand-group { gap: 12px; }
+.topbar .header-report-actions { justify-content: center; gap: 12px; overflow: visible; }
+.topbar .header-action-group { gap: 8px; }
+.topbar .header-action-group + .header-action-group { margin-left: 0; padding-left: 12px; }
+.topbar .header-integrations { gap: 10px; }
+.topbar .header-action,
+.topbar .header-icon-button,
+.topbar .header-dropdown-trigger {
+  height: 42px; min-height: 42px; padding: 0 13px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); gap: 9px;
+  font-size: 13px; font-weight: 600;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.topbar .header-action { width: auto; }
+.topbar .header-action > span, .topbar .header-dropdown-trigger > span { display: inline; }
+.topbar .header-icon-button { width: 42px; min-width: 42px; padding: 0; }
+.topbar .header-action:hover:not(:disabled),
+.topbar .header-icon-button:hover:not(:disabled),
+.topbar .header-dropdown-trigger:hover,
+.topbar .header-dropdown.open .header-dropdown-trigger {
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+}
+.topbar button:active:not(:disabled) { transform: translateY(1px); }
+.topbar button:focus-visible, .save-state:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.topbar .header-action:disabled, .topbar .header-icon-button:disabled { opacity: .4; }
+.topbar #reportMenuButton { width: auto; min-width: 0; flex-shrink: 0; padding: 0; border-color: transparent; background: transparent; gap: 9px; }
+.topbar #reportMenuButton:hover, .topbar .report-switcher.open #reportMenuButton { background: var(--line-soft); }
+.topbar .brand-mark { width: 60px; height: 38px; }
+.topbar .brand strong { font-size: 20px; font-weight: 700; letter-spacing: -.04em; color: var(--ink); }
+.topbar #reportMenuButton .chevron-icon { display: block; margin-right: 5px; }
+.topbar .save-state { position: relative; display: flex; justify-content: center; min-width: 20px; height: 32px; }
+.topbar .save-dot { width: 12px; height: 12px; background: #15b889; box-shadow: 0 0 0 3px color-mix(in srgb, #15b889 10%, transparent); }
+.topbar .save-state.saving .save-dot { background: #8995b6; box-shadow: none; }
+.topbar .save-state.save-dirty .save-dot { background: #ffba33; box-shadow: none; }
+.topbar .save-state.save-error .save-dot { background: #f04452; box-shadow: none; }
+.topbar .save-state > span:last-child {
+  position: absolute; top: calc(100% + 9px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 260px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+  font-size: 12px; font-weight: 500; pointer-events: none;
+  opacity: 0; visibility: hidden;
+}
+.topbar .save-state:hover > span:last-child, .topbar .save-state:focus-visible > span:last-child { opacity: 1; visibility: visible; }
+.topbar #localImportButton {
+  display: inline-flex; flex: 0 0 auto; width: auto; min-width: 86px; height: 42px;
+  padding: 0 12px; gap: 8px; color: var(--ink); border-color: var(--line);
+  background: var(--surface); animation: none; box-shadow: none;
+}
+.topbar #localImportButton .ai-receiver-icon { width: 23px; height: 23px; filter: none; animation: none; }
+.topbar #localImportButton .local-import-indicator {
+  position: static; display: block; width: 9px; height: 9px; flex: 0 0 9px;
+  border-radius: 50%; background: #98a3bf; padding: 0;
+}
+.topbar #localImportButton.local-import-active .local-import-indicator { background: #15b889; }
+.topbar #localImportButton:hover { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); }
+.topbar .header-dropdown-menu { min-width: 265px; padding: 10px; border-radius: 12px; }
+.topbar .report-switcher .header-dropdown-menu { min-width: 170px; padding: 6px; }
+.topbar .current-app { justify-content: space-between; }
+.topbar .current-app .ui-icon { color: var(--primary); }
+.header-menu-title { padding: 4px 10px 10px; color: var(--ink); font-size: 18px; font-weight: 700; }
+.header-menu-label { padding: 8px 10px 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.topbar .header-dropdown-item { min-height: 42px; gap: 14px; font-weight: 500; }
+.topbar .header-dropdown-item:hover, .topbar .header-dropdown-item:focus-visible { background: color-mix(in srgb, var(--primary) 9%, var(--surface)); }
+.topbar .header-dropdown-divider { margin: 7px 8px; }
+.header-update { position: relative; padding-left: 12px; border-left: 1px solid var(--line); }
+.header-update[hidden] { display: none; }
+.pwa-update-dot, .whats-new-dot { width: 8px; height: 8px; top: -3px; right: -3px; background: #f04452; box-shadow: 0 0 0 3px var(--surface); }
+.header-update-popover {
+  display: none; position: absolute; z-index: 160; top: 100%; right: -8px;
+  width: 260px; padding: 18px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+  font-size: 13px; line-height: 1.5;
+}
+.header-update:hover .header-update-popover, .header-update:focus-within .header-update-popover { display: block; }
+.header-update-popover strong { font-size: 14px; }
+.header-update-popover p { margin: 8px 0 14px; color: var(--muted); }
+.settings-section .theme-selector { display: block; }
+.settings-section .theme-toggle { display: none; }
+.settings-section .theme-menu { display: grid; position: static; width: 100%; box-shadow: none; gap: 8px; padding: 8px; }
+.settings-section .theme-menu-item { min-height: 48px; }
+.settings-section .agent-setup-body { padding: 0; overflow: visible; max-height: none; }
+.settings-section .agent-brand { margin-bottom: 16px; }
+@media (max-width: 1500px) {
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+}
+@media (max-width: 1250px) {
+  .topbar { gap: 10px; padding: 0 16px; }
+  .topbar .header-report-actions, .topbar .header-integrations { gap: 7px; }
+  .topbar .header-action-group { gap: 5px; }
+  .topbar .header-action-group + .header-action-group { padding-left: 7px; }
+  .topbar .header-action { padding: 0 10px; }
+}
+@media (min-width: 901px) and (max-width: 1320px) {
+  .topbar { height: 64px; }
+  .topbar .header-report-actions .header-action { width: 38px; min-width: 38px; padding: 0; }
+  .topbar .header-report-actions .header-action > span { display: none; }
+  .topbar .header-icon-button { width: 38px; min-width: 38px; }
+  .topbar .header-report-actions #historyButton { display: inline-flex; }
+  .topbar #copyMenuButton { width: auto; min-width: auto; }
+}
+@media (max-width: 900px) {
+  .topbar { height: 112px; padding: 10px 12px; gap: 8px; grid-template-columns: auto 1fr; grid-template-rows: 42px 42px; }
+  .topbar .header-brand-group { gap: 5px; }
+  .topbar .brand-mark { width: 42px; height: 32px; }
+  .topbar .brand strong { font-size: 17px; }
+  .topbar .header-integrations { gap: 5px; }
+  .topbar .header-integrations .header-icon-button { width: 34px; min-width: 34px; height: 38px; min-height: 38px; }
+  .topbar .header-report-actions { grid-row: 2; grid-column: 1 / -1; justify-content: space-between; overflow: visible; }
+  .topbar .header-report-actions #historyButton { display: inline-flex; }
+  .topbar .header-report-actions .header-action { width: auto; min-width: 36px; padding: 0 9px; }
+  .topbar .header-report-actions .header-action > span { display: none; }
+  .topbar .header-report-actions #clearButton > span { display: inline; }
+  .topbar .header-action-group { gap: 5px; }
+  .topbar .header-action-group + .header-action-group { padding-left: 7px; }
+  .topbar #localImportButton { min-width: 34px; padding: 0 5px; gap: 4px; }
+  .topbar #localImportButton .ai-label { display: none; }
+  .topbar #localImportButton .ai-receiver-icon { width: 20px; height: 20px; }
+  .topbar #localImportButton .local-import-indicator { width: 6px; height: 6px; flex-basis: 6px; }
+  .topbar #copyMenuButton { width: 34px; min-width: 34px; height: 38px; min-height: 38px; padding: 0; }
+  .topbar #copyMenuButton > span, .topbar #copyMenuButton .chevron-icon { display: none; }
+  .topbar .header-dropdown-menu { position: fixed; top: 58px; right: 12px; left: auto; max-width: calc(100vw - 24px); max-height: calc(100dvh - 76px); overflow-y: auto; }
+  .topbar .report-switcher .header-dropdown-menu { left: 12px; right: auto; }
+  .header-update { padding-left: 0; border: 0; }
+  .header-update-popover { position: fixed; top: 58px; right: 12px; }
+  .editor-toolbar, .app-shell.focus-mode .editor-toolbar { top: 112px; }
+  .cloud-conflict-popover { top: 124px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar button { transition: none; }
+}
+
+@media (min-width: 901px) and (max-width: 1180px) { .topbar { height: 64px; } }
+
+@media (max-width: 900px) {
+  .topbar .header-report-actions .header-icon-button { width: 36px; min-width: 36px; }
+  .topbar .save-state > span:last-child { left: 0; transform: none; max-width: calc(100vw - 180px); white-space: normal; }
+}
+@media (max-width: 380px) {
+  .topbar .brand strong { display: none; }
+  .topbar .header-report-actions #clearButton > span { display: none; }
+}
+
+@media (max-width: 900px) {
+  .topbar:has(#installAppButton:not([hidden])):has(.header-update:not([hidden])) .brand strong { display: none; }
+}
+@media (max-width: 380px) {
+  .topbar { padding-inline: 8px; }
+  .topbar .header-brand-group { gap: 2px; }
+  .topbar .header-integrations { gap: 3px; }
+  .topbar .header-integrations .header-icon-button, .topbar #copyMenuButton { width: 30px; min-width: 30px; }
+  .topbar #localImportButton { width: 34px; min-width: 34px; padding: 3px; gap: 2px; }
+  .topbar #localImportButton .ai-receiver-icon { width: 18px; height: 18px; }
+  .topbar .header-report-actions { gap: 4px; }
+  .topbar .header-action-group { gap: 4px; }
+  .topbar .header-action-group + .header-action-group { padding-left: 5px; }
+  .topbar .header-report-actions .header-action, .topbar .header-report-actions .header-icon-button { width: 34px; min-width: 34px; padding: 0; }
+}

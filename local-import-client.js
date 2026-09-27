@@ -58,7 +58,7 @@
     start.textContent = starting ? "Включаем…" : active ? "Приём включён" : "Включить приём";
     panel.dataset.state = active ? "on" : "off";
     trigger.classList.toggle("local-import-active", active);
-    indicator.textContent = active ? "ON" : "OFF";
+    indicator.dataset.state = active ? "on" : "off";
     const label = `Приём результатов от ИИ ${active ? "включён" : "выключен"}`;
     trigger.title = label; trigger.setAttribute("aria-label", label);
   }

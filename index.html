@@ -8,13 +8,30 @@
     <title>QA Report — редактор чек-листов</title>
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
-    <script src="/pwa.js?v=3" defer></script>
+    <script src="/pwa.js?v=4" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=110" />
+    <link rel="stylesheet" href="/styles.css?v=116" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
       <!-- Feather icons: check and x, matching the existing outline icon set. -->
+      <!-- Header icons: Lucide, ISC license in LICENSE-icons.txt. -->
+      <symbol id="icon-header-file" viewBox="0 0 24 24">
+  <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+  <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+      </symbol>
+      <symbol id="icon-header-file-text" viewBox="0 0 24 24">
+  <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+  <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+  <path d="M10 9H8" />
+  <path d="M16 13H8" />
+  <path d="M16 17H8" />
+      </symbol>
+      <symbol id="icon-header-share" viewBox="0 0 24 24">
+  <path d="M12 2v13" />
+  <path d="m16 6-4-4-4 4" />
+  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      </symbol>
       <symbol id="icon-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
       <symbol id="icon-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></symbol>
       <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
@@ -32,18 +49,7 @@
       <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></symbol>
       <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
-      <!-- Jira logomark: https://atlassian.design/foundations/logos -->
-      <symbol id="icon-jira" viewBox="0 0 48 48">
-        <path d="M0 12C0 5.37258 5.37258 0 12 0H36C42.6274 0 48 5.37258 48 12V36C48 42.6274 42.6274 48 36 48H12C5.37258 48 0 42.6274 0 36V12Z" fill="#1868DB"/>
-        <g clip-path="url(#jira-logo-clip)">
-        <path d="M17.9475 31.0469H15.2429C11.1638 31.0469 8.23755 28.5484 8.23755 24.8899H22.7804C23.5341 24.8899 24.0218 25.4252 24.0218 26.1837V40.8178C20.3861 40.8178 17.9475 37.8731 17.9475 33.7684V31.0469ZM25.1303 23.7745H22.4257C18.3466 23.7745 15.4203 21.3206 15.4203 17.6621H29.9631C30.7168 17.6621 31.2489 18.1528 31.2489 18.9113V33.5454C27.6132 33.5454 25.1303 30.6007 25.1303 26.496V23.7745ZM32.3573 16.5467H29.6527C25.5736 16.5467 22.6473 14.0482 22.6473 10.3896H37.1902C37.9439 10.3896 38.4316 10.925 38.4316 11.6389V26.273C34.7959 26.273 32.3573 23.3283 32.3573 19.2236V16.5467Z" fill="white"/>
-        </g>
-        <defs>
-        <clipPath id="jira-logo-clip">
-        <rect width="30.1941" height="30.4281" fill="white" transform="translate(8.23755 10.3901)"/>
-        </clipPath>
-        </defs>
-      </symbol>
+      <symbol id="icon-jira" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc. --><path fill="#2684ff" d="M490 241.7C417.1 169 320.6 71.8 248.5 0 83 164.9 6 241.7 6 241.7c-7.9 7.9-7.9 20.7 0 28.7C138.8 402.7 67.8 331.9 248.5 512c379.4-378 15.7-16.7 241.5-241.7 8-7.9 8-20.7 0-28.6zm-241.5 90l-76-75.7 76-75.7 76 75.7-76 75.7z"/></symbol>
       <symbol id="icon-ticket" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2Z" /><path d="M9 9h6M9 13h4" /></symbol>
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
       <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></symbol>
@@ -82,49 +88,33 @@
     <div class="app-shell">
       <header class="topbar">
         <div class="header-brand-group">
-          <a class="brand" href="#" aria-label="QA Report">
-            <span class="brand-mark" aria-hidden="true"></span>
-            <span class="brand-copy">
-              <strong>Report</strong>
-              <small>редактор чек-листов</small>
-            </span>
-          </a>
-          <div class="save-state" id="saveState">
-            <span class="save-dot"></span>
-            <span>Сохранено</span>
-          </div>
-          <div class="theme-selector">
-            <button class="header-icon-button theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="Выберите тему" aria-label="Выберите тему">
-              <svg class="ui-icon theme-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+          <div class="header-dropdown report-switcher">
+            <button class="brand header-dropdown-trigger" id="reportMenuButton" type="button" aria-label="Выбрать приложение" aria-haspopup="menu" aria-expanded="false" aria-controls="reportMenu">
+              <span class="brand-mark" aria-hidden="true"></span><strong>Report</strong>
+              <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
-            <div class="theme-menu" id="themeMenu" role="menu" hidden>
-              <button class="theme-menu-item" data-theme="light" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-sun"></use></svg>
-                <span>Светлая</span>
-              </button>
-              <button class="theme-menu-item" data-theme="graphite" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg>
-                <span>Графитовая</span>
-              </button>
-              <button class="theme-menu-item" data-theme="dark" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
-                <span>Тёмная</span>
-              </button>
+            <div class="header-dropdown-menu" id="reportMenu" role="menu" aria-label="Приложения" hidden>
+              <button class="header-dropdown-item current-app" type="button" role="menuitemradio" aria-checked="true"><span>Report</span><svg class="ui-icon" aria-hidden="true"><use href="#icon-check"></use></svg></button>
+              <a class="header-dropdown-item" href="https://qa-capture.mlbrg.ru/" target="_blank" rel="noopener noreferrer" role="menuitem" aria-label="Capture — открыть в новой вкладке">Capture</a>
             </div>
           </div>
+          <div class="save-state" id="saveState" tabindex="0" role="status" aria-live="polite" aria-label="Сохранено">
+            <span class="save-dot" aria-hidden="true"></span>
+            <span>Сохранено</span>
+          </div>
+
         </div>
 
         <nav class="header-report-actions" aria-label="Действия с отчётом">
           <div class="header-action-group">
-            <button class="header-action" id="clearButton" type="button">
+            <button class="header-action" id="clearButton" type="button" title="Новый отчёт" aria-label="Новый отчёт">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
               <span>Новый</span>
             </button>
             <button class="header-action" id="importButton" type="button" title="Импорт чек-листа" aria-label="Импорт чек-листа" aria-haspopup="dialog" aria-controls="importModal">
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg>
-              <span>Импорт</span>
+              <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg><span>Импорт</span>
             </button>
-            <button class="header-action" id="historyButton" type="button">
+            <button class="header-action" id="historyButton" type="button" title="История" aria-label="История">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
               <span>История</span>
             </button>
@@ -138,13 +128,13 @@
             </button>
           </div>
           <div class="header-action-group">
-            <button class="header-action" id="focusModeButton" type="button">
+            <button class="header-action" id="focusModeButton" type="button" title="Фокус" aria-label="Фокус">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-focus"></use></svg>
               <span>Фокус</span>
             </button>
-            <button class="header-action" id="previewButton" type="button">
+            <button class="header-action" id="previewButton" type="button" title="Просмотр" aria-label="Просмотр">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-eye"></use></svg>
-              <span>Предпросмотр</span>
+              <span>Просмотр</span>
             </button>
           </div>
         </nav>
@@ -159,67 +149,59 @@
               <circle cx="15.5" cy="13.5" r=".75" />
               <path d="M9.5 17a3.5 3.5 0 0 0 5 0" />
             </svg>
-            <small class="local-import-indicator" id="localImportIndicator" aria-hidden="true">OFF</small>
+            <span class="ai-label">AI</span><span class="local-import-indicator" id="localImportIndicator" aria-hidden="true"></span>
           </button>
           <div class="header-dropdown">
-            <button class="header-dropdown-trigger" id="jiraMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="jiraMenu" aria-label="Jira" title="Jira">
-              <svg class="ui-icon dropdown-leading-icon jira-logo" aria-hidden="true"><use href="#icon-jira"></use></svg>
-              <span>Jira</span>
-              <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
-            </button>
-            <div class="header-dropdown-menu" id="jiraMenu" role="menu" hidden>
-              <button class="header-dropdown-item" id="importCommentButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-import"></use></svg>
-                <span>Отчёт из комментария</span>
-              </button>
-              <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
-                <svg class="ui-icon primary-action-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
-                <span class="primary-action-label">Отправить в Jira</span>
-              </button>
-              <div class="header-dropdown-divider" role="separator"></div>
-              <button class="header-dropdown-item" id="openJiraConnectionsButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
-                <span>Настройки подключения</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="header-dropdown">
             <button class="header-dropdown-trigger" id="copyMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="copyMenu" aria-label="Экспорт" title="Экспорт">
-              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
+              <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-header-share"></use></svg>
               <span>Экспорт</span>
               <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
             <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" aria-label="Экспорт" hidden>
-              <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-file-down"></use></svg>
-                <span>Сохранить копию (.report)</span>
-              </button>
-              <div class="header-dropdown-divider" role="separator"></div>
-              <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
-                <span>Копировать как HTML</span>
+              <div class="header-menu-title">Экспорт</div>
+              <div class="header-menu-label">Jira</div>
+              <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
+                <svg class="ui-icon jira-logo primary-action-icon" aria-hidden="true"><use href="#icon-jira"></use></svg>
+                <span class="primary-action-label">Отправить в Jira</span>
               </button>
               <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-copy"></use></svg>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
                 <span>Копировать для Jira</span>
+              </button>
+              <div class="header-dropdown-divider" role="separator"></div>
+              <div class="header-menu-label">Файлы</div>
+              <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-header-file"></use></svg>
+                <span>Сохранить копию (.report)</span>
               </button>
               <button class="header-dropdown-item" id="exportXlsxButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-sheet"></use></svg>
                 <span>Скачать Excel (.xlsx)</span>
+              </button>
+              <div class="header-dropdown-divider" role="separator"></div>
+              <div class="header-menu-label">Другое</div>
+              <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
+                <span>Копировать HTML</span>
               </button>
             </div>
           </div>
           <button class="header-icon-button" id="installAppButton" type="button" title="Установить QA Report" aria-label="Установить QA Report" hidden>
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
           </button>
-          <button class="pwa-update-button" id="updateAppButton" type="button" title="Новая версия готова. Сохранить чек-лист и обновить приложение" hidden>
+          <div class="header-update" id="updateAppContainer" hidden><button class="pwa-update-button header-icon-button" id="updateAppButton" type="button" aria-label="Доступно обновление приложения" aria-describedby="updateAppHint">
             <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg>
             <span class="pwa-update-dot" aria-hidden="true"></span><span id="updateAppLabel" class="pwa-sr-only">Обновить</span>
           </button>
+            <div class="header-update-popover" id="updateAppHint">
+              <strong>Доступно обновление</strong>
+              <p>Сохраните отчёт и обновите приложение до новой версии.</p>
+              <button class="button button-primary" id="confirmUpdateAppButton" type="button">Обновить</button>
+            </div>
+          </div>
           <span id="updateAppAnnouncement" class="pwa-sr-only" role="status" aria-live="polite"></span>
           <button class="header-icon-button whats-new-button" id="whatsNewButton" type="button" title="Что нового" aria-label="Что нового" aria-haspopup="dialog" aria-controls="whatsNewModal">
-            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/></svg>
+            <svg class="ui-icon" aria-hidden="true"><use href="#icon-header-file-text"></use></svg>
             <span class="whats-new-dot" id="whatsNewDot" hidden aria-hidden="true"></span>
           </button>
           <button class="header-icon-button" id="settingsButton" type="button" title="Настройки" aria-label="Настройки">
@@ -776,16 +758,36 @@
               <button class="settings-nav-item" type="button" data-settings-section="columns">Столбцы</button>
               <button class="settings-nav-item" type="button" data-settings-section="pinning">Закрепление столбцов</button>
             </div>
-            <button class="settings-nav-item" id="settingsJiraSectionButton" type="button" data-settings-section="jira">
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-send"></use></svg>
-              <span>Jira</span>
-            </button>
+
             <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
               <span>История</span>
             </button>
+            <button class="settings-nav-item" type="button" data-settings-section="appearance"><svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg><span>Внешний вид</span></button>
+            <button class="settings-nav-item settings-nav-parent" id="settingsIntegrationsButton" type="button" data-settings-section="jira"><svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg><span>Интеграции</span></button>
+            <div class="settings-subnav"><button class="settings-nav-item" type="button" data-settings-section="jira">Jira</button></div>
           </nav>
           <div class="settings-body">
+            <section class="settings-section" data-settings-panel="appearance" hidden><h3>Внешний вид</h3><p class="settings-note">Выберите тему приложения.</p>          <div class="theme-selector">
+            <button class="header-icon-button theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="Выберите тему" aria-label="Выберите тему">
+              <svg class="ui-icon theme-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+            </button>
+            <div class="theme-menu" id="themeMenu" role="menu" hidden>
+              <button class="theme-menu-item" data-theme="light" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-sun"></use></svg>
+                <span>Светлая</span>
+              </button>
+              <button class="theme-menu-item" data-theme="graphite" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg>
+                <span>Графитовая</span>
+              </button>
+              <button class="theme-menu-item" data-theme="dark" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
+                <span>Тёмная</span>
+              </button>
+            </div>
+          </div></section>
+
             <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
               <fieldset class="numbering-settings">
                 <legend>Нумерация пунктов</legend>
@@ -983,14 +985,14 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=31"></script>
+    <script src="/release-notes.js?v=34"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
     <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=112"></script>
-    <script src="/local-import-client.js?v=4"></script>
+    <script src="/app.js?v=115"></script>
+    <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

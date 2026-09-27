@@ -6,13 +6,13 @@ const SHELL = [
   "/import-options.js?v=5", "/import-wizard.js?v=5",
   "/attachment-limits.js?v=1",
   "/jira-attachment-reuse.js?v=1",
-  "/attachment-import.js?v=5", "/local-import-client.js?v=4",
+  "/attachment-import.js?v=5", "/local-import-client.js?v=5",
   "/checklist-table.js?v=2",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/styles.css?v=110', '/app.js?v=112', '/pwa.js?v=3',
+  '/styles.css?v=116', '/app.js?v=115', '/pwa.js?v=4',
   '/jira-markup-import.js?v=10', '/checklist-selection.js?v=2',
-  '/checklist-numbering.js?v=3', '/release-notes.js?v=31',
+  '/checklist-numbering.js?v=3', '/release-notes.js?v=34',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

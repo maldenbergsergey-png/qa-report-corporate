@@ -286,7 +286,6 @@ const elements = {
   jiraSettingsModal: document.querySelector("#jiraSettingsModal"),
   closeJiraSettingsButton: document.querySelector("#closeJiraSettingsButton"),
   settingsChecklistSectionButton: document.querySelector("#settingsChecklistSectionButton"),
-  settingsJiraSectionButton: document.querySelector("#settingsJiraSectionButton"),
   settingsHistorySectionButton: document.querySelector("#settingsHistorySectionButton"),
   settingsJiraSection: document.querySelector("#settingsJiraSection"),
   settingsHistorySection: document.querySelector("#settingsHistorySection"),
@@ -302,8 +301,8 @@ const elements = {
   redoButton: document.querySelector("#redoButton"),
   historyButton: document.querySelector("#historyButton"),
   focusModeButton: document.querySelector("#focusModeButton"),
-  jiraMenuButton: document.querySelector("#jiraMenuButton"),
-  jiraMenu: document.querySelector("#jiraMenu"),
+  reportMenuButton: document.querySelector("#reportMenuButton"),
+  reportMenu: document.querySelector("#reportMenu"),
   copyMenuButton: document.querySelector("#copyMenuButton"),
   copyMenu: document.querySelector("#copyMenu"),
   focusExitButton: document.querySelector("#focusExitButton"),
@@ -713,6 +712,8 @@ function isSavedByThisBrowser(candidate) {
 function setSaveStatus(status, { saving = false } = {}) {
   elements.saveState.classList.toggle("saving", saving);
   elements.saveState.classList.toggle("save-error", status === "Ошибка сохранения");
+  elements.saveState.classList.toggle("save-dirty", status === "Есть несохранённые изменения");
+  elements.saveState.setAttribute("aria-label", status);
   elements.saveState.querySelector("span:last-child").textContent = status;
 }
 
@@ -1851,7 +1852,7 @@ function scheduleSave({ collect = true } = {}) {
   // Structural operations keep the existing collection path.
   if (collect) flushDraftFromDom();
   hasUnsavedLocalChanges = true;
-  setSaveStatus("Сохранение…", { saving: true });
+  setSaveStatus("Есть несохранённые изменения");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveDraft, 400);
   scheduleHistoryCommit();
@@ -3725,7 +3726,8 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "pinning", "jira", "history"].includes(section) ? section : "checklist";
+  const selected = ["checklist", "columns", "pinning", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  document.getElementById("settingsIntegrationsButton").classList.toggle("group-active", selected === "jira");
   elements.settingsChecklistSectionButton.classList.toggle("group-active", ["checklist", "columns", "pinning"].includes(selected));
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
@@ -4326,6 +4328,34 @@ function resolvePublishScope(accepted) {
   } : null);
 }
 
+async function promptJiraSetup() {
+  const accepted = await askConfirmation("Чтобы отправлять отчёты, настройте интеграцию с Jira в настройках.", {
+    title: "Jira не подключена", confirmText: "Настроить Jira",
+  });
+  if (accepted) {
+    openJiraSettings();
+    setSettingsSection("jira");
+  } else {
+    elements.copyMenuButton.focus();
+  }
+  return false;
+}
+
+async function isJiraReadyToPublish() {
+  try {
+    const response = await fetch("/api/jira/connections", { cache: "no-store" });
+    if (!response.ok) return true; // Let the existing publish flow explain server/auth errors.
+    const payload = await response.json();
+    const instances = payload.instances || [];
+    const target = draft.issueUrl.trim();
+    const matching = instances.filter(instance => target.startsWith(instance.baseUrl.replace(/\/$/, "") + "/"));
+    if (!(matching.length ? matching : instances).some(instance => instance.connected)) return promptJiraSetup();
+  } catch {
+    // A failed status check must not block the existing error/retry flow.
+  }
+  return true;
+}
+
 async function publishToJira() {
   const publishButtonHtml = elements.publishButton.innerHTML;
   if (publishInProgress) return;
@@ -4333,6 +4363,7 @@ async function publishToJira() {
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
+    if (!await isJiraReadyToPublish()) return;
     const scope = await askPublishScope();
     if (!scope) return;
     const { sectionIds, statuses } = scope;
@@ -7065,7 +7096,7 @@ function applyTheme(theme) {
 
 function closeHeaderDropdowns(exceptMenu = null) {
   [
-    [elements.jiraMenuButton, elements.jiraMenu],
+    [elements.reportMenuButton, elements.reportMenu],
     [elements.copyMenuButton, elements.copyMenu],
   ].forEach(([button, menu]) => {
     if (!button || !menu || menu === exceptMenu) return;
@@ -7714,15 +7745,15 @@ document.addEventListener("drop", (event) => {
   editor.classList.remove("code-drop-target");
 });
 
-elements.jiraMenuButton.addEventListener("click", (event) => {
+elements.reportMenuButton.addEventListener("click", (event) => {
   event.stopPropagation();
-  toggleHeaderDropdown(elements.jiraMenuButton, elements.jiraMenu);
+  toggleHeaderDropdown(elements.reportMenuButton, elements.reportMenu);
 });
 elements.copyMenuButton.addEventListener("click", (event) => {
   event.stopPropagation();
   toggleHeaderDropdown(elements.copyMenuButton, elements.copyMenu);
 });
-elements.jiraMenu.addEventListener("click", () => closeHeaderDropdowns());
+elements.reportMenu.addEventListener("click", () => closeHeaderDropdowns());
 elements.copyMenu.addEventListener("click", () => closeHeaderDropdowns());
 elements.previewButton.addEventListener("click", openPreview);
 elements.feedbackButton.addEventListener("click", openFeedback);
@@ -7737,7 +7768,6 @@ elements.modalSaveMarkupButton.addEventListener("click", savePreviewMarkupToDraf
 elements.closePreviewButton.addEventListener("click", closePreview);
 elements.clearButton.addEventListener("click", resetDraft);
 elements.importButton.addEventListener("click", () => openImport("markup"));
-document.getElementById("importCommentButton").addEventListener("click", () => openImport("comment"));
 elements.closeImportButton.addEventListener("click", closeImport);
 elements.applyImportButton.addEventListener("click", () => applyImport());
 elements.closeMediaViewerButton.addEventListener("click", closeMediaViewer);
@@ -7906,12 +7936,11 @@ elements.saveVersionChoiceButton.addEventListener("click", () => {
 });
 elements.openLocalCopyButton.addEventListener("click", () => openSavedConflictCopy("local"));
 elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCopy("cloud"));
-document.querySelectorAll('.settings-subnav [data-settings-section]').forEach((button) => {
+document.querySelectorAll('.settings-sidebar [data-settings-section]').forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });
 elements.settingsChecklistSectionButton.addEventListener("click", () => setSettingsSection("checklist"));
-elements.settingsJiraSectionButton.addEventListener("click", () => setSettingsSection("jira"));
-elements.settingsHistorySectionButton.addEventListener("click", () => setSettingsSection("history"));
+
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
 elements.jiraSettingsModal.addEventListener("change", markSettingsDirty);
 elements.cloudHistoryEnabled.addEventListener("change", () => updateCloudHistorySettingsState());
@@ -8232,11 +8261,7 @@ window.preparePwaUpdate = async function () {
   await saveReportSnapshot('before-update');
 };
 
-document.getElementById('openJiraConnectionsButton').addEventListener('click', () => {
-  closeHeaderDropdowns();
-  openJiraSettings();
-  setSettingsSection('jira');
-});
+
 
 
 document.getElementById("addDefaultColumn").addEventListener("click", () => {
@@ -8252,3 +8277,23 @@ document.getElementById("resetDefaultColumns").addEventListener("click", () => {
 for (const input of [elements.importMarkup, elements.commentImportUrl]) {
   input.addEventListener("input", resetImportPreview);
 }
+
+// Header menus share keyboard navigation and close when focus leaves the menu.
+document.querySelectorAll('.topbar .header-dropdown').forEach(dropdown => {
+  const trigger = dropdown.querySelector('.header-dropdown-trigger');
+  const menu = dropdown.querySelector('[role="menu"]');
+  dropdown.addEventListener('keydown', event => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...menu.querySelectorAll('[role^="menuitem"]:not(:disabled)')];
+    if (menu.hidden) { toggleHeaderDropdown(trigger, menu); if (event.key === 'ArrowUp') items.at(-1)?.focus(); return; }
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+    items[next]?.focus();
+  });
+  dropdown.addEventListener('keydown', event => {
+    if (event.key === 'Tab') setTimeout(() => {
+      if (!dropdown.contains(document.activeElement)) closeHeaderDropdowns();
+    }, 0);
+  });
+});

@@ -39,8 +39,9 @@
   let lastCheck = 0;
   const reveal = () => {
     if (!registration?.waiting || !navigator.serviceWorker.controller) return;
-    if (button.hidden) announcement.textContent = 'Доступна новая версия QA Report. Нажмите «Обновить», когда будет удобно.';
+    if (document.getElementById('updateAppContainer').hidden) announcement.textContent = 'Доступна новая версия QA Report. Нажмите «Обновить», когда будет удобно.';
     button.hidden = false;
+    document.getElementById('updateAppContainer').hidden = false;
   };
   const check = () => {
     if (!registration || document.visibilityState !== 'visible' || Date.now() - lastCheck < 60000) return;
@@ -109,3 +110,5 @@
     }
   });
 })();
+
+document.getElementById('confirmUpdateAppButton').addEventListener('click', () => document.getElementById('updateAppButton').click());

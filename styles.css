@@ -5266,3 +5266,12 @@ body.pin-number-columns .section-header-table .number-header::before,
 tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 @keyframes import-row-highlight { from { background-color: color-mix(in srgb, var(--primary) 18%, var(--surface)); } }
 @media (prefers-reduced-motion: reduce) { tr.import-added > td { animation: none; outline: 1px solid var(--primary); } }
+
+/* Portable report progress and failures remain readable on narrow screens. */
+#reportFileModal .modal { width: min(560px, 100%); min-width: 0; max-height: calc(100dvh - 48px); }
+#reportFileModal .publish-progress-body { min-height: 0; overflow: auto; overflow-wrap: anywhere; }
+#reportFileModal .modal-footer { gap: 16px; }
+#reportFileModal .modal-footer > span { min-width: 0; }
+#reportFileModal .modal-footer > button { flex-shrink: 0; }
+#reportFileProgress { width: 100%; accent-color: var(--primary); }
+#reportFileError { white-space: pre-wrap; overflow-wrap: anywhere; }

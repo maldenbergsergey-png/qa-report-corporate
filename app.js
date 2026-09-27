@@ -569,7 +569,7 @@ function sanitizeRichHtml(value) {
   const safeUrl = (raw, { image = false, fileData = false } = {}) => {
     const text = String(raw || "").trim();
     if (image && /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
-    if (fileData && /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(text)) return text;
+    if (fileData && /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]*$/i.test(text)) return text;
     try {
       const url = new URL(text, window.location.origin);
       return ["http:", "https:"].includes(url.protocol) ? url.href : "";
@@ -6746,6 +6746,141 @@ function buildChecklistXlsxBlob() {
     { name: "xl/sharedStrings.xml", content: sharedStringsXml },
   ]);
 }
+
+// Portable report files only read existing attachment transports; opening is local.
+let reportFileBusy = false;
+function closeReportFileDialog() {
+  if (reportFileBusy) return;
+  document.getElementById("reportFileModal").hidden = true;
+  syncBodyModalOverflow(); elements.copyMenuButton.focus();
+}
+async function runReportFileOperation(title, action) {
+  if (reportFileBusy) return;
+  if (pwaPendingOperations || publishInProgress || importBusy) {
+    showToast("Дождитесь завершения текущей операции с отчётом."); return;
+  }
+  reportFileBusy = true; pwaPendingOperations++;
+  const modal = document.getElementById("reportFileModal");
+  const status = document.getElementById("reportFileStatus");
+  const error = document.getElementById("reportFileError");
+  const close = document.getElementById("closeReportFileButton");
+  const progress = document.getElementById("reportFileProgress");
+  document.getElementById("reportFileTitle").textContent = title;
+  status.textContent = "Подготовка отчёта…"; error.hidden = true; error.textContent = "";
+  close.disabled = true; progress.removeAttribute("value"); modal.hidden = false;
+  closeHeaderDropdowns(); syncBodyModalOverflow(); status.focus();
+  const onProgress = ({ completed, total }) => {
+    progress.max = Math.max(1, total); progress.value = completed;
+    status.textContent = total ? `Обработано вложений: ${completed} из ${total}` : "Подготовка отчёта без вложений…";
+  };
+  try { status.textContent = await action(onProgress); progress.max = 1; progress.value = 1; }
+  catch (cause) {
+    status.textContent = "Операция не завершена";
+    error.textContent = cause.message || "Не удалось обработать файл .report."; error.hidden = false;
+  } finally { reportFileBusy = false; pwaPendingOperations--; close.disabled = false; close.focus(); }
+}
+function reportAttachmentLoader() {
+  const manifests = new Map();
+  return async item => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+    const signal = controller.signal;
+    try {
+      let url;
+      try { if (item.url) url = new URL(item.url, location.origin); } catch {}
+      if (url?.origin === location.origin && url.pathname.startsWith("/api/storage/object/")) {
+        const response = await fetch(url.href, { headers: reportIdentityHeaders(), credentials: "same-origin", redirect: "error", signal });
+        if (!response.ok) throw new Error(`Хранилище: HTTP ${response.status}`);
+        if (Number(response.headers.get("content-length")) > window.QaReportFile.MAX_BYTES) throw new Error("Файл больше 250 МиБ");
+        const blob = await response.blob();
+        if (blob.type.includes("text/html") && item.type !== "text/html") throw new Error("Хранилище вернуло страницу вместо файла");
+        return blob;
+      }
+      if (item.jiraId || item.jiraName || (!item.url && item.issueUrl)) {
+        if (!item.issueUrl) throw new Error("Не указана исходная задача Jira");
+        let attachmentId = item.jiraId;
+        if (!attachmentId) {
+          if (!manifests.has(item.issueUrl)) manifests.set(item.issueUrl, jiraRequest("/api/jira/attachment-manifest", {
+            issueUrl: item.issueUrl,
+          }, { signal }));
+          const manifest = await manifests.get(item.issueUrl);
+          const matches = (manifest.attachments || []).filter(file => file.filename === (item.jiraName || item.name));
+          if (matches.length !== 1) throw new Error(matches.length ? "В Jira несколько файлов с таким именем" : "Вложение не найдено в Jira");
+          attachmentId = matches[0].id;
+        }
+        return await jiraRequest("/api/jira/import-attachment", {
+          commentUrl: item.issueUrl, attachmentId,
+        }, { binary: true, signal });
+      }
+      if (!url || !["https:", "http:", "blob:"].includes(url.protocol) || url.username || url.password) throw new Error("Нет доступной локальной копии вложения");
+      const response = await fetch(url.href, { credentials: "omit", redirect: "error", signal });
+      if (!response.ok) throw new Error(`Не удалось скачать файл: HTTP ${response.status}`);
+      if (Number(response.headers.get("content-length")) > window.QaReportFile.MAX_BYTES) throw new Error("Файл больше 250 МиБ");
+      return await response.blob();
+    } finally { clearTimeout(timeout); }
+  };
+}
+async function exportReportFile() {
+  await runReportFileOperation("Сохранить полную копию", async onProgress => {
+    flushDraftFromDom();
+    const snapshot = clone(draft);
+    const result = await window.QaReportFile.pack(snapshot, { load: reportAttachmentLoader(), onProgress });
+    const url = URL.createObjectURL(result.blob), link = document.createElement("a");
+    const stamp = new Date().toLocaleString("sv-SE").replace(/[ :]/g, "-");
+    link.href = url; link.download = `${issueKeyFromUrl(snapshot.issueUrl) || "report"}_${stamp}.report`;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return `Полная копия подготовлена: ${result.count} вложений. Сохраните скачанный файл .report — его можно открыть в другом браузере через меню «Файл».`;
+  });
+}
+function portableHistoryRecord(value, reason, existing = {}) {
+  const now = new Date().toISOString();
+  return { ...existing, id: value.reportId, publicId: value.publicId,
+    title: `${reportIssueLabel(value)} — ${value.environment}`, issueUrl: value.issueUrl,
+    issueKey: issueKeyFromUrl(value.issueUrl), environment: value.environment, overallStatus: value.overallStatus,
+    createdAt: existing.createdAt || now, updatedAt: now, lastOpenedAt: now,
+    reason, historyComment: existing.historyComment || "", document: clone(value), schemaVersion: 3 };
+}
+async function openReportFile(file) {
+  if (!file) return;
+  await runReportFileOperation("Открыть репорт из файла", async onProgress => {
+    const imported = await window.QaReportFile.unpack(file, { onProgress });
+    const next = normalizeDraft({ ...imported.document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
+      publicId: createPublicId(), revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
+    const db = await openDatabase();
+    clearTimeout(saveTimer); clearTimeout(historyTimer); flushDraftFromDom();
+    const before = clone(draft), beforeContent = serializeDraft();
+    // Save both documents atomically before changing the editor or localStorage.
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(REPORT_STORE, "readwrite"), store = transaction.objectStore(REPORT_STORE);
+      const request = store.get(before.reportId);
+      request.onsuccess = () => {
+        try {
+          store.put(portableHistoryRecord(before, "before-file-import", request.result));
+          store.put(portableHistoryRecord(next, "file-import"));
+        } catch { transaction.abort(); }
+      };
+      transaction.oncomplete = resolve;
+      transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить копию в браузере. Возможно, недостаточно места. Текущий отчёт остаётся открытым; исходный файл .report сохранён у вас."));
+    });
+    flushDraftFromDom();
+    if (draft.reportId !== before.reportId || serializeDraft() !== beforeContent) {
+      throw new Error("Текущий отчёт изменился во время открытия. Импортированная копия сохранена в истории; текущий отчёт остаётся открытым.");
+    }
+    applyDraftLocally(next); broadcastDraftUpdate();
+    return `Открыта отдельная копия: ${imported.count} вложений. Предыдущий отчёт сохранён в истории. Новые правки сохраняются в браузере; для обновления резервного файла скачайте полную копию ещё раз.`;
+  });
+}
+document.getElementById("exportReportButton").addEventListener("click", exportReportFile);
+document.getElementById("openReportButton").addEventListener("click", () => document.getElementById("reportFileInput").click());
+document.getElementById("reportFileInput").addEventListener("change", event => {
+  const file = event.target.files[0]; event.target.value = ""; openReportFile(file);
+});
+document.getElementById("closeReportFileButton").addEventListener("click", closeReportFileDialog);
+document.getElementById("reportFileModal").addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeReportFileDialog(); }
+  if (event.key === "Tab") { event.preventDefault(); document.getElementById(reportFileBusy ? "reportFileStatus" : "closeReportFileButton").focus(); }
+});
 
 function safeExportFilename() {
   const issueKey = issueKeyFromUrl(draft.issueUrl) || "checklist";

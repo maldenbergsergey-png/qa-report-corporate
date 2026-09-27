@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=104" />
+    <link rel="stylesheet" href="/styles.css?v=105" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -182,21 +182,29 @@
           <div class="header-dropdown">
             <button class="header-dropdown-trigger" id="copyMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="copyMenu">
               <svg class="ui-icon dropdown-leading-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
-              <span>Скопировать как</span>
+              <span>Файл</span>
               <svg class="ui-icon chevron-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
             <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" hidden>
+              <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
+                <span>Сохранить полную копию .report</span>
+              </button>
+              <button class="header-dropdown-item" id="openReportButton" type="button" role="menuitem">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
+                <span>Открыть из файла .report</span>
+              </button>
               <button class="header-dropdown-item" id="copyVisualButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg>
-                <span>HTML-разметку</span>
+                <span>Скопировать HTML-разметку</span>
               </button>
               <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
-                <span>Jira-разметку</span>
+                <span>Скопировать Jira-разметку</span>
               </button>
               <button class="header-dropdown-item" id="exportXlsxButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-download"></use></svg>
-                <span>Excel XLSX</span>
+                <span>Скачать Excel XLSX</span>
               </button>
             </div>
           </div>
@@ -407,6 +415,22 @@
     <button class="floating-help-button" id="feedbackButton" type="button" title="Помощь и обратная связь" aria-label="Помощь и обратная связь">
       <svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg>
     </button>
+
+    <input id="reportFileInput" type="file" accept=".report" hidden />
+    <div class="modal-backdrop" id="reportFileModal" hidden>
+      <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="reportFileTitle">
+        <header class="modal-header"><h2 id="reportFileTitle">Полная копия репорта</h2></header>
+        <div class="publish-progress-body">
+          <progress id="reportFileProgress" max="1" aria-label="Обработка репорта"></progress>
+          <p class="publish-status" id="reportFileStatus" role="status" tabindex="-1"></p>
+          <p class="publish-error" id="reportFileError" role="alert" hidden></p>
+        </div>
+        <footer class="modal-footer">
+          <span>Полная копия включает содержимое отчёта и все вложения.</span>
+          <button class="button button-secondary" id="closeReportFileButton" type="button">Закрыть</button>
+        </footer>
+      </section>
+    </div>
 
     <div class="modal-backdrop" id="previewModal" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
@@ -935,13 +959,14 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=26"></script>
+    <script src="/release-notes.js?v=27"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
-    <script src="/app.js?v=108"></script>
+    <script src="/report-file.js?v=1"></script>
+    <script src="/app.js?v=109"></script>
     <script src="/local-import-client.js?v=4"></script>
   </body>
 </html>

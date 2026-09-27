@@ -75,7 +75,8 @@ async function main() {
   const archive = path.join(temp, 'roundtrip.report'); await download.saveAs(archive);
   await page.waitForFunction(() => !reportFileBusy);
   assert.equal(await page.locator('#reportFileError').isVisible(), false);
-  assert.match(await page.locator('#reportFileStatus').innerText(), /3 вложений/);
+  assert.match(await page.locator('#reportFileStatus').innerText(), /Файл \.report содержит отчёт и все вложения/);
+  assert.equal(await page.locator('#reportFileTitle').innerText(), 'Копия отчёта скачана');
   const expected = await page.evaluate(() => window.QaReportFile.documentFields(draft));
   const manifest = require('../report-file').unzip(new Uint8Array(fs.readFileSync(archive)));
   assert.equal(manifest.size, 5);

@@ -4427,6 +4427,10 @@ function setSelectedReportFile(file, errorMessage = "") {
   selectedReportFile = file;
   document.getElementById("reportFileInput").value = "";
   document.getElementById("selectedReportFile").hidden = !file;
+  document.getElementById("reportFileEmpty").hidden = Boolean(file);
+  document.getElementById("reportDropZone").classList.toggle("has-file", Boolean(file));
+  document.getElementById("selectedReportFileSize").textContent = file ? formatFileSize(file.size) : "";
+  document.getElementById("chooseReportFileButton").textContent = file ? "Выбрать другой файл" : "Выбрать файл";
   const name = document.getElementById("selectedReportFileName");
   name.textContent = file?.name || ""; name.title = file?.name || "";
   document.getElementById("chooseReportFileButton").setAttribute("aria-label", file ? "Выбрать другой файл .report" : "Выбрать файл .report");
@@ -6126,7 +6130,7 @@ function setImportProgress(label, completed, total) {
 function resetImportPreview() {
   preparedImport = null; pendingImportedDraft = null; importWizard = null; importPlanSummary = null; importContext = null; pendingImportErrors = [];
   elements.importModal.querySelector(".modal-footer > span").classList.remove("import-footer-warning");
-  elements.importModal.querySelector(".modal-footer > span").textContent = importSource === "report" ? "Выберите файл и нажмите «Открыть отчёт»." : "На следующем шаге выберите, куда добавить пункты, или замените чек-лист.";
+  elements.importModal.querySelector(".modal-footer > span").textContent = importSource === "report" ? "Текущий отчёт сохранится в истории." : importSource === "comment" ? "Далее — выбор пунктов и вложений." : "Далее — выбор пунктов и настроек.";
   elements.importModal.classList.remove("has-import-preview");
   document.getElementById("importSourceSummary").hidden = true;
   document.getElementById("importTitle").textContent = "Импорт чек-листа";
@@ -6810,9 +6814,17 @@ function buildChecklistXlsxBlob() {
 
 // Portable report files only read existing attachment transports; opening is local.
 let reportFileBusy = false;
+const REPORT_FILE_DISMISS_KEY = "qa-report-hide-export-success-v1";
+let reportFileSuccessHidden = false;
+try { reportFileSuccessHidden = localStorage.getItem(REPORT_FILE_DISMISS_KEY) === "true"; } catch {}
 function closeReportFileDialog() {
   if (reportFileBusy) return;
-  document.getElementById("reportFileModal").hidden = true;
+  const modal = document.getElementById("reportFileModal");
+  if (modal.classList.contains("is-success")) {
+    reportFileSuccessHidden = document.getElementById("reportFileDismissCheckbox").checked;
+    try { localStorage.setItem(REPORT_FILE_DISMISS_KEY, String(reportFileSuccessHidden)); } catch {}
+  }
+  modal.hidden = true;
   syncBodyModalOverflow(); elements.copyMenuButton.focus();
 }
 async function runReportFileOperation(title, action) {
@@ -6826,6 +6838,13 @@ async function runReportFileOperation(title, action) {
   const error = document.getElementById("reportFileError");
   const close = document.getElementById("closeReportFileButton");
   const progress = document.getElementById("reportFileProgress");
+  modal.classList.remove("is-success");
+  document.getElementById("reportFileSuccessIcon").hidden = true;
+  document.getElementById("reportFileDismissOption").hidden = true;
+  document.getElementById("reportFileDismissCheckbox").checked = reportFileSuccessHidden;
+  const closeIcon = document.getElementById("closeReportFileIcon");
+  closeIcon.hidden = true;
+  progress.hidden = false;
   document.getElementById("reportFileTitle").textContent = title;
   status.textContent = "Подготовка отчёта…"; error.hidden = true; error.textContent = "";
   close.disabled = true; progress.removeAttribute("value"); modal.hidden = false;
@@ -6834,11 +6853,27 @@ async function runReportFileOperation(title, action) {
     progress.max = Math.max(1, total); progress.value = completed;
     status.textContent = total ? `Обработано вложений: ${completed} из ${total}` : "Подготовка отчёта без вложений…";
   };
-  try { status.textContent = await action(onProgress); progress.max = 1; progress.value = 1; }
+  try {
+    status.textContent = await action(onProgress);
+    progress.hidden = true;
+    if (reportFileSuccessHidden) {
+      modal.hidden = true;
+      syncBodyModalOverflow();
+    } else {
+      modal.classList.add("is-success");
+      document.getElementById("reportFileTitle").textContent = "Копия отчёта скачана";
+      document.getElementById("reportFileSuccessIcon").hidden = false;
+      document.getElementById("reportFileDismissOption").hidden = false;
+    }
+  }
   catch (cause) {
     status.textContent = "Операция не завершена";
     error.textContent = cause.message || "Не удалось обработать файл .report."; error.hidden = false;
-  } finally { reportFileBusy = false; pwaPendingOperations--; close.disabled = false; close.focus(); }
+  } finally {
+    reportFileBusy = false; pwaPendingOperations--; close.disabled = false;
+    closeIcon.hidden = false;
+    if (modal.hidden) elements.copyMenuButton.focus(); else close.focus();
+  }
 }
 function reportAttachmentLoader() {
   const manifests = new Map();
@@ -6891,7 +6926,7 @@ async function exportReportFile() {
     link.href = url; link.download = `${issueKeyFromUrl(snapshot.issueUrl) || "report"}_${stamp}.report`;
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    return `Полная копия подготовлена: ${result.count} вложений. Сохраните скачанный файл .report — его можно открыть в другом браузере через «Импорт» → «Файл .report».`;
+    return "Файл .report содержит отчёт и все вложения.\nПозже его можно открыть через «Импорт» →\n«Файл .report».";
   });
 }
 function portableHistoryRecord(value, reason, existing = {}) {
@@ -6955,9 +6990,16 @@ for (const type of ["dragenter", "dragover", "dragleave", "drop"]) {
   });
 }
 document.getElementById("closeReportFileButton").addEventListener("click", closeReportFileDialog);
+document.getElementById("closeReportFileIcon").addEventListener("click", closeReportFileDialog);
 document.getElementById("reportFileModal").addEventListener("keydown", event => {
   if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeReportFileDialog(); }
-  if (event.key === "Tab") { event.preventDefault(); document.getElementById(reportFileBusy ? "reportFileStatus" : "closeReportFileButton").focus(); }
+  if (event.key === "Tab") {
+    if (reportFileBusy) { event.preventDefault(); document.getElementById("reportFileStatus").focus(); return; }
+    const controls = [...event.currentTarget.querySelectorAll("button, input")].filter(node => !node.disabled && node.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 });
 
 function safeExportFilename() {

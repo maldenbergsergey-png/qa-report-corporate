@@ -10,10 +10,13 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=3" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=106" />
+    <link rel="stylesheet" href="/styles.css?v=110" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
+      <!-- Feather icons: check and x, matching the existing outline icon set. -->
+      <symbol id="icon-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></symbol>
       <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
       <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></symbol>
       <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5" /><path d="M4 9h9a7 7 0 0 1 7 7v4" /></symbol>
@@ -416,15 +419,24 @@
     </button>
 
     <div class="modal-backdrop" id="reportFileModal" hidden>
-      <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="reportFileTitle">
-        <header class="modal-header"><h2 id="reportFileTitle">Полная копия репорта</h2></header>
+      <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="reportFileTitle" aria-describedby="reportFileStatus">
+        <header class="modal-header">
+          <h2 id="reportFileTitle">Сохранить копию</h2>
+          <button class="icon-button" id="closeReportFileIcon" type="button" aria-label="Закрыть" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+        </header>
         <div class="publish-progress-body">
-          <progress id="reportFileProgress" max="1" aria-label="Обработка репорта"></progress>
-          <p class="publish-status" id="reportFileStatus" role="status" tabindex="-1"></p>
+          <progress id="reportFileProgress" max="1" aria-label="Обработка отчёта"></progress>
+          <div class="report-file-result">
+            <span class="report-file-success-icon" id="reportFileSuccessIcon" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-check"></use></svg></span>
+            <p class="publish-status" id="reportFileStatus" role="status" tabindex="-1"></p>
+          </div>
           <p class="publish-error" id="reportFileError" role="alert" hidden></p>
+          <label class="report-file-dismiss" id="reportFileDismissOption" hidden>
+            <input id="reportFileDismissCheckbox" type="checkbox">
+            <span>Больше не показывать это сообщение</span>
+          </label>
         </div>
         <footer class="modal-footer">
-          <span>Полная копия включает содержимое отчёта и все вложения.</span>
           <button class="button button-secondary" id="closeReportFileButton" type="button">Закрыть</button>
         </footer>
       </section>
@@ -548,7 +560,6 @@
       <section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
         <header class="modal-header">
           <div>
-            <div class="eyebrow">Импорт</div>
             <h2 id="importTitle">Импорт чек-листа</h2>
           </div>
           <button class="icon-button" id="closeImportButton" type="button" aria-label="Закрыть импорт">×</button>
@@ -560,13 +571,11 @@
         </div>
         <div class="import-body">
           <div id="markupImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-markup">
-            <p>
-              Вставьте чек-лист или отдельные строки без заголовков в формате Jira Wiki Markup.
-              Таблицы, разделы, статусы и форматирование превратятся в редактируемый чек-лист.
-              Подключение к Jira не требуется. На следующем шаге выберите раздел, пункты и соответствие столбцов.
-            </p>
+            <p id="importMarkupHint">Вставьте таблицу или строки в формате Jira Wiki Markup.</p>
             <textarea
               id="importMarkup"
+              aria-label="Разметка чек-листа"
+              aria-describedby="importMarkupHint"
               class="import-textarea"
               placeholder="||Номер||Проверка||ФР||Статус||Комментарий||&#10;|1.|Проверка...|Результат...|{color:#14892c}*OK*{color}| |"
             ></textarea>
@@ -574,27 +583,24 @@
           <div id="commentImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-comment" hidden>
             <label class="field">
               <span>Ссылка на комментарий</span>
-              <input id="commentImportUrl" type="url" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
+              <input id="commentImportUrl" type="url" aria-describedby="commentImportHint" placeholder="https://jira.example/browse/QA-123?focusedCommentId=12345" />
             </label>
-            <p>
-              Вставьте ссылку на комментарий Jira. На следующем шаге выберите пункты, содержимое столбцов и вложения.
-            </p>
+            <p id="commentImportHint">Откройте комментарий в Jira и скопируйте ссылку на него.</p>
           </div>
           <div id="reportImportPane" class="import-pane" role="tabpanel" aria-labelledby="importSource-report" hidden>
-            <p>Откройте ранее сохранённый файл QA Report. Текущий отчёт будет заменён данными из файла и сохранён в истории.</p>
             <div id="reportDropZone" class="report-drop-zone">
-              <button id="chooseReportFileButton" class="report-file-picker" type="button">
+              <div class="report-file-empty" id="reportFileEmpty">
                 <svg class="ui-icon report-upload-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>
                 <strong>Перетащите файл .report сюда</strong>
                 <span>или выберите его на компьютере</span>
-                <span class="button button-secondary">Выбрать файл</span>
-                <small>Формат файла: .report</small>
-              </button>
+              </div>
               <div id="selectedReportFile" class="report-selected-file" hidden>
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
-                <span><strong id="selectedReportFileName"></strong><small>Файл выбран. Нажмите «Открыть отчёт».</small></span>
+                <span><strong id="selectedReportFileName"></strong><small id="selectedReportFileSize"></small></span>
                 <button id="removeReportFileButton" class="icon-button" type="button" aria-label="Убрать выбранный файл">×</button>
               </div>
+              <button id="chooseReportFileButton" class="button button-secondary report-file-picker" type="button">Выбрать файл</button>
+              <small class="report-file-format">Формат файла: .report</small>
             </div>
             <input id="reportFileInput" type="file" accept=".report" hidden />
             <p id="reportImportError" class="import-warning" role="alert" hidden></p>
@@ -602,7 +608,7 @@
           <div id="importSourceSummary" class="import-source-summary" hidden><span class="import-source-copy"><span id="importSourceTitle"></span><span id="importPreviewMeta" class="import-preview-meta" role="status" hidden></span></span><button type="button" id="changeImportSource" class="text-button">Изменить</button></div>
           <label class="local-import-option">
             <input id="importWithAttachments" type="checkbox" checked aria-describedby="importAttachmentsHint" />
-            <span class="import-option-copy"><strong>Скачать вложения в браузер</strong><small id="importAttachmentsHint">Изображения и файлы сохранятся в этом браузере</small></span>
+            <span class="import-option-copy"><strong>Скачать вложения</strong><small id="importAttachmentsHint">Сохранить изображения и файлы в этом браузере</small></span>
           </label>
           <div id="importConfigurator" hidden></div>
           <div class="import-warning" id="importWarning" hidden></div>
@@ -613,7 +619,7 @@
           <div class="import-progress-bar is-indeterminate" id="importProgressBar" role="progressbar" aria-labelledby="importProgressLabel" aria-valuemin="0"><span></span></div>
         </div>
         <footer class="modal-footer">
-          <span>На следующем шаге выберите, куда добавить пункты, или замените чек-лист.</span>
+          <span>Далее — выбор пунктов и настроек.</span>
           <div class="modal-actions">
             <button class="button button-primary" id="applyImportButton" type="button"><span class="button-spinner" aria-hidden="true" hidden></span><span class="button-label">Продолжить</span></button>
           </div>
@@ -977,14 +983,14 @@
     <script src="/checklist-selection.js?v=2"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=29"></script>
+    <script src="/release-notes.js?v=31"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
     <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=110"></script>
+    <script src="/app.js?v=112"></script>
     <script src="/local-import-client.js?v=4"></script>
   </body>
 </html>

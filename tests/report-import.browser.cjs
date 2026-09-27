@@ -88,6 +88,8 @@ async function main() {
   }
   assert.equal(await action.textContent(), 'Открыть отчёт');
   assert.equal(await action.isDisabled(), true);
+  assert.equal(await page.locator('#reportFileEmpty').isVisible(), true);
+  assert.equal(await page.locator('#chooseReportFileButton').innerText(), 'Выбрать файл');
   assert.equal(await page.locator('#reportDropZone').isVisible(), true);
   assert.equal(await page.locator('#importWithAttachments').isVisible(), false);
   // Both the chooser and empty zone surface open the native file picker.
@@ -102,12 +104,17 @@ async function main() {
   assert.deepEqual(await geometry(), desktop);
   await page.locator('#reportFileInput').setInputFiles(validFile);
   assert.equal(await page.locator('#selectedReportFileName').textContent(), validFile.name);
+  assert.equal(await page.locator('#reportFileEmpty').isVisible(), false);
+  assert.match(await page.locator('#selectedReportFileSize').innerText(), /\d.*[БКМ]/);
+  assert.equal(await page.locator('#chooseReportFileButton').innerText(), 'Выбрать другой файл');
   assert.equal(await action.isDisabled(), false);
   assert.equal(await page.evaluate(() => serializeDraft()), original.content);
   assert.deepEqual(await geometry(), desktop);
   await screenshot('report-selected');
   await page.click('#removeReportFileButton');
   assert.equal(await action.isDisabled(), true);
+  assert.equal(await page.locator('#reportFileEmpty').isVisible(), true);
+  assert.equal(await page.locator('#chooseReportFileButton').innerText(), 'Выбрать файл');
   // Drag depth should keep highlighting while crossing descendants.
   const dragResult = await page.evaluate(bytes => {
     const zone = document.getElementById('reportDropZone');
@@ -243,6 +250,27 @@ async function main() {
     await page.click('#closeImportButton');
   }
   await page.setViewportSize({width:1440,height:900});
+  let themeGeometry;
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
+    await page.click('#importButton');
+    const baseline = await geometry();
+    if (themeGeometry) assert.deepEqual(baseline, themeGeometry);
+    themeGeometry = baseline;
+    for (const source of ['markup','comment','report']) {
+      await tab(source).click(); assert.deepEqual(await geometry(), baseline);
+      await screenshot(`compact-${theme}-${source}`);
+    }
+    await page.locator('#reportFileInput').setInputFiles(validFile);
+    assert.deepEqual(await geometry(), baseline);
+    await screenshot(`compact-${theme}-selected`);
+    const picker = page.waitForEvent('filechooser');
+    await page.click('#chooseReportFileButton');
+    await (await picker).setFiles({ ...validFile, name: 'replacement.report' });
+    assert.equal(await page.locator('#selectedReportFileName').innerText(), 'replacement.report');
+    assert.deepEqual(await geometry(), baseline);
+    await page.click('#closeImportButton');
+  }
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.click('#importButton'); await tab('report').click(); await screenshot('report-dark');
   assert.deepEqual(errors, []);

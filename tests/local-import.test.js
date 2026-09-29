@@ -28,6 +28,24 @@ async function fixture(options = {}) {
 }
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII=","base64");
 const payload = (id="batch", file="shot") => ({id,kind:"cells",updates:[{sectionId:"section",rowId:"row",columnId:"actual",expectedHash:"0".repeat(64),text:"Проверено",attachmentIds:[file]}]});
+test("default import token remains valid for two hours and expires for both producer and browser at the deadline", async () => {
+  let time=1000;const f=await fixture({now:()=>time});
+  try {
+    assert.equal(f.session.expiresAt, time + 2 * 60 * 60_000);
+    assert.equal(f.session.connection.expiresAt, f.session.expiresAt);
+    time += 60 * 60_000;
+    assert.equal((await f.agent("/context")).status, 200);
+    assert.equal((await f.browser("/next")).status, 200);
+    time += 30 * 60_000;
+    assert.equal((await f.agent("/context")).status, 200);
+    time = f.session.expiresAt - 1;
+    assert.equal((await f.agent("/context")).status, 200);
+    assert.equal((await f.browser("/next")).status, 200);
+    time++;
+    assert.equal((await f.agent("/context")).status, 404);
+    assert.equal((await f.browser("/next")).status, 404);
+  } finally { await f.close(); }
+});
 test("binary upload reaches the browser, remains pending until durable acknowledgement and is then removed", async()=>{
   const f=await fixture();try {
     assert.equal((await f.agent("/files/shot",{method:"PUT",headers:{"Content-Type":"image/png","X-QA-File-Name":encodeURIComponent("Скриншот.png")},body:png})).status,201);

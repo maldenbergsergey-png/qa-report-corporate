@@ -2619,6 +2619,12 @@ function createColumnHeader(section, column, index) {
       items.push({ label: "Переместить вправо", icon: "arrow-right", action: () => moveColumn(section, column.id, 1) });
     }
     items.push({
+      label: "Очистить столбец",
+      icon: "trash",
+      danger: true,
+      action: () => clearSectionColumn(section.id, column.id),
+    });
+    items.push({
       label: "Удалить столбец",
       icon: "trash",
       danger: true,
@@ -2686,6 +2692,12 @@ function createStatusHeader(section) {
         label: "Вставить столбец слева",
         icon: "column-insert-left",
         action: () => insertColumn(section, section.columns.length),
+      },
+      {
+        label: "Очистить столбец",
+        icon: "trash",
+        danger: true,
+        action: () => clearSectionColumn(section.id),
       },
     ]);
   });
@@ -3038,6 +3050,21 @@ function moveRowToSectionEnd(targetSectionRef, sourceId) {
   renderSections();
   renderSummary();
   saveLocalMutationNow();
+}
+
+function clearSectionColumn(sectionId, columnId = null) {
+  flushDraftFromDom();
+  const section = draft.sections.find((item) => item.id === sectionId);
+  if (!section || (columnId !== null && !section.columns.some((column) => column.id === columnId))) return;
+  const isStatus = columnId === null;
+  if (!section.rows.some((row) => isStatus ? row.status !== "НЕ ПРОВЕРЕНО" : Boolean(row.cells[columnId]))) return;
+  closeFloatingMenu();
+  commitSelectionMutation(() => {
+    section.rows.forEach((row) => {
+      if (isStatus) row.status = "НЕ ПРОВЕРЕНО";
+      else row.cells[columnId] = "";
+    });
+  });
 }
 
 function deleteColumn(section, columnId) {

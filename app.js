@@ -404,7 +404,7 @@ let selectedRowIds = new Set();
 let selectionDraftId = null;
 const selectionUi = Object.fromEntries([
   "Toggle", "Toolbar", "All", "Count", "StatusButton", "StatusMenu", "StatusOptions", "StatusCount", "StatusApply",
-  "MoveButton", "MoveMenu", "Search", "Destinations", "NewSection", "CreateForm", "NewTitle", "Delete", "Exit",
+  "MoveButton", "MoveMenu", "Search", "Destinations", "NewSection", "CreateForm", "NewTitle", "CopyButton", "Delete", "Exit",
 ].map((name) => [name, document.getElementById(`selection${name}`)]));
 let linkEditorRange = null;
 let editingLink = null;
@@ -2018,6 +2018,7 @@ function updateSelectionUi() {
   selectionUi.All.checked = count > 0 && count === rows.length;
   selectionUi.All.indeterminate = count > 0 && count < rows.length;
   selectionUi.Delete.disabled = count === 0;
+  selectionUi.CopyButton.disabled = count === 0 || selectionCopyBusy;
   selectionUi.MoveButton.disabled = count === 0 || !window.QaReportTable.canMove(draft.sections, selectedRowIds);
   selectionUi.MoveButton.title = !window.QaReportTable.canMove(draft.sections, selectedRowIds) ? "Верните исходный порядок выбранных строк для переноса" : "Перенести выбранные строки";
   if (selectionUi.MoveButton.disabled && !selectionUi.MoveMenu.hidden) closeSelectionMenus();
@@ -2135,6 +2136,87 @@ async function moveSelectedRows(targetId, newTitle = "") {
   const destination = [...elements.sections.children].find((section) => section.dataset.sectionId === destinationId);
   destination?.scrollIntoView({ behavior: "smooth", block: "start" });
   showToast(`Перенесено строк: ${movedCount}`);
+}
+
+let selectionCopyBusy = false;
+
+async function saveSelectionCopy(before, next) {
+  const db = await openDatabase();
+  let sourceRecord, copyRecord;
+  // Either both history entries are durable, or neither write is committed.
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(REPORT_STORE, "readwrite");
+    const store = transaction.objectStore(REPORT_STORE);
+    const request = store.get(before.reportId);
+    request.onsuccess = () => {
+      try {
+        sourceRecord = portableHistoryRecord(before, "before-selection-copy", request.result);
+        copyRecord = portableHistoryRecord(next, "selection-copy");
+        copyRecord.historyComment = `Выбранные пункты из чек-листа ${before.publicId}`;
+        store.put(sourceRecord);
+        store.add(copyRecord);
+      } catch { transaction.abort(); }
+    };
+    transaction.oncomplete = resolve;
+    transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить чек-листы в истории. Проверьте свободное место в браузере и повторите копирование."));
+  });
+  queueServerReportSave(sourceRecord);
+  queueServerReportSave(copyRecord);
+}
+
+async function copySelectedRowsToNewChecklist() {
+  if (selectionCopyBusy) return;
+  flushDraftFromDom();
+  const ids = new Set(selectedRowIds);
+  if (!draft.sections.some((section) => section.rows.some((row) => ids.has(row.id)))) return;
+  const documentId = draft.draftId;
+  selectionCopyBusy = true;
+  updateSelectionUi();
+  closeSelectionMenus();
+  try {
+    clearTimeout(saveTimer);
+    if (await saveDraft() === false) throw new Error("Не удалось сохранить текущий чек-лист. Проверьте сохранение и повторите копирование.");
+    if (draft.draftId !== documentId) throw new Error("Отчёт изменился. Выберите строки заново.");
+    flushDraftFromDom();
+    const before = clone(draft);
+    const beforeContent = serializeDraft();
+    const sections = window.QaReportSelection.copySections(before.sections, ids, () => crypto.randomUUID());
+    if (!sections.length) return;
+    const next = normalizeDraft({
+      ...clone(DEFAULT_DRAFT),
+      issueUrl: before.issueUrl, environment: before.environment, overallStatus: before.overallStatus,
+      intro: before.intro, numberingMode: before.numberingMode, sections,
+      draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId(),
+      revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId,
+    });
+    await saveSelectionCopy(before, next);
+    const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
+    const unchanged = () => {
+      flushDraftFromDom();
+      return draft.draftId === documentId && serializeDraft() === beforeContent;
+    };
+    if (!unchanged()) {
+      showToast("Новый чек-лист сохранён в истории. Текущий отчёт изменился и остаётся открытым.");
+      return;
+    }
+    const open = await askConfirmation(
+      `Скопировано пунктов: ${count}. Новый чек-лист: /report/${next.publicId}. Оба чек-листа сохранены в истории. Открыть новый чек-лист?`,
+      { title: "Новый чек-лист создан", confirmText: "Да, открыть", cancelText: "Нет, остаться" },
+    );
+    if (open && unchanged()) {
+      applyDraftLocally(next);
+      broadcastDraftUpdate();
+      showToast("Открыт новый чек-лист с выбранными пунктами");
+    } else if (open) {
+      showToast("Текущий отчёт изменился. Новый чек-лист доступен в истории.");
+    }
+  } catch (error) {
+    showToast(error.message || "Не удалось скопировать выбранные пункты", 9000);
+  } finally {
+    selectionCopyBusy = false;
+    updateSelectionUi();
+    if (draft.draftId === documentId && selectionMode && elements.confirmModal.hidden) selectionUi.CopyButton.focus();
+  }
 }
 
 async function deleteSelectedRows() {
@@ -7120,6 +7202,7 @@ function askConfirmation(message, options = {}) {
   elements.confirmModalTitle.textContent = options.title || "Подтвердите действие";
   elements.confirmModalMessage.textContent = message;
   elements.acceptConfirmButton.textContent = options.confirmText || "Подтвердить";
+  elements.cancelConfirmButton.textContent = options.cancelText || "Отмена";
   elements.alternativeConfirmButton.hidden = !options.alternativeText;
   elements.alternativeConfirmButton.textContent = options.alternativeText || "";
   elements.acceptConfirmButton.className =
@@ -7218,6 +7301,7 @@ selectionUi.CreateForm.addEventListener("submit", (event) => {
   if (title) moveSelectedRows(null, title);
   else selectionUi.NewTitle.focus();
 });
+selectionUi.CopyButton.addEventListener("click", copySelectedRowsToNewChecklist);
 selectionUi.Delete.addEventListener("click", deleteSelectedRows);
 // Dismiss on the start of an outside interaction, not the click produced when
 // a text-selection gesture starts inside an input and ends outside the popover.

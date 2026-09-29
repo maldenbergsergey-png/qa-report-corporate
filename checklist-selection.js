@@ -41,6 +41,19 @@
     return moved.length;
   }
 
+  // Copy whole selected sections or just their selected rows without sharing objects.
+  function copySections(sections, selectedIds, createId) {
+    return sections.flatMap((section) => {
+      const rows = section.rows.filter((row) => selectedIds.has(row.id));
+      if (!rows.length) return [];
+      const copy = JSON.parse(JSON.stringify({ ...section, rows }));
+      copy.id = createId();
+      copy.collapsed = false;
+      copy.rows.forEach((row) => { row.id = createId(); });
+      return [copy];
+    });
+  }
+
   function deleteRows(sections, selectedIds, createRow, createDefaultSection) {
     const count = sections.reduce((sum, section) => sum + section.rows.filter((row) => selectedIds.has(row.id)).length, 0);
     if (!count) return { sections, count };
@@ -54,7 +67,7 @@
     return { sections: remaining, count };
   }
 
-  const api = { selectByStatus, moveRows, deleteRows };
+  const api = { selectByStatus, moveRows, copySections, deleteRows };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportSelection = api;
 })(typeof window !== "undefined" ? window : globalThis);

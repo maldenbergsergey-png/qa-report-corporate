@@ -1,0 +1,158 @@
+// Copy selection regression with isolated history and synthetic attachments.
+// QA_REPORT_PLAYWRIGHT may point at an existing Playwright installation.
+const { chromium } = require(process.env.QA_REPORT_PLAYWRIGHT || 'playwright');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-selection-copy-'));
+let child, browser;
+async function main() {
+  const listener = http.createServer();
+  await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  const origin = `http://127.0.0.1:${port}`;
+  const secret = crypto.randomBytes(32).toString('hex');
+  child = spawn(process.execPath, ['server.js'], { cwd: root, env: {
+    ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'development',
+    AUTH_SECRET: secret, AUTH_SECRET_FILE: '', DEV_LOGIN_EMAIL: 'qa@example.com',
+    DEV_LOGIN_PASSWORD: crypto.randomBytes(24).toString('hex'),
+    REPORTS_DB_PATH: path.join(temp, 'reports.sqlite'), QA_REPORT_PUBLIC_URL: origin,
+    QA_STORAGE_ACCESS_KEY: '', QA_STORAGE_SECRET_KEY: '',
+    QA_STORAGE_ACCESS_KEY_FILE: '', QA_STORAGE_SECRET_KEY_FILE: '',
+  }, stdio: ['ignore', 'pipe', 'pipe'] });
+  await new Promise((resolve, reject) => {
+    let log = '';
+    child.stdout.on('data', chunk => { log += chunk; if (log.includes('QA Report:')) resolve(); });
+    child.stderr.on('data', chunk => fs.appendFileSync(path.join(temp, 'server.log'), chunk));
+    child.once('exit', code => reject(Error(`Server exited: ${code}`)));
+    setTimeout(() => reject(Error('Server startup timeout')), 10000).unref();
+  });
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' });
+  if (fs.existsSync(path.join(root, 'auth.js'))) {
+    const { createSessionToken } = require(path.join(root, 'auth'));
+    await context.addCookies([{ name: 'query-port-session', value: createSessionToken('qa@example.com', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
+  }
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // Never contact a real Jira or external attachment service.
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.origin === origin ? route.continue() : route.abort();
+  });
+  page.setDefaultTimeout(10000);
+  await page.goto(origin);
+  await page.waitForSelector('#settingsButton');
+  await page.evaluate(async () => {
+    cloudHistoryEnabled = false;
+    applyDraftLocally({ ...draft, numberingMode: 'manual', intro: '<p>Intro</p>', sections: [
+      { id: 'first', title: 'First', collapsed: false, columns: [{ id: 'check', title: 'Check' }], rows: [
+        { id: 'one', status: 'OK', manualNumber: '7', cells: { check: 'One' } },
+        { id: 'two', status: 'НЕ ОК', manualNumber: '9', cells: { check: 'Two' } },
+      ] },
+      { id: 'second', title: 'Second', collapsed: true, columns: [{ id: 'extra', title: 'Details' }], rows: [
+        { id: 'three', status: 'НЕ ПРОВЕРЕНО', manualNumber: '12', cells: { extra: '<p>Three</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">' } },
+      ] },
+    ] });
+    await saveDraft();
+    window.originalId = draft.reportId;
+    window.originalPublicId = draft.publicId;
+    window.originalDocument = JSON.stringify(draftContentSnapshot());
+  });
+  await page.click('#selectionToggle');
+  assert.equal(await page.locator('#selectionCopyButton').isDisabled(), true);
+  await page.check('#selectionAll');
+  await page.uncheck('[data-selection-row="two"]');
+  const originalUrl = page.url();
+  if (process.env.QA_REPORT_COPY_SCREENSHOTS) {
+    await page.screenshot({ path: path.join(temp, 'copy-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(temp, 'copy-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    console.log(`Screenshots: ${temp}`);
+  }
+  await page.click('#selectionCopyButton');
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.match(await page.locator('#confirmModalMessage').textContent(), /Скопировано пунктов: 2/);
+  await page.click('#cancelConfirmButton');
+  assert.equal(page.url(), originalUrl);
+  await page.waitForFunction(() => !selectionCopyBusy);
+  const copies = await page.evaluate(async () => {
+    const records = await getAllReports();
+    const source = records.find(r => r.id === window.originalId);
+    const copy = records.find(r => r.reason === 'selection-copy');
+    if (JSON.stringify(draftContentSnapshot()) !== window.originalDocument) throw Error('Source changed');
+    if (source.document.sections[0].rows.length !== 2) throw Error('Source rows lost');
+    if (!selectedRowIds.has('one') || !selectedRowIds.has('three')) throw Error('Selection lost');
+    window.firstCopyId = copy.id;
+    return { sections: copy.document.sections, publicId: copy.publicId, numbering: copy.document.numberingMode };
+  });
+  assert.equal(copies.numbering, 'manual');
+  assert.deepEqual(copies.sections.map(s => s.rows.length), [1, 1]);
+  assert.equal(copies.sections[0].rows[0].manualNumber, '7');
+  assert.match(copies.sections[1].rows[0].cells.extra, /data:image/);
+  assert.equal(copies.sections[1].collapsed, false);
+  await page.click('#selectionCopyButton');
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  await page.click('#acceptConfirmButton');
+  await page.waitForFunction(() => !selectionCopyBusy && draft.reportId !== window.originalId);
+  assert.notEqual(page.url(), originalUrl);
+  assert.equal(await page.locator('tr[data-row-id]').count(), 2);
+  const newUrl = page.url();
+  await page.reload();
+  await page.waitForFunction(() => draft.sections.length === 2 && draft.sections[0].rows.length === 1);
+  assert.equal(page.url(), newUrl);
+  await page.goto(originalUrl);
+  await page.waitForFunction(() => draft.sections[0].rows.length === 2);
+  // Storage failure keeps the source open and never offers an unusable copy.
+  await page.click('#selectionToggle');
+  await page.check('[data-selection-row="one"]');
+  await page.evaluate(() => {
+    window.realOpenDatabase = openDatabase;
+    openDatabase = async () => { throw Error('Test storage failure'); };
+  });
+  await page.click('#selectionCopyButton');
+  await page.waitForFunction(() => !selectionCopyBusy);
+  assert.equal(page.url(), originalUrl);
+  assert.equal(await page.locator('#confirmModal').isHidden(), true);
+  await page.evaluate(() => { openDatabase = window.realOpenDatabase; });
+  // Verify the transaction itself rolls back the source write if adding the copy fails.
+  await page.evaluate(async () => {
+    const before = clone(draft);
+    const stored = await getReportRecord(before.reportId);
+    const changed = { ...before, intro: 'Must roll back' };
+    try { await saveSelectionCopy(changed, before); throw Error('Expected duplicate failure'); }
+    catch (error) { if (error.message === 'Expected duplicate failure') throw error; }
+    const after = await getReportRecord(before.reportId);
+    if (after.document.intro !== stored.document.intro) throw Error('Partial history transaction');
+  });
+  // A changed source is never replaced by the asynchronously created copy.
+  await page.evaluate(async () => {
+    const realSave = saveSelectionCopy;
+    saveSelectionCopy = async (...args) => {
+      await realSave(...args);
+      elements.introEditor.innerHTML = '<p>Concurrent edit</p>';
+    };
+    const count = (await getAllReports()).length;
+    const first = copySelectedRowsToNewChecklist();
+    await copySelectedRowsToNewChecklist(); // Duplicate click while busy is a no-op.
+    await first;
+    saveSelectionCopy = realSave;
+    if (draft.intro !== '<p>Concurrent edit</p>') throw Error('Concurrent edit lost');
+    if ((await getAllReports()).length !== count + 1) throw Error('Duplicate copy');
+  });
+  assert.equal(page.url(), originalUrl);
+  assert.equal(await page.locator('#confirmModal').isHidden(), true);
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ version: path.basename(root), copied: 2, stay: true, open: true, reload: true, sourceHistory: true, storageFailure: true, rollback: true }));
+}
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
+  await browser?.close(); child?.kill();
+});

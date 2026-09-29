@@ -96,3 +96,32 @@ test('different column titles sharing an ID are preserved as separate fields', (
   ]);
   assert.equal(new Set(target.columns.map((c) => c.id)).size, target.columns.length);
 });
+
+test('copying selected sections preserves schemas, rich content, manual numbers and sort without mutating source', () => {
+  const { copySections } = require('../checklist-selection');
+  const rich = '<img src="data:image/png;base64,YQ=="><a href="https://example.test">File</a>';
+  const sections = [
+    { ...section('a', [{ ...row('1', 'OK', { check: rich }), manualNumber: '4.2' }, row('2')]), collapsed: true, statusSort: true },
+    section('b', [row('3', 'НЕ ОК', { custom: 'B' }), row('4', 'OK', { custom: '' })], [{ id: 'custom', title: 'Details', width: 310 }]),
+    section('ignored', [row('5')]),
+  ];
+  const before = structuredClone(sections);
+  const copy = copySections(sections, new Set(['4', '3', '1', 'stale']), id);
+  assert.deepEqual(sections, before);
+  assert.deepEqual(copy.map(s => s.title), ['a', 'b']);
+  assert.deepEqual(copy.map(s => s.rows.length), [1, 2]);
+  assert.equal(copy[0].collapsed, false);
+  assert.equal(copy[0].statusSort, true);
+  assert.equal(copy[0].rows[0].manualNumber, '4.2');
+  assert.equal(copy[0].rows[0].cells.check, rich);
+  assert.equal(copy[0].rows[0].status, 'OK');
+  assert.equal(copy[1].columns[0].width, 310);
+  assert.deepEqual(copy[1].rows.map(r => r.cells.custom), ['B', '']);
+  const oldIds = new Set(sections.flatMap(s => [s.id, ...s.rows.map(r => r.id)]));
+  assert.ok(copy.flatMap(s => [s.id, ...s.rows.map(r => r.id)]).every(value => !oldIds.has(value)));
+  copy[0].columns[0].title = 'Changed';
+  copy[0].rows[0].cells.check = 'Changed';
+  assert.deepEqual(sections, before);
+  assert.deepEqual(copySections(sections, new Set(), id), []);
+  assert.deepEqual(copySections(sections, new Set(['stale']), id), []);
+});

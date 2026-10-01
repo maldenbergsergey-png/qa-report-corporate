@@ -3715,11 +3715,25 @@ function generatePortableHtml() {
     cell.style.border = "1px solid #cfd6dd";
     cell.style.verticalAlign = "top";
     cell.style.textAlign = "left";
-    cell.style.overflowWrap = "anywhere";
+    cell.style.overflowWrap = "normal";
+    cell.style.wordBreak = "normal";
+    cell.style.hyphens = "none";
   });
   container.querySelectorAll("th").forEach((cell) => {
+    const titleLength = cell.textContent.replace(/\s+/g, " ").trim().length;
+    const minimumWidth = Math.min(240, Math.max(72, titleLength * 8 + 24));
+    cell.style.width = `${minimumWidth}px`;
+    cell.style.minWidth = `${minimumWidth}px`;
+    cell.setAttribute("width", String(minimumWidth));
     cell.style.background = "#e9edf2";
     cell.style.fontWeight = "700";
+  });
+  container.querySelectorAll("table").forEach((table) => {
+    const headers = [...table.querySelectorAll("thead tr:first-child th")];
+    if (headers.length) {
+      table.style.tableLayout = "fixed";
+      table.style.minWidth = `${headers.reduce((sum, cell) => sum + Number(cell.getAttribute("width")), 0)}px`;
+    }
   });
   container.querySelectorAll("tbody tr:nth-child(even)").forEach((row) => {
     row.style.background = "#fafbfc";

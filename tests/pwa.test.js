@@ -71,3 +71,19 @@ for (const other of [false, true]) test(`update ${other ? 'blocks multiple windo
   await dispatch(w, 'message', { data: { type: 'APPLY_UPDATE' }, source: { id: 'a' }, ports: [{ postMessage: data => reply = data }] });
   assert.equal(reply.ok, !other); assert.equal(w.activated(), !other);
 });
+
+test('Docker image includes every asset required to install the PWA, including workers', () => {
+  const root = path.resolve(__dirname, '..');
+  const context = { self: { addEventListener() {} } };
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'sw.js'), 'utf8') + '\nthis.assets = SHELL;', context);
+  const sources = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8').split('\n')
+    .filter(line => /^COPY\s/.test(line)).flatMap(line => line.trim().split(/\s+/)
+      .slice(1).filter(word => !word.startsWith('--')).slice(0, -1));
+  for (const asset of context.assets) {
+    const relative = asset === '/' ? 'index.html' : asset.split('?')[0].replace(/^\//, '');
+    const copied = sources.some(source => source === relative ||
+      (fs.existsSync(path.join(root, source)) && fs.statSync(path.join(root, source)).isDirectory()
+        && relative.startsWith(source.replace(/\/$/, '') + '/')));
+    assert.equal(copied, true, `Required PWA asset absent from Docker image: ${relative}`);
+  }
+});

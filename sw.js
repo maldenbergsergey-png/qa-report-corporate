@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v58';
+const CACHE_NAME = 'qa-report-corporate-assets-v59';
 const SHELL = [
   "/draft-storage-worker.js?v=1",
   "/report-file.js?v=1",
@@ -11,9 +11,9 @@ const SHELL = [
   "/checklist-table.js?v=2",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/styles.css?v=116', '/app.js?v=121', '/pwa.js?v=4',
+  '/styles.css?v=116', '/app.js?v=122', '/pwa.js?v=5',
   '/jira-markup-import.js?v=10', '/checklist-selection.js?v=3',
-  '/checklist-numbering.js?v=3', '/release-notes.js?v=41',
+  '/checklist-numbering.js?v=3', '/release-notes.js?v=42',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

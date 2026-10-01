@@ -8501,9 +8501,14 @@ const RELEASE_SEEN_KEY = "qa-report-release-seen-v1";
 let seenRelease = "";
 try { seenRelease = localStorage.getItem(RELEASE_SEEN_KEY) || ""; } catch {}
 
+function latestReleaseReceipt() {
+  const latest = window.QaReportReleases?.[0];
+  return latest ? `${latest.version}:${shortHashFromString(JSON.stringify(latest))}` : "";
+}
+
 function updateReleaseIndicator() {
   const latest = window.QaReportReleases?.[0];
-  const unread = Boolean(latest && seenRelease !== latest.version);
+  const unread = Boolean(latest && seenRelease !== latestReleaseReceipt());
   document.getElementById("whatsNewDot").hidden = !unread;
   whatsNewButton.setAttribute("aria-label", unread ? "Что нового — есть непросмотренные изменения" : "Что нового");
 }
@@ -8552,7 +8557,7 @@ whatsNewButton.addEventListener("click", () => {
   document.getElementById("whatsNewContent").scrollTop = 0;
   syncBodyModalOverflow();
   whatsNewClose.focus();
-  seenRelease = window.QaReportReleases?.[0]?.version || "";
+  seenRelease = latestReleaseReceipt();
   try { localStorage.setItem(RELEASE_SEEN_KEY, seenRelease); } catch {}
   updateReleaseIndicator();
 });

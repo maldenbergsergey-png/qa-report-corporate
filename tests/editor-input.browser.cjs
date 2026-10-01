@@ -161,7 +161,41 @@ async function main() {
   assert.deepEqual(await page.evaluate(() => ({ text: draft.sections[0].rows[1].cells.text,
     attachment: draft.sections[0].rows[0].cells.attachment, intro: draft.intro, issueUrl: draft.issueUrl, environment: draft.environment })), beforeReload);
   assert.deepEqual(errors, []);
+  // Trimming must preserve the latest 50 reports, including the previous tie
+  // order, without loading any document bodies or altering their attachments.
+  await page.evaluate(async () => {
+    await dbTransaction('readwrite', store => {
+      for (let index = 0; index < 55; index++) {
+        const id = `history-fixture-${String(index).padStart(2, '0')}`;
+        store.put({ id, publicId: (index + 1).toString(16).padStart(8, '0'),
+          updatedAt: index >= 50 ? '2021-01-01T00:00:00.000Z' : '2020-01-01T00:00:00.000Z',
+          historyComment: `Comment ${index}`, document: { intro: window.fixtureAttachment } });
+      }
+    });
+    const before = await getAllReports();
+    const expected = before.slice(0, HISTORY_LIMIT);
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    const originalGet = IDBObjectStore.prototype.get;
+    const originalCursor = IDBObjectStore.prototype.openCursor;
+    const rejectRead = () => { throw Error('History trimming read a report body'); };
+    IDBObjectStore.prototype.getAll = rejectRead;
+    IDBObjectStore.prototype.get = rejectRead;
+    IDBObjectStore.prototype.openCursor = rejectRead;
+    try { await trimReportHistory(); }
+    finally {
+      IDBObjectStore.prototype.getAll = originalGetAll;
+      IDBObjectStore.prototype.get = originalGet;
+      IDBObjectStore.prototype.openCursor = originalCursor;
+    }
+    const after = await getAllReports();
+    if (JSON.stringify(after) !== JSON.stringify(expected)) throw Error('History contents changed');
+    const originalKeyCursor = IDBIndex.prototype.openKeyCursor;
+    IDBIndex.prototype.openKeyCursor = () => { throw Error('History within the limit was scanned'); };
+    try { await trimReportHistory(); }
+    finally { IDBIndex.prototype.openKeyCursor = originalKeyCursor; }
+  });
   console.log('PASS: large-report input, autosave, typing after autosave, summary, attachments, undo/redo, report fields and reload');
+  console.log('PASS: history limit, equal timestamps, intact attachments and comments, no document reads');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   await browser?.close();

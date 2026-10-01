@@ -619,8 +619,8 @@ function sanitizeRichHtml(value) {
   return template.innerHTML;
 }
 
-function draftContentSnapshot(value = draft) {
-  const copy = clone(value);
+function draftContentFields(value = draft) {
+  const copy = { ...value };
   delete copy.revision;
   delete copy.updatedAt;
   delete copy.lastSavedBy;
@@ -633,6 +633,10 @@ function draftContentSnapshot(value = draft) {
   delete copy.scroll;
   delete copy.syncTimestamps;
   return copy;
+}
+
+function draftContentSnapshot(value = draft) {
+  return clone(draftContentFields(value));
 }
 
 function stripServerAttachmentsFromHtml(value) {
@@ -1266,8 +1270,27 @@ async function clearServerReports() {
 }
 
 async function trimReportHistory() {
-  const reports = await getAllReports();
-  for (const report of reports.slice(HISTORY_LIMIT)) await deleteReportRecord(report.id);
+  // Read only keys and dates; history documents may contain large attachments.
+  await dbTransaction("readwrite", (store) => {
+    const count = store.count();
+    count.onsuccess = () => {
+      if (count.result <= HISTORY_LIMIT) return;
+      const entries = [];
+      const request = store.index("updatedAt").openKeyCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          entries.push({ id: cursor.primaryKey, updatedAt: cursor.key });
+          cursor.continue();
+          return;
+        }
+        // A forward cursor keeps the previous primary-key order for equal dates.
+        entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        entries.slice(HISTORY_LIMIT).forEach(({ id }) => store.delete(id));
+      };
+    };
+    return count;
+  });
 }
 
 async function clearReportHistory() {
@@ -1869,7 +1892,7 @@ function saveLocalMutationNow() {
 }
 
 function serializeDraft() {
-  return JSON.stringify(draftContentSnapshot(draft));
+  return JSON.stringify(draftContentFields(draft));
 }
 
 function scheduleHistoryCommit() {
@@ -1938,19 +1961,22 @@ function collectDocumentFields() {
 }
 
 function collectSectionsFromDom() {
+  const sectionsById = new Map(draft.sections.map((section) => [section.id, section]));
   elements.sections.querySelectorAll(".check-section[data-section-id]").forEach((sectionElement) => {
-    const section = draft.sections.find((item) => item.id === sectionElement.dataset.sectionId);
+    const section = sectionsById.get(sectionElement.dataset.sectionId);
     if (!section) return;
+    const columnsById = new Map(section.columns.map((column) => [column.id, column]));
+    const rowsById = new Map(section.rows.map((row) => [row.id, row]));
     const title = sectionElement.querySelector(".section-title");
     if (title) section.title = title.value;
     section.collapsed = sectionElement.classList.contains("collapsed");
     sectionElement.querySelectorAll("th[data-column-id]").forEach((columnElement) => {
-      const column = section.columns.find((item) => item.id === columnElement.dataset.columnId);
+      const column = columnsById.get(columnElement.dataset.columnId);
       const columnTitle = columnElement.querySelector("input");
       if (column && columnTitle) column.title = columnTitle.value;
     });
     sectionElement.querySelectorAll("tr[data-row-id]").forEach((rowElement) => {
-      const row = section.rows.find((item) => item.id === rowElement.dataset.rowId);
+      const row = rowsById.get(rowElement.dataset.rowId);
       if (!row) return;
       rowElement.querySelectorAll(".cell-editor[data-column-id]").forEach((editor) => {
         row.cells[editor.dataset.columnId] = cleanEditorHtml(editor);

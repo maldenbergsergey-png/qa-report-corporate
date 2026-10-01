@@ -12,12 +12,12 @@ function harness() {
       { id: 'row', status: 'НЕ ПРОВЕРЕНО', cells: { text: 'Before', attachment: '' } },
       { id: 'other', status: 'OK', cells: { text: 'Keep', attachment: '<img src="data:image/png;base64,AAAA">' } },
     ] }] },
-    hasUnsavedLocalChanges: false, saveTimer: 0,
+    hasUnsavedLocalChanges: false, saveTimer: 0, localEditGeneration: 0,
     flushDraftFromDom: () => counts.collections++,
     cleanEditorHtml: editor => { counts.cleanups++; return editor.html; },
     htmlToText: html => html.replace(/<[^>]*>/g, '').trim(),
     renderSummary: () => counts.summaries++,
-    setSaveStatus() {}, saveDraft() {}, scheduleHistoryCommit: () => counts.history++,
+    setSaveStatus() {}, saveDraft: options => { counts.saveOptions = options; }, scheduleHistoryCommit: () => counts.history++,
     clearTimeout: id => timers.delete(id),
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
   });
@@ -39,6 +39,8 @@ test('typing only collects the edited cell, debounces saving and keeps history e
   assert.equal(ctx.hasUnsavedLocalChanges, true);
   assert.equal(timers.size, 1);
   assert.equal([...timers.values()][0].delay, 400);
+  [...timers.values()][0].callback();
+  assert.equal(counts.saveOptions.collect, false, "autosave avoids a full scan too");
   ctx.scheduleSave();
   assert.equal(counts.collections, 1, 'other operations retain the full collection');
 });
@@ -74,4 +76,15 @@ test('events from a removed row, column or section cannot mutate another report'
     assert.equal(counts.cleanups, 0);
     assert.equal(counts.history, 0);
   }
+});
+
+test('image, code and checked rows avoid HTML parsing just to detect presence', () => {
+  const { ctx } = harness();
+  ctx.htmlToText = () => { throw Error('Unnecessary rich HTML parse'); };
+  for (const row of [
+    { status: 'OK', cells: { text: '<p>text</p>' } },
+    { status: 'НЕ ПРОВЕРЕНО', cells: {} },
+    { status: 'НЕ ПРОВЕРЕНО', cells: { text: '<figure><img src="data:image/png;base64,AAAA"></figure>' } },
+    { status: 'НЕ ПРОВЕРЕНО', cells: { text: '<pre><code>sample</code></pre>' } },
+  ]) assert.equal(ctx.hasRowContent(row), true);
 });

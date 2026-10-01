@@ -97,7 +97,11 @@ async function main() {
   });
   await other.goto(origin); await other.waitForSelector('#settingsButton');
   const previous = await other.evaluate(() => { elements.introEditor.innerHTML = '<p>Сохранить прежний отчёт</p>'; return draft.reportId; });
-  await other.setInputFiles('#reportFileInput', archive);
+  // File selection now has its own import-tab test. This round-trip suite
+  // exercises the file operation directly, including its success/error dialog.
+  const openArchive = bytes => other.evaluate(bytes => runReportFileOperation("Открыть полную копию", onProgress =>
+    openReportFile(new File([new Uint8Array(bytes)], 'fixture.report', { type: 'application/zip' }), onProgress)), Array.from(bytes));
+  await openArchive(fs.readFileSync(archive));
   await other.waitForFunction(() => !reportFileBusy && document.getElementById('reportFileStatus').textContent.includes('Открыта отдельная копия'));
   const restored = await other.evaluate(async () => ({ value: window.QaReportFile.documentFields(draft), reportId: draft.reportId, publicId: draft.publicId,
     before: (await getAllReports()).find(r => r.document.intro.includes('Сохранить прежний отчёт')) }));
@@ -126,13 +130,13 @@ async function main() {
   // Damaged archive must not replace the document or change local history.
   const beforeFailure = await other.evaluate(async () => ({ id: draft.reportId, intro: draft.intro, count: (await getAllReports()).length }));
   const damaged = Buffer.from(fs.readFileSync(archive)); damaged[50] ^= 1;
-  await other.setInputFiles('#reportFileInput', { name: 'damaged.report', mimeType: 'application/zip', buffer: damaged });
+  await openArchive(damaged);
   await other.waitForFunction(() => !reportFileBusy && !document.getElementById('reportFileError').hidden);
   assert.deepEqual(await other.evaluate(async () => ({ id: draft.reportId, intro: draft.intro, count: (await getAllReports()).length })), beforeFailure);
   await other.click('#closeReportFileButton');
   // A failed second write aborts BOTH records and leaves the open editor intact.
   await other.evaluate(() => { window.originalRecord = portableHistoryRecord; portableHistoryRecord = (value, reason, existing) => { if (reason === 'file-import') throw new DOMException('Quota', 'QuotaExceededError'); return window.originalRecord(value, reason, existing); }; });
-  await other.setInputFiles('#reportFileInput', archive);
+  await openArchive(fs.readFileSync(archive));
   await other.waitForFunction(() => !reportFileBusy && !document.getElementById('reportFileError').hidden);
   assert.match(await other.locator('#reportFileError').innerText(), /недостаточно места/);
   assert.deepEqual(await other.evaluate(async () => ({ id: draft.reportId, intro: draft.intro, count: (await getAllReports()).length })), beforeFailure);

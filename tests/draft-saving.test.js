@@ -14,16 +14,16 @@ function harness({ quota = true } = {}) {
     draft: { reportId: "report", revision: 1, intro: "Imported with attachments" },
     clone: structuredClone, normalizeDraft: structuredClone,
     hasUnsavedLocalChanges: true, applyingRemoteDraft: false, forceLocalDraftSave: false,
-    cloudHistoryEnabled: false, saveTimer: 0, tabId: "tab", reportClientId: "client",
-    clearTimeout() {}, flushDraftFromDom() {}, readStoredDraft: () => null, getFreshestStoredDraft: async () => null,
+    cloudHistoryEnabled: false, saveTimer: 0, localEditGeneration: 0, savedContentForHistory: null, draftWriteQueue: Promise.resolve(), tabId: "tab", reportClientId: "client",
+    clearTimeout() {}, flushDraftFromDom() { ctx.localEditGeneration++; }, readStoredDraft: () => null, getFreshestStoredDraft: async () => null,
     localStorage: { setItem(key, value) { if (quota) throw new Error("QuotaExceededError"); stored.push(JSON.parse(value)); } },
-    STORAGE_KEY: "draft", setSaveStatus: value => statuses.push(value),
+    STORAGE_KEY: "draft", DRAFT_LOCATION_KEY: "location", LOCAL_DRAFT_COPY_LIMIT: 1024 * 1024, setSaveStatus: value => statuses.push(value),
     saveReportSnapshot: (reason, candidate) => { const d = deferred(); writes.push({ ...d, candidate: structuredClone(candidate) }); return d.promise; },
-    broadcastDraftUpdate: () => broadcasts.push(structuredClone(ctx.draft)),
+    broadcastDraftUpdate: snapshot => broadcasts.push(structuredClone(snapshot)),
     serializeDraft: () => JSON.stringify(ctx.draft),
   });
   const source = fs.readFileSync(require.resolve("../app.js"), "utf8");
-  for (const name of ["saveDraft", "persistLocalDraft", "flushPendingDraftSave"]) {
+  for (const name of ["copyDraftValue", "writeLocalDraftCopy", "draftSaveMetadata", "saveDraft", "persistLocalDraft", "flushPendingDraftSave"]) {
     const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
     assert.ok(start >= 0, name);
     vm.runInContext(source.slice(start, source.indexOf("\n}", start) + 2), ctx);
@@ -74,7 +74,8 @@ for (const change of ["edit", "import", "switch"]) test(`late save completion ca
   for (const failure of [true, false]) {
     const h = harness();
     h.ctx.flushPendingDraftSave();
-    if (change === "edit") h.ctx.draft.intro = "New typing";
+    await settle();
+    if (change === "edit") { h.ctx.draft.intro = "New typing"; h.ctx.localEditGeneration++; }
     if (change === "import") h.ctx.draft = { ...h.ctx.draft, revision: h.ctx.draft.revision + 1, intro: "New AI batch" };
     if (change === "switch") h.ctx.draft = { ...h.ctx.draft, reportId: "another" };
     h.ctx.setSaveStatus("New operation");
@@ -86,14 +87,48 @@ for (const change of ["edit", "import", "switch"]) test(`late save completion ca
   }
 });
 
-test("an older failure cannot replace a newer successful save", async () => {
+test("overlapping saves write in request order and an old failure cannot replace a newer save", async () => {
   const h = harness();
   h.ctx.flushPendingDraftSave();
-  h.ctx.flushPendingDraftSave();
-  h.writes[1].resolve();
   await settle();
+  h.ctx.draft.intro = "New typing";
+  h.ctx.localEditGeneration++;
+  h.ctx.flushPendingDraftSave();
+  await settle();
+  assert.equal(h.writes.length, 1, "second snapshot waits for the first write");
   h.writes[0].reject(new Error("old failure"));
+  await settle();
+  assert.equal(h.writes.length, 2);
+  assert.equal(h.writes[1].candidate.intro, "New typing");
+  assert.equal(h.statuses.at(-1), "Сохранение…");
+  h.writes[1].resolve();
   await settle();
   assert.equal(h.statuses.at(-1), "Сохранено");
   assert.equal(h.ctx.hasUnsavedLocalChanges, false);
+});
+
+test("large reports avoid localStorage payload writes and publish the locator only after commit", async () => {
+  const h = harness({ quota: false });
+  h.ctx.draft.intro = "x".repeat(1024 * 1024 + 1);
+  const result = h.ctx.saveDraft({ collect: false });
+  await settle();
+  assert.equal(h.stored.length, 0);
+  assert.equal(h.ctx.hasUnsavedLocalChanges, true);
+  h.writes[0].resolve();
+  assert.equal(await result, true);
+  assert.equal(h.stored.length, 1);
+  assert.equal(h.stored[0].reportId, "report");
+  assert.equal(h.stored[0].intro, undefined, "locator contains no report payload");
+});
+
+test("a failed large save does not replace the previous locator or mark data saved", async () => {
+  const h = harness({ quota: false });
+  h.ctx.draft.intro = "x".repeat(1024 * 1024 + 1);
+  const result = h.ctx.saveDraft({ collect: false });
+  await settle();
+  h.writes[0].reject(new Error("IDB quota"));
+  assert.equal(await result, false);
+  assert.equal(h.stored.length, 0);
+  assert.equal(h.ctx.hasUnsavedLocalChanges, true);
+  assert.equal(h.statuses.at(-1), "Ошибка сохранения");
 });

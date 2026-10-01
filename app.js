@@ -1,4 +1,6 @@
 const STORAGE_KEY = "qa-report-editor-draft-v2";
+const DRAFT_LOCATION_KEY = "qa-report-draft-location-v1";
+const LOCAL_DRAFT_COPY_LIMIT = 1024 * 1024;
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
 const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
@@ -359,11 +361,19 @@ const elements = {
   openCloudCopyButton: document.querySelector("#openCloudCopyButton"),
 };
 
+const sanitizedDraftFields = new WeakMap();
 const tabId = crypto.randomUUID();
 const draftSyncChannel =
   typeof BroadcastChannel === "function" ? new BroadcastChannel(DRAFT_SYNC_CHANNEL) : null;
 let draft = loadDraft();
 let saveTimer;
+let localEditGeneration = 0;
+let savedContentForHistory = null;
+let draftWriteQueue = Promise.resolve();
+let reportMetadataWorker = null;
+let reportMetadataWorkerDisabled = false;
+let reportMetadataRequestId = 0;
+const reportMetadataRequests = new Map();
 let toastTimer;
 let activeEditor = elements.introEditor;
 let savedEditorRange = null;
@@ -490,7 +500,7 @@ function preserveKnownColumnMetadata(nextDraft, baseDraft = draft) {
 }
 
 function normalizeSections(sections) {
-  return clone(sections).map((section, sectionIndex) => {
+  return copyDraftValue(sections).map((section, sectionIndex) => {
     const columns = (Array.isArray(section.columns) ? section.columns : DEFAULT_COLUMNS).map(
       (column, columnIndex) => ({
         ...column,
@@ -543,15 +553,28 @@ function normalizeDraft(value) {
     numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
     sections,
   };
-  normalized.intro = sanitizeRichHtml(normalized.intro);
-  normalized.sections.forEach((section) => {
-    section.rows.forEach((row) => {
+  sanitizeDraftHtmlField(normalized, "intro", parsed);
+  normalized.sections.forEach((section, sectionIndex) => {
+    section.rows.forEach((row, rowIndex) => {
+      const previousCells = parsed.sections?.[sectionIndex]?.rows?.[rowIndex]?.cells;
       Object.keys(row.cells || {}).forEach((columnId) => {
-        row.cells[columnId] = sanitizeRichHtml(row.cells[columnId]);
+        sanitizeDraftHtmlField(row.cells, columnId, previousCells);
       });
     });
   });
   return normalized;
+}
+
+function sanitizeDraftHtmlField(owner, key, previousOwner) {
+  // Only a value previously returned by the sanitizer may bypass parsing.
+  // Loading/importing a new object, or changing any field, runs the same sanitizer.
+  const value = owner[key];
+  const checked = previousOwner && sanitizedDraftFields.get(previousOwner);
+  const safeValue = checked?.has(key) && checked.get(key) === value ? value : sanitizeRichHtml(value);
+  owner[key] = safeValue;
+  let fields = sanitizedDraftFields.get(owner);
+  if (!fields) { fields = new Map(); sanitizedDraftFields.set(owner, fields); }
+  fields.set(key, safeValue);
 }
 
 function sanitizeRichHtml(value) {
@@ -617,6 +640,23 @@ function sanitizeRichHtml(value) {
     placeholder.textContent = placeholder.dataset.jiraName;
   });
   return template.innerHTML;
+}
+
+function copyDraftValue(value) {
+  // Documents contain JSON values. Copy containers while sharing immutable HTML
+  // strings, instead of encoding and decoding every embedded attachment.
+  if (value && typeof value.toJSON === "function") return copyDraftValue(value.toJSON());
+  if (Array.isArray(value)) return Array.from(value, (item) => copyDraftValue(item) ?? null);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
+      const copy = copyDraftValue(item);
+      return copy === undefined ? [] : [[key, copy]];
+    }));
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? (value || 0) : null;
+  if (["undefined", "function", "symbol"].includes(typeof value)) return undefined;
+  if (typeof value === "bigint") throw new TypeError("Draft values must be JSON-compatible");
+  return value;
 }
 
 function draftContentFields(value = draft) {
@@ -899,11 +939,52 @@ function reportIssueLabel(report) {
   return issueKeyFromUrl(issueUrl) || String(issueUrl).trim() || "Без задачи";
 }
 
+async function getReportMetadata(id) {
+  if (typeof Worker !== "function" || reportMetadataWorkerDisabled) return getReportRecord(id);
+  await openDatabase(); // The existing main-thread code owns schema initialization.
+  try {
+    if (!reportMetadataWorker) {
+      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=1");
+      reportMetadataWorker.addEventListener("message", ({ data }) => {
+        const pending = reportMetadataRequests.get(data.requestId);
+        if (!pending) return;
+        reportMetadataRequests.delete(data.requestId);
+        clearTimeout(pending.timer);
+        if (data.error) pending.reject(new Error(data.error));
+        else pending.resolve(data.metadata);
+      });
+      reportMetadataWorker.addEventListener("error", () => {
+        reportMetadataWorkerDisabled = true;
+        reportMetadataWorker.terminate();
+        reportMetadataWorker = null;
+        for (const pending of reportMetadataRequests.values()) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error("Metadata worker unavailable"));
+        }
+        reportMetadataRequests.clear();
+      });
+    }
+    return await new Promise((resolve, reject) => {
+      const requestId = ++reportMetadataRequestId;
+      const timer = setTimeout(() => {
+        reportMetadataRequests.delete(requestId);
+        reject(new Error("Metadata read timed out"));
+      }, 10000);
+      reportMetadataRequests.set(requestId, { resolve, reject, timer });
+      reportMetadataWorker.postMessage({ requestId, databaseName: DB_NAME,
+        databaseVersion: DB_VERSION, storeName: REPORT_STORE, reportId: id });
+    });
+  } catch {
+    // Older browsers, blocked workers, and storage errors retain the old path.
+    return getReportRecord(id);
+  }
+}
+
 async function saveReportSnapshot(reason = "manual", candidate = null) {
   if (!candidate) flushDraftFromDom();
-  const snapshot = candidate || draft;
+  const snapshot = candidate || copyDraftValue(draft);
   const now = new Date().toISOString();
-  const existing = await getReportRecord(snapshot.reportId);
+  const existing = await getReportMetadata(snapshot.reportId);
   const issueKey = issueKeyFromUrl(snapshot.issueUrl);
   const record = {
     id: snapshot.reportId,
@@ -918,7 +999,7 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
     lastOpenedAt: now,
     reason,
     historyComment: existing?.historyComment || "",
-    document: clone(snapshot),
+    document: snapshot,
     schemaVersion: 3,
   };
   await dbTransaction("readwrite", (store) => store.put(record));
@@ -941,7 +1022,10 @@ function queueServerReportSave(record) {
         clearDismissedCloudHash(record.id);
       }
       if (result.report?.publicId && draft.reportId === record.id) {
-        draft.publicId = result.report.publicId;
+        if (draft.publicId !== result.report.publicId) {
+          draft.publicId = result.report.publicId;
+          scheduleSave({ collect: false });
+        }
         updateChecklistUrl();
       }
     })
@@ -1188,7 +1272,8 @@ async function findLocalReportByPublicId(publicId) {
 }
 
 async function openReportFromRoute() {
-  const publicId = routeChecklistPublicId();
+  const location = readDraftLocation();
+  const publicId = routeChecklistPublicId() || (isNewerDraft(location) ? location?.publicId : "");
   if (!publicId) {
     updateChecklistUrl(draft.publicId);
     return;
@@ -1196,9 +1281,10 @@ async function openReportFromRoute() {
   // Черновик из localStorage загружается синхронно до IndexedDB. При быстром
   // обновлении страницы запись истории могла ещё не успеть сохраниться, но
   // совпадающий publicId уже однозначно указывает на открытый чек-лист.
-  if (normalizePublicId(draft.publicId) === publicId) return;
+  if (normalizePublicId(draft.publicId) === publicId && !isNewerDraft(location)) return;
   try {
-    const localReport = await findLocalReportByPublicId(publicId);
+    const localReport = location?.publicId === publicId
+      ? await getReportRecord(location.reportId) : await findLocalReportByPublicId(publicId);
     const fullReport = localReport || (cloudHistoryEnabled ? await getServerReport(publicId) : null);
     if (!fullReport?.document) throw new Error("not-found");
     applyDraftLocally(fullReport.document, { status: "Сохранено" });
@@ -1223,12 +1309,13 @@ async function getAllHistoryReports() {
 
 async function getFreshestStoredDraft() {
   const candidates = [];
-  const stored = readStoredDraft();
+  const stored = readStoredDraft({ normalize: false });
   if (stored && isSameDraftLineage(stored)) candidates.push(stored);
   try {
-    const currentReport = await getReportRecord(draft.reportId);
-    if (currentReport?.document) {
-      const reportDraft = normalizeDraft(currentReport.document);
+    const metadata = await getReportMetadata(draft.reportId);
+    if (metadata?.document && isSameDraftLineage(metadata.document) && isNewerDraft(metadata.document)) {
+      const currentReport = await getReportRecord(draft.reportId);
+      const reportDraft = currentReport?.document;
       if (isSameDraftLineage(reportDraft)) candidates.push(reportDraft);
     }
   } catch {
@@ -1297,8 +1384,8 @@ async function clearReportHistory() {
   await dbTransaction("readwrite", (store) => store.clear());
 }
 
-async function saveDraft() {
-  flushDraftFromDom();
+async function saveDraft({ collect = true } = {}) {
+  if (collect) flushDraftFromDom();
   if (!applyingRemoteDraft && !forceLocalDraftSave) {
     const stored = await getFreshestStoredDraft();
     if (stored && isNewerDraft(stored)) {
@@ -1335,42 +1422,87 @@ async function saveDraft() {
 }
 
 // localStorage is a fast copy; reports with attachments may fit only in IndexedDB.
-function persistLocalDraft() {
-  const snapshot = clone(draft);
+function persistLocalDraft({ forceLocalCopy = false } = {}) {
+  const currentDraft = draft;
+  const generation = localEditGeneration;
+  const snapshot = copyDraftValue(draft);
   const content = serializeDraft();
-  const isCurrent = () => draft.reportId === snapshot.reportId && draft.revision === snapshot.revision && serializeDraft() === content;
-  let localStorageSaved = false;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    localStorageSaved = true;
-  } catch {
-    // Wait for the durable fallback before reporting a storage failure.
-  }
+  savedContentForHistory = { draft: currentDraft, generation, content };
+  const isCurrent = () => draft === currentDraft && localEditGeneration === generation
+    && draft.reportId === snapshot.reportId && draft.revision === snapshot.revision;
+  const localStorageSaved = writeLocalDraftCopy(snapshot, forceLocalCopy ? 0 : content.length);
   hasUnsavedLocalChanges = !localStorageSaved;
   setSaveStatus(localStorageSaved ? "Сохранено" : "Сохранение…", { saving: !localStorageSaved });
-  if (localStorageSaved && !applyingRemoteDraft) broadcastDraftUpdate();
-  const completion = saveReportSnapshot("autosave", snapshot).then(() => {
-    if (!localStorageSaved && isCurrent()) {
+  // Keep writes in request order, including a save started during a slow write.
+  const write = draftWriteQueue.catch(() => {}).then(() => saveReportSnapshot("autosave", snapshot));
+  draftWriteQueue = write;
+  const completion = write.then(() => {
+    if (isCurrent()) {
       hasUnsavedLocalChanges = false;
       setSaveStatus("Сохранено");
-      if (!applyingRemoteDraft) broadcastDraftUpdate();
+      try { localStorage.setItem(DRAFT_LOCATION_KEY, JSON.stringify(draftSaveMetadata(snapshot))); } catch {}
+      if (!applyingRemoteDraft) broadcastDraftUpdate(snapshot);
     }
     return true;
   }, () => {
-    if (!localStorageSaved && isCurrent()) {
-      hasUnsavedLocalChanges = true;
-      setSaveStatus("Ошибка сохранения");
+    if (isCurrent()) {
+      hasUnsavedLocalChanges = !localStorageSaved;
+      if (!localStorageSaved) setSaveStatus("Ошибка сохранения");
+      else if (!applyingRemoteDraft) broadcastDraftUpdate(snapshot, { localStorageOnly: true });
     }
     return localStorageSaved;
   });
   return { localStorageSaved, completion };
 }
 
+function writeLocalDraftCopy(snapshot, contentLength) {
+  // Keep the existing small-report fallback and its file format. Large reports
+  // already use IndexedDB; do not repeatedly encode a copy that cannot fit.
+  if (contentLength > LOCAL_DRAFT_COPY_LIMIT) return false;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function draftSaveMetadata(value = draft) {
+  const { reportId, publicId, draftId, revision, updatedAt, lastSavedBy, lastSavedClientId } = value;
+  return { reportId, publicId, draftId, revision, updatedAt, lastSavedBy, lastSavedClientId };
+}
+
+function readDraftLocation() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DRAFT_LOCATION_KEY) || "null");
+    return value?.reportId && normalizePublicId(value.publicId) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function handleDraftSyncMessage(message) {
+  if (message?.type !== "draft-updated" || message.storageKey !== STORAGE_KEY) return;
+  // Accept messages from a tab that still runs the previous application version.
+  if (message.draft) { handleRemoteDraftUpdate(message.draft); return; }
+  if (!isSameDraftLineage(message) || !isNewerDraft(message) || message.tabId === tabId) return;
+  const reportId = draft.reportId;
+  try {
+    const remote = message.localStorageOnly ? readStoredDraft({ normalize: false })
+      : (await getReportRecord(message.reportId))?.document;
+    if (draft.reportId === reportId && isSameDraftLineage(remote) && isNewerDraft(remote)) {
+      handleRemoteDraftUpdate(remote);
+    }
+  } catch {
+    // A missing or unavailable store must not replace the current document.
+  }
+}
+
 function flushPendingDraftSave() {
   clearTimeout(saveTimer);
   flushDraftFromDom();
   if (!applyingRemoteDraft) {
-    const stored = readStoredDraft();
+    const stored = readStoredDraft({ normalize: false });
     if (stored && isNewerDraft(stored) && (hasUnsavedLocalChanges || serializeDraft() !== historyCurrent)) {
       if (isSavedByThisBrowser(stored)) {
         applyRemoteDraft(stored);
@@ -1392,25 +1524,25 @@ function flushPendingDraftSave() {
     draft.lastSavedBy = tabId;
     draft.lastSavedClientId = reportClientId;
   }
-  return persistLocalDraft().localStorageSaved;
+  return persistLocalDraft({ forceLocalCopy: true }).localStorageSaved;
 }
 
-function broadcastDraftUpdate() {
+function broadcastDraftUpdate(snapshot = draft, { localStorageOnly = false } = {}) {
   draftSyncChannel?.postMessage({
     type: "draft-updated",
     storageKey: STORAGE_KEY,
-    draft: clone(draft),
-    draftId: draft.draftId,
-    revision: draft.revision,
-    updatedAt: draft.updatedAt,
+    ...draftSaveMetadata(snapshot),
+    localStorageOnly,
     tabId,
   });
 }
 
-function readStoredDraft() {
+function readStoredDraft({ normalize = true } = {}) {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? normalizeDraft(JSON.parse(saved)) : null;
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    return normalize ? normalizeDraft(parsed) : parsed;
   } catch {
     return null;
   }
@@ -1607,12 +1739,8 @@ function applyDraftLocally(nextDraft, { status = "Сохранено" } = {}) {
   clearTimeout(saveTimer);
   clearTimeout(historyTimer);
   draft = normalized;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-  } catch {
-    // Если draft слишком большой для localStorage, актуальная копия остаётся в IndexedDB.
-  }
   historyCurrent = serializeDraft();
+  writeLocalDraftCopy(draft, historyCurrent.length);
   hasUnsavedLocalChanges = false;
   undoStack = [];
   redoStack = [];
@@ -1874,10 +2002,11 @@ function scheduleSave({ collect = true } = {}) {
   // Input handlers that already updated the current draft can skip the full scan.
   // Structural operations keep the existing collection path.
   if (collect) flushDraftFromDom();
+  localEditGeneration++;
   hasUnsavedLocalChanges = true;
   setSaveStatus("Есть несохранённые изменения");
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveDraft, 400);
+  saveTimer = setTimeout(() => saveDraft({ collect: false }), 400);
   scheduleHistoryCommit();
 }
 
@@ -1899,8 +2028,11 @@ function scheduleHistoryCommit() {
   if (suppressHistory) return;
   clearTimeout(historyTimer);
   historyTimer = setTimeout(() => {
-    collectDocumentFields();
-    const next = serializeDraft();
+    // Input handlers already collected the changed field; structural handlers
+    // collected the document before scheduling this commit. Reuse the save text.
+    const cached = savedContentForHistory;
+    const next = cached?.draft === draft && cached.generation === localEditGeneration
+      ? cached.content : serializeDraft();
     if (next === historyCurrent) return;
     undoStack.push(historyCurrent);
     if (undoStack.length > 100) undoStack.shift();
@@ -1953,6 +2085,7 @@ function redo() {
 }
 
 function collectDocumentFields() {
+  localEditGeneration++;
   draft.issueUrl = elements.issueUrl.value;
   draft.environment = elements.environment.value.trim() || "Не указано";
   draft.overallStatus = elements.overallStatus.value;
@@ -3274,9 +3407,9 @@ function setStatusClass(select, status) {
 
 function hasRowContent(row) {
   return (
-    Object.values(row.cells).some((value) => htmlToText(value) || /<img|<pre/i.test(value)) ||
     row.status !== "НЕ ПРОВЕРЕНО" ||
-    Object.keys(row.cells).length === 0
+    Object.keys(row.cells).length === 0 ||
+    Object.values(row.cells).some((value) => /<img|<pre/i.test(value) || htmlToText(value))
   );
 }
 
@@ -8215,7 +8348,7 @@ window.addEventListener("resize", () => {
 });
 draftSyncChannel?.addEventListener("message", (event) => {
   if (event.data?.type !== "draft-updated" || event.data.storageKey !== STORAGE_KEY) return;
-  handleRemoteDraftUpdate(event.data.draft);
+  handleDraftSyncMessage(event.data).catch(() => {});
 });
 window.addEventListener("storage", (event) => {
   if (event.key === PINNED_COLUMNS_KEY || event.key === null) {
@@ -8223,6 +8356,12 @@ window.addEventListener("storage", (event) => {
     applyPinnedColumns();
     // Keep an open settings form in sync with the shared browser preference.
     fillPinnedColumnsForm();
+  }
+  if (event.key === DRAFT_LOCATION_KEY && event.newValue) {
+    try {
+      handleDraftSyncMessage({ ...JSON.parse(event.newValue), type: "draft-updated", storageKey: STORAGE_KEY }).catch(() => {});
+    } catch {}
+    return;
   }
   if (event.key !== STORAGE_KEY || !event.newValue) return;
   try {
@@ -8345,7 +8484,7 @@ window.addEventListener("beforeunload", (event) => {
 render();
 getLocalAttachmentLimits();
 refreshObjectStorageUi();
-if (!routeChecklistPublicId()) updateChecklistUrl(draft.publicId);
+if (!routeChecklistPublicId() && !isNewerDraft(readDraftLocation())) updateChecklistUrl(draft.publicId);
 updateHistoryButtons();
 if (new URL(window.location.href).searchParams.has("importToken")) {
   handleInboundChecklistImport();

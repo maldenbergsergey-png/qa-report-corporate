@@ -39,7 +39,7 @@ function element() {
 
 function harness(records = new Map()) {
   const ctx = vm.createContext({
-    URL, document: { createElement: element },
+    URL, localEditGeneration: 0, document: { createElement: element },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
@@ -52,8 +52,8 @@ function harness(records = new Map()) {
     getAllReports: async () => [...records.values()].map(record => structuredClone(record)),
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
-  for (const name of ["issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+  for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
+    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;

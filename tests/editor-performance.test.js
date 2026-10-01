@@ -76,3 +76,40 @@ test('table collection updates current rows by identity, including manual number
   assert.deepEqual(section.rows.map(item => item.status), ['НЕ ОК', 'OK']);
   assert.deepEqual(section.rows.map(item => item.manualNumber), ['7.1', '7.2']);
 });
+
+test('save copies preserve legacy JSON fields and attachments without sharing mutable containers', () => {
+  const value = { schemaVersion: 2, reportId: 'legacy', publicId: 'abc12345', extra: { custom: [1, null] },
+    intro: '<p>Introduction</p>', sections: [{ id: 'section', collapsed: true,
+      columns: [{ id: 'text', name: 'Legacy title', width: 333, required: true }],
+      rows: [{ id: 'row', manualNumber: '7.2', status: 'НЕ ОК', custom: { old: true },
+        cells: { text: '<figure><img src="data:image/png;base64,AAAA"></figure>' } }] }],
+    optional: undefined, nonfinite: NaN, values: [undefined, Infinity] };
+  const ctx = load({}, ['copyDraftValue']);
+  const copy = ctx.copyDraftValue(value);
+  assert.equal(JSON.stringify(copy), JSON.stringify(value));
+  copy.sections[0].rows[0].cells.text = 'Changed';
+  copy.sections[0].columns[0].width = 200;
+  copy.extra.custom.push(2);
+  assert.equal(value.sections[0].rows[0].cells.text.includes('data:image/png'), true);
+  assert.equal(value.sections[0].columns[0].width, 333);
+  assert.equal(value.extra.custom.length, 2);
+});
+
+test('history commit reuses the saved content and reflects edits made during a pending save', () => {
+  let callback, serializations = 0;
+  const draft = { intro: 'Saved' };
+  const ctx = load({ draft, suppressHistory: false, historyTimer: 0, localEditGeneration: 1,
+    savedContentForHistory: { draft, generation: 1, content: JSON.stringify(draft) },
+    historyCurrent: '{"intro":"Before"}', undoStack: [], redoStack: ['Redo'],
+    clearTimeout() {}, setTimeout: fn => { callback = fn; }, updateHistoryButtons() {},
+    collectDocumentFields: () => { throw Error('History scanned the table'); },
+    serializeDraft: () => { serializations++; return JSON.stringify(draft); },
+  }, ['scheduleHistoryCommit']);
+  ctx.scheduleHistoryCommit(); callback();
+  assert.equal(serializations, 0);
+  assert.equal(ctx.historyCurrent, '{"intro":"Saved"}');
+  draft.intro = 'New typing'; ctx.localEditGeneration++;
+  ctx.scheduleHistoryCommit(); callback();
+  assert.equal(serializations, 1);
+  assert.equal(ctx.historyCurrent, '{"intro":"New typing"}');
+});

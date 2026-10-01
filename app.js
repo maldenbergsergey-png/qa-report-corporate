@@ -3689,6 +3689,33 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
   return wrapper.innerHTML;
 }
 
+function wrapPortableUrls(container) {
+  container.querySelectorAll("td").forEach((cell) => {
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    const urlNodes = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (/https?:\/\//i.test(node.data) && !node.parentElement?.closest("pre, code")) urlNodes.push(node);
+    }
+    urlNodes.forEach((node) => {
+      const fragment = document.createDocumentFragment();
+      let offset = 0;
+      for (const match of node.data.matchAll(/https?:\/\/\S+/gi)) {
+        fragment.append(document.createTextNode(node.data.slice(offset, match.index)));
+        const url = document.createElement("span");
+        url.style.overflowWrap = "anywhere";
+        url.style.wordBreak = "break-word";
+        url.style.whiteSpace = "normal";
+        url.textContent = match[0];
+        fragment.append(url);
+        offset = match.index + match[0].length;
+      }
+      fragment.append(document.createTextNode(node.data.slice(offset)));
+      node.replaceWith(fragment);
+    });
+  });
+}
+
 function generatePortableHtml() {
   const container = document.createElement("div");
   container.innerHTML = generateVisualPreview();
@@ -3719,20 +3746,32 @@ function generatePortableHtml() {
     cell.style.wordBreak = "normal";
     cell.style.hyphens = "none";
   });
+  container.querySelectorAll("td").forEach((cell) => {
+    cell.style.overflowWrap = "break-word";
+  });
   container.querySelectorAll("th").forEach((cell) => {
-    const titleLength = cell.textContent.replace(/\s+/g, " ").trim().length;
-    const minimumWidth = Math.min(240, Math.max(72, titleLength * 8 + 24));
-    cell.style.width = `${minimumWidth}px`;
-    cell.style.minWidth = `${minimumWidth}px`;
-    cell.setAttribute("width", String(minimumWidth));
     cell.style.background = "#e9edf2";
     cell.style.fontWeight = "700";
   });
   container.querySelectorAll("table").forEach((table) => {
     const headers = [...table.querySelectorAll("thead tr:first-child th")];
     if (headers.length) {
+      const rows = [...(table.tBodies[0]?.rows || [])];
+      const widths = headers.map((cell, index) => {
+        const titleLength = cell.textContent.replace(/\s+/g, " ").trim().length;
+        let longestWord = 0;
+        rows.forEach((row) => {
+          const text = (row.cells[index]?.textContent || "").replace(/https?:\/\/\S+/gi, " ");
+          for (const word of text.match(/\S+/g) || []) longestWord = Math.max(longestWord, word.length);
+        });
+        const minimumWidth = Math.min(240, Math.max(72, titleLength * 8 + 24, longestWord * 8 + 24));
+        cell.style.width = `${minimumWidth}px`;
+        cell.style.minWidth = `${minimumWidth}px`;
+        cell.setAttribute("width", String(minimumWidth));
+        return minimumWidth;
+      });
       table.style.tableLayout = "fixed";
-      table.style.minWidth = `${headers.reduce((sum, cell) => sum + Number(cell.getAttribute("width")), 0)}px`;
+      table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
     }
   });
   container.querySelectorAll("tbody tr:nth-child(even)").forEach((row) => {
@@ -3756,6 +3795,7 @@ function generatePortableHtml() {
     block.style.background = "#f4f5f7";
     block.style.whiteSpace = "pre-wrap";
   });
+  wrapPortableUrls(container);
   return container.outerHTML;
 }
 

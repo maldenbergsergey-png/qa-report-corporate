@@ -1,7 +1,7 @@
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./jira-markup-import"));
-  else root.QaReportImportOptions = factory(root.QaReportJiraImport);
-})(typeof globalThis !== "undefined" ? globalThis : this, function (jira) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./jira-markup-import"), () => require("./checklist-numbering"));
+  else root.QaReportImportOptions = factory(root.QaReportJiraImport, () => root.ChecklistNumbering);
+})(typeof globalThis !== "undefined" ? globalThis : this, function (jira, getNumbering) {
   "use strict";
   const statuses = ["НЕ ОК", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
   const itemWord = count => count % 100 >= 11 && count % 100 <= 14 ? "пунктов" : count % 10 === 1 ? "пункт" : count % 10 >= 2 && count % 10 <= 4 ? "пункта" : "пунктов";
@@ -80,6 +80,14 @@
     const duplicateTitles = incoming.filter(s => document.sections.some(existing => titleKey(existing.title) === titleKey(s.title)))
       .map(s => s.title || "Раздел");
     if (placement.mode === "sections") {
+      const numbering = getNumbering();
+      if (placement.preserveSectionNumbers) {
+        numbering.setSectionMode(document, "manual");
+        const sourceNumbers = JSON.parse(JSON.stringify(source));
+        numbering.configureSectionImport(sourceNumbers, true);
+        const labels = numbering.sectionNumbers(sourceNumbers);
+        incoming.forEach(section => { section.manualNumber = labels.get(section.id); });
+      } else incoming.forEach(section => { delete section.manualNumber; });
       let index = document.sections.length;
       if (placement.afterId === "start") index = 0;
       else if (placement.afterId) {

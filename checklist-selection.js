@@ -42,11 +42,12 @@
   }
 
   // Copy whole selected sections or just their selected rows without sharing objects.
-  function copySections(sections, selectedIds, createId, rowNumbers = null) {
+  function copySections(sections, selectedIds, createId, rowNumbers = null, sectionNumbers = null) {
     return sections.flatMap((section) => {
       const rows = section.rows.filter((row) => selectedIds.has(row.id));
       if (!rows.length) return [];
       const copy = JSON.parse(JSON.stringify({ ...section, rows }));
+      if (sectionNumbers) copy.manualNumber = sectionNumbers.get(section.id) ?? "";
       copy.id = createId();
       copy.collapsed = false;
       copy.rows.forEach((row) => {
@@ -55,6 +56,18 @@
       });
       return [copy];
     });
+  }
+
+  // A row-only copy keeps every distinct field while giving the new section its own identity.
+  function copySelection(sections, selectedIds, createId, options = {}) {
+    const copies = copySections(sections, selectedIds, createId, options.rowNumbers, options.sectionNumbers);
+    if (options.grouping !== "rows" || !copies.length) return copies;
+    const target = { id: createId(), title: options.title || "Выбранные пункты", collapsed: false, columns: [], rows: [] };
+    const ids = new Set(copies.flatMap(section => section.rows.map(row => row.id)));
+    moveRows([...copies, target], ids, target.id, createId, columns => ({
+      id: createId(), status: "НЕ ПРОВЕРЕНО", cells: Object.fromEntries(columns.map(column => [column.id, ""])),
+    }));
+    return [target];
   }
 
   function deleteRows(sections, selectedIds, createRow, createDefaultSection) {
@@ -70,7 +83,7 @@
     return { sections: remaining, count };
   }
 
-  const api = { selectByStatus, moveRows, copySections, deleteRows };
+  const api = { selectByStatus, moveRows, copySections, copySelection, deleteRows };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportSelection = api;
 })(typeof window !== "undefined" ? window : globalThis);

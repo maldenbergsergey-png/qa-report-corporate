@@ -394,6 +394,7 @@
         currentSection = {
           id: randomUUID(),
           title: stripSectionNumber(pendingTitle) || `Раздел ${tableNumber}`,
+          ...(sectionNumberFromTitle(pendingTitle) !== undefined ? { manualNumber: sectionNumberFromTitle(pendingTitle) } : {}),
           collapsed: false,
           columns,
           rows: [],
@@ -405,6 +406,7 @@
       }
       if (allowHeaderlessRows && line.startsWith("|") && !headers) {
         currentSection = { id: randomUUID(), title: stripSectionNumber(pendingTitle) || "Строки без заголовков",
+          ...(sectionNumberFromTitle(pendingTitle) !== undefined ? { manualNumber: sectionNumberFromTitle(pendingTitle) } : {}),
           collapsed: false, columns: [], rows: [], headerlessRows: [] };
         imported.sections.push(currentSection);
         headers = { numberIndex: -1, statusIndex: -1, columnCount: 0 };
@@ -449,9 +451,13 @@
   }
 
   // Only explicit ordinal prefixes; years, versions and 2FA remain titles.
+  function sectionNumberFromTitle(title) {
+    return String(title || "").match(/^\s*(\d{1,3})[.)]\s+(?=\S)/)?.[1];
+  }
+
   function stripSectionNumber(title) {
     return String(title || "").replace(/^\s*\d{1,3}[.)]\s+(?=\S)/, "").trim();
   }
 
-  return { parseJiraMarkup, configureHeaderlessSection, statusText, matchStatus, normalizeStatus, stripSectionNumber };
+  return { parseJiraMarkup, configureHeaderlessSection, statusText, matchStatus, normalizeStatus, sectionNumberFromTitle, stripSectionNumber };
 });

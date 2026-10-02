@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=119" />
+    <link rel="stylesheet" href="/styles.css?v=120" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -547,6 +547,31 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="selectionCopyOptionsModal" hidden>
+      <section class="modal selection-copy-options-modal" role="dialog" aria-modal="true" aria-labelledby="selectionCopyOptionsTitle">
+        <header class="modal-header">
+          <div><div class="eyebrow">Новый чек-лист</div><h2 id="selectionCopyOptionsTitle">Как скопировать выбранное</h2></div>
+          <button class="icon-button" id="closeSelectionCopyOptions" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="selection-copy-options-body">
+          <p id="selectionCopyOptionsSummary" class="settings-note"></p>
+          <fieldset class="numbering-settings">
+            <legend>Структура копии</legend>
+            <label class="settings-toggle-card"><input type="radio" name="selectionCopyGrouping" value="sections" checked /><span><strong>Сохранить разделы</strong><small>Названия, столбцы и выбранные пункты остаются в своих разделах.</small></span></label>
+            <label class="settings-toggle-card"><input type="radio" name="selectionCopyGrouping" value="rows" /><span><strong>Собрать пункты в один раздел</strong><small>Пункты объединяются; разные столбцы и вложения сохраняются.</small></span></label>
+          </fieldset>
+          <label class="selection-copy-title" id="selectionCopyTitleField" hidden>Название нового раздела<input id="selectionCopyTitle" type="text" value="Выбранные пункты" maxlength="200" /></label>
+          <label class="settings-toggle-card"><input id="selectionCopyPreserveRowNumbers" type="checkbox" checked /><span><strong>Сохранить номера пунктов</strong><small>Исходные номера остаются для ретеста и редактируются вручную. Без флажка — пересчитываются.</small></span></label>
+          <label class="settings-toggle-card" id="selectionCopySectionNumbersOption"><input id="selectionCopyPreserveSectionNumbers" type="checkbox" checked /><span><strong>Сохранить номера разделов</strong><small>Например, разделы 4 и 8 сохранят свои номера. Без флажка — начнутся с 1.</small></span></label>
+          <p id="selectionCopyGroupingHint" class="settings-note" hidden>Общий новый раздел получит номер 1. Номера пунктов можно сохранить независимо.</p>
+        </div>
+        <footer class="modal-footer">
+          <button class="button button-ghost" id="cancelSelectionCopyOptions" type="button">Отмена</button>
+          <button class="button button-primary" id="acceptSelectionCopyOptions" type="button">Копировать</button>
+        </footer>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="htmlCopyScopeModal" hidden>
       <section class="modal publish-scope-modal html-copy-scope-modal" role="dialog" aria-modal="true" aria-labelledby="htmlCopyScopeTitle" aria-describedby="htmlCopyScopeHint">
         <header class="modal-header">
@@ -869,6 +894,18 @@
           </div></section>
 
             <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
+              <fieldset class="numbering-settings section-numbering-settings">
+                <legend>Нумерация разделов</legend>
+                <p class="settings-note">Настройка сохраняется в текущем чек-листе и не зависит от нумерации пунктов.</p>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="sectionNumberingMode" value="automatic" checked />
+                  <span><strong>По порядку</strong><small>Номера 1, 2, 3 пересчитываются при удалении и перемещении разделов.</small></span>
+                </label>
+                <label class="settings-toggle-card numbering-option">
+                  <input type="radio" name="sectionNumberingMode" value="manual" />
+                  <span><strong>Вручную — сохранить номера</strong><small>Текущие номера фиксируются. Меняйте их в заголовках разделов: например, 4, 8, 12. Перемещение и удаление не меняют остальные номера; для новых разделов задавайте номер вручную.</small></span>
+                </label>
+              </fieldset>
               <fieldset class="numbering-settings">
                 <legend>Нумерация пунктов</legend>
                 <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. В автоматических режимах номера обновляются при изменении порядка разделов и строк.</p>
@@ -1061,19 +1098,19 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=10"></script>
-    <script src="/checklist-selection.js?v=4"></script>
+    <script src="/jira-markup-import.js?v=11"></script>
+    <script src="/checklist-selection.js?v=5"></script>
     <script src="/checklist-table.js?v=2"></script>
-    <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=45"></script>
+    <script src="/checklist-numbering.js?v=4"></script>
+    <script src="/release-notes.js?v=46"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
-    <script src="/import-options.js?v=5"></script>
-    <script src="/import-wizard.js?v=5"></script>
+    <script src="/import-options.js?v=6"></script>
+    <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=1"></script>
-    <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=125"></script>
+    <script src="/report-file.js?v=2"></script>
+    <script src="/app.js?v=126"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

@@ -182,6 +182,22 @@ async function main() {
   await page.evaluate(() => { window.finishClipboard(); navigator.clipboard.write = window.realClipboardWrite; });
   assert.equal(await page.locator('#acceptHtmlCopyScopeButton').textContent(), 'Копировать HTML');
   await page.keyboard.press('Escape');
+  // Manual section labels survive partial HTML filters without becoming positional ones.
+  await page.evaluate(() => {
+    draft.sectionNumberingMode = 'manual'; draft.numberingMode = 'hierarchical';
+    draft.sections.forEach((section, index) => { section.manualNumber = ['4', '8', '12'][index]; });
+    render();
+  });
+  await open();
+  await page.uncheck('#htmlCopyStatusSelectAll');
+  await page.check('#htmlCopyStatusList input[value="НЕ ОК"]');
+  await page.uncheck('#htmlCopySectionList input[value="first"]');
+  await page.click('#acceptHtmlCopyScopeButton');
+  await page.waitForFunction(() => document.getElementById('acceptHtmlCopyScopeButton').textContent === 'Скопировано в буфер обмена');
+  const manualSections = await readClipboard();
+  assert.deepEqual(manualSections.headings, ['8. Second']);
+  assert.deepEqual(manualSections.numbers, ['8.1']);
+  await page.keyboard.press('Escape');
   // The exit remains in the upper right corner when actions wrap.
   await page.click('#selectionToggle');
   for (const width of [1440, 1024, 390]) {

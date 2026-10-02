@@ -74,9 +74,11 @@
     const unique = list => { if (new Set(list).size !== list.length) bad(); };
     if (!value || value.schemaVersion !== 3 || !Array.isArray(value.sections) || !value.sections.length || value.sections.length > 1000) bad();
     if (!statuses.has(value.overallStatus) || !["section", "continuous", "hierarchical", "manual"].includes(value.numberingMode)) bad();
+    if (value.sectionNumberingMode !== undefined && !["automatic", "manual"].includes(value.sectionNumberingMode)) bad();
     let rows = 0;
     const result = { schemaVersion: 3, issueUrl: string(value.issueUrl), environment: string(value.environment), overallStatus: value.overallStatus,
-      intro: string(value.intro), numberingMode: value.numberingMode, sections: value.sections.map(section => {
+      intro: string(value.intro), numberingMode: value.numberingMode,
+      ...(value.sectionNumberingMode !== undefined ? { sectionNumberingMode: value.sectionNumberingMode } : {}), sections: value.sections.map(section => {
         if (!section || !Array.isArray(section.columns) || !section.columns.length || section.columns.length > 100 || !Array.isArray(section.rows) || !section.rows.length || (rows += section.rows.length) > 20000) bad();
         const columns = section.columns.map(column => {
           if (!column) bad();
@@ -87,7 +89,8 @@
           return copy;
         });
         unique(columns.map(c => c.id));
-        return { id: id(section.id), title: string(section.title), collapsed: Boolean(section.collapsed), statusSort: Boolean(section.statusSort), columns,
+        return { id: id(section.id), title: string(section.title),
+          ...(section.manualNumber !== undefined ? { manualNumber: string(section.manualNumber) } : {}), collapsed: Boolean(section.collapsed), statusSort: Boolean(section.statusSort), columns,
           rows: section.rows.map(row => {
             if (!row || !row.cells || typeof row.cells !== "object" || !statuses.has(row.status)) bad();
             const cells = Object.fromEntries(columns.map(c => [c.id, string(row.cells[c.id])]));

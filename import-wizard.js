@@ -21,13 +21,17 @@
     const opened = new Set(), initialized = new Set();
     let targetDocument = JSON.parse(JSON.stringify(currentDocument));
     const destination = { mode: defaultMode, afterId: "", targetId: hasHeaderless && targetDocument.sections.length === 1 ? targetDocument.sections[0].id : "", columns: new Map() };
-    const placement = () => ({ ...destination, columns: new Map(destination.columns), preserveNumbers: preserve });
+    const placement = () => ({ ...destination, columns: new Map(destination.columns), preserveNumbers: preserve, preserveSectionNumbers: preserveSections });
     const selectedDocument = () => {
       const result = O.build(source, state);
       if (destination.mode !== "replace") result.intro = "";
       return result;
     };
-    const sectionLabel = (section, index) => `${index + 1}. ${section.title || "Раздел"}`;
+    const sectionLabel = (section) => {
+      const document = targetDocument.sections.some(item => item.id === section.id) ? targetDocument
+        : { ...source, sectionNumberingMode: root.ChecklistNumbering.hasSourceSectionNumbers(source) ? "manual" : "automatic" };
+      return root.ChecklistNumbering.sectionTitle(document, section);
+    };
     const destinationText = () => {
       if (destination.mode === "replace") return "Содержимое текущего чек-листа будет заменено";
       if (destination.mode === "rows") {
@@ -38,7 +42,8 @@
       const index = targetDocument.sections.findIndex(s => s.id === destination.afterId);
       return index < 0 ? "Новые разделы · в конец чек-листа" : `Новые разделы · после «${sectionLabel(targetDocument.sections[index], index)}»`;
     };
-    let tab = "rows", preserve = root.ChecklistNumbering.hasSourceNumbers(source), busy = false;
+    let tab = "rows", preserve = root.ChecklistNumbering.hasSourceNumbers(source),
+      preserveSections = root.ChecklistNumbering.hasSourceSectionNumbers(source), busy = false;
     let numbers = new Map(source.sections.flatMap(section => section.rows.map((row, index) => [row.id, row.manualNumber ?? `${index + 1}.`])));
     const nameOf = (section, row) => plain(row.cells[section.columns[0]?.id]) || "Пустой пункт";
     const shortName = (section, row) => `${numbers.get(row.id)} ${nameOf(section, row)}`.trim();
@@ -222,8 +227,15 @@
       numbering.id = "importNumberingChoice"; numbering.querySelector("input").id = "importPreserveNumbers";
       numbering.hidden = !root.ChecklistNumbering.hasSourceNumbers(source) || (destination.mode !== "replace" && targetDocument.numberingMode !== "manual");
       numbering.lastElementChild.className = "import-option-copy";
-      numbering.lastElementChild.append(el("strong", "", "Сохранить исходные номера"), el("small", "", destination.mode === "replace" ? "Включится ручная нумерация. Например, пункты 3, 8 и 14 сохранят свои номера после отбора." : "Исходные номера сохранятся только у добавляемых пунктов. Снимите флажок, чтобы оставить их пустыми."));
+      numbering.lastElementChild.append(el("strong", "", "Сохранить исходные номера пунктов"), el("small", "", destination.mode === "replace" ? "Включится ручная нумерация. Например, пункты 3, 8 и 14 сохранят свои номера после отбора." : "Исходные номера сохранятся только у добавляемых пунктов. Снимите флажок, чтобы оставить их пустыми."));
       panel.append(numbering);
+      const sectionNumbering = check("", "preserve-section-numbers", preserveSections, value => { preserveSections = value; changed(false); }, "local-import-option");
+      sectionNumbering.querySelector("input").id = "importPreserveSectionNumbers";
+      sectionNumbering.hidden = destination.mode === "rows" || !root.ChecklistNumbering.hasSourceSectionNumbers(source);
+      sectionNumbering.lastElementChild.className = "import-option-copy";
+      sectionNumbering.lastElementChild.append(el("strong", "", "Сохранить исходные номера разделов"),
+        el("small", "", "Разделы сохранят свои номера в ручном режиме. Номера существующих разделов не изменятся."));
+      panel.append(sectionNumbering);
       if (destination.mode !== "replace") panel.append(el("p", "import-help", targetDocument.numberingMode === "manual"
         ? "Ручная нумерация текущего чек-листа сохранится. Пункты без исходного номера получат пустой номер."
         : "Номера добавляемых пунктов рассчитываются по правилам текущего чек-листа. Итоговые номера видны в предпросмотре."));
@@ -292,7 +304,7 @@
     function renderPreview(panel, result) {
       const prepared = A.removeExcluded(result, attachments, policy);
       let resultDocument = prepared, addedIds;
-      if (destination.mode === "replace") root.ChecklistNumbering.configureImport(prepared, preserve, targetDocument.numberingMode);
+      if (destination.mode === "replace") root.ChecklistNumbering.configureImport(prepared, preserve, targetDocument.numberingMode, preserveSections);
       else {
         try {
           const plan = O.planAddition(targetDocument, prepared, placement());
@@ -307,7 +319,7 @@
         const visibleRows = root.QaReportTable ? root.QaReportTable.visibleRows(section) : section.rows;
         const rows = addedIds ? visibleRows.filter(row => addedIds.has(row.id)) : visibleRows;
         if (!rows.length) continue;
-        panel.append(el("strong", "import-preview-title", section.title || "Раздел"));
+        panel.append(el("strong", "import-preview-title", root.ChecklistNumbering.sectionTitle(resultDocument, section)));
         const scroll = el("div", "import-preview-scroll"), table = el("table", "import-result-table");
         const head = el("thead"), header = el("tr");
         for (const name of ["№", ...section.columns.map(c => c.title), "Статус"]) header.append(el("th", "", name));

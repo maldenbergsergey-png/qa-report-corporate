@@ -5604,3 +5604,14 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   .file-viewer-modal .modal-actions { width: 100%; }
   .file-viewer-modal .modal-actions .button { flex: 1; padding-inline: 10px; }
 }
+
+.section-numbering-settings { margin-bottom: 24px; }
+.section-number-input { flex: 0 0 64px; width: 64px; min-width: 0; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--ink); font: inherit; font-size: 17px; font-weight: 700; text-align: center; }
+.section-number-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.selection-copy-options-modal { width: min(560px, 100%); height: auto; max-height: 88dvh; grid-template-rows: auto minmax(0, 1fr) auto; }
+.selection-copy-options-body { overflow-y: auto; min-height: 0; display: grid; gap: 16px; padding: 20px 22px; }
+.selection-copy-options-body [hidden] { display: none; }
+.selection-copy-options-body .settings-note { margin: 0; }
+.selection-copy-options-modal .modal-footer { justify-content: flex-end; gap: 8px; }
+.selection-copy-title { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
+.selection-copy-title input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--ink); font: inherit; }

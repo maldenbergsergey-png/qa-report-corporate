@@ -52,12 +52,12 @@ async function main() {
   await page.waitForSelector('#settingsButton');
   await page.evaluate(async () => {
     cloudHistoryEnabled = false;
-    applyDraftLocally({ ...draft, numberingMode: 'manual', intro: '<p>Intro</p>', sections: [
-      { id: 'first', title: 'First', collapsed: false, columns: [{ id: 'check', title: 'Check' }], rows: [
+    applyDraftLocally({ ...draft, numberingMode: 'manual', sectionNumberingMode: 'manual', intro: '<p>Intro</p>', sections: [
+      { id: 'first', title: 'First', manualNumber: '4', collapsed: false, columns: [{ id: 'check', title: 'Check' }], rows: [
         { id: 'one', status: 'OK', manualNumber: '7', cells: { check: 'One' } },
         { id: 'two', status: 'НЕ ОК', manualNumber: '9', cells: { check: 'Two' } },
       ] },
-      { id: 'second', title: 'Second', collapsed: true, columns: [{ id: 'extra', title: 'Details' }], rows: [
+      { id: 'second', title: 'Second', manualNumber: '8', collapsed: true, columns: [{ id: 'extra', title: 'Details' }], rows: [
         { id: 'three', status: 'НЕ ПРОВЕРЕНО', manualNumber: '12', cells: { extra: '<p>Three</p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">' } },
       ] },
     ] });
@@ -73,15 +73,14 @@ async function main() {
   const originalUrl = page.url();
   const historyBeforeCancel = await page.evaluate(async () => (await getAllReports()).length);
   await page.click('#selectionCopyButton');
-  await page.waitForSelector('#confirmModal:not([hidden])');
-  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
+  await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.setViewportSize({ width: 390, height: 844 });
   if (process.env.QA_REPORT_COPY_SCREENSHOTS) await page.screenshot({ path: path.join(temp, 'numbering-mobile.png') });
-  assert.ok(await page.locator('#confirmModal .modal-footer button').evaluateAll(nodes => nodes.every(n => {
+  assert.ok(await page.locator('#selectionCopyOptionsModal .modal-footer button').evaluateAll(nodes => nodes.every(n => {
     const r = n.getBoundingClientRect(); return r.x >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
   })));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.click('#cancelConfirmButton');
+  await page.click('#cancelSelectionCopyOptions');
   await page.waitForFunction(() => !selectionCopyBusy);
   assert.equal(await page.evaluate(async () => (await getAllReports()).length), historyBeforeCancel);
   assert.equal(await page.evaluate(() => selectedRowIds.size), 2);
@@ -94,9 +93,8 @@ async function main() {
     console.log(`Screenshots: ${temp}`);
   }
   await page.click('#selectionCopyButton');
-  await page.waitForSelector('#confirmModal:not([hidden])');
-  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
-  await page.click('#acceptConfirmButton');
+  await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
+  await page.click('#acceptSelectionCopyOptions');
   await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
   assert.match(await page.locator('#confirmModalMessage').textContent(), /Скопировано пунктов: 2/);
   await page.click('#cancelConfirmButton');
@@ -113,14 +111,14 @@ async function main() {
     return { sections: copy.document.sections, publicId: copy.publicId, numbering: copy.document.numberingMode };
   });
   assert.equal(copies.numbering, 'manual');
+  assert.deepEqual(copies.sections.map(s => s.manualNumber), ['4', '8']);
   assert.deepEqual(copies.sections.map(s => s.rows.length), [1, 1]);
   assert.equal(copies.sections[0].rows[0].manualNumber, '7');
   assert.match(copies.sections[1].rows[0].cells.extra, /data:image/);
   assert.equal(copies.sections[1].collapsed, false);
   await page.click('#selectionCopyButton');
-  await page.waitForSelector('#confirmModal:not([hidden])');
-  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
-  await page.click('#acceptConfirmButton');
+  await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
+  await page.click('#acceptSelectionCopyOptions');
   await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
   await page.click('#acceptConfirmButton');
   await page.waitForFunction(() => !selectionCopyBusy && draft.reportId !== window.originalId);
@@ -140,8 +138,8 @@ async function main() {
     openDatabase = async () => { throw Error('Test storage failure'); };
   });
   await page.click('#selectionCopyButton');
-  await page.waitForSelector('#confirmModal:not([hidden])');
-  await page.click('#acceptConfirmButton');
+  await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
+  await page.click('#acceptSelectionCopyOptions');
   await page.waitForFunction(() => !selectionCopyBusy);
   assert.equal(page.url(), originalUrl);
   assert.equal(await page.locator('#confirmModal').isHidden(), true);
@@ -166,7 +164,7 @@ async function main() {
     const count = (await getAllReports()).length;
     const first = copySelectedRowsToNewChecklist();
     await copySelectedRowsToNewChecklist(); // Duplicate click while busy is a no-op.
-    resolveConfirmation(true);
+    resolveSelectionCopyOptions(true);
     await first;
     saveSelectionCopy = realSave;
     if (draft.intro !== '<p>Concurrent edit</p>') throw Error('Concurrent edit lost');
@@ -178,7 +176,7 @@ async function main() {
   for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
     for (const preserve of [true, false]) {
       const expected = await page.evaluate(async ({ mode }) => {
-        applyDraftLocally({ ...draft, numberingMode: mode, intro: '', sections: [
+        applyDraftLocally({ ...draft, numberingMode: mode, sectionNumberingMode: 'automatic', intro: '', sections: [
           { id: 'omitted', title: 'Omitted', columns: [{ id: 'text', title: 'Check' }], rows: [
             { id: 'ignore', status: 'OK', cells: { text: 'Ignore' } },
           ] },
@@ -200,8 +198,10 @@ async function main() {
         return [numbers.get('pick'), numbers.get('last')];
       }, { mode });
       await page.click('#selectionCopyButton');
-      await page.waitForSelector('#confirmModal:not([hidden])');
-      await page.click(preserve ? '#acceptConfirmButton' : '#alternativeConfirmButton');
+      await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
+      await page.locator('#selectionCopyPreserveRowNumbers').setChecked(preserve);
+      await page.locator('#selectionCopyPreserveSectionNumbers').setChecked(preserve);
+      await page.click('#acceptSelectionCopyOptions');
       await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
       await page.click('#cancelConfirmButton');
       await page.waitForFunction(() => !selectionCopyBusy);

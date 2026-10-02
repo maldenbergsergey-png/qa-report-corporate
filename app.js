@@ -220,6 +220,7 @@ const DEFAULT_DRAFT = {
   overallStatus: "OK",
   intro: "",
   numberingMode: "section",
+  sectionNumberingMode: "automatic",
   sections: [createSection("Основные проверки", loadDefaultColumns(), 2)],
 };
 
@@ -554,6 +555,7 @@ function normalizeDraft(value) {
     lastSavedClientId: parsed.lastSavedClientId || "",
     issueUrl: parsed.issueUrl || "",
     numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
+    sectionNumberingMode: ChecklistNumbering.normalizeSectionMode(parsed.sectionNumberingMode),
     sections,
   };
   sanitizeDraftHtmlField(normalized, "intro", parsed);
@@ -2105,6 +2107,8 @@ function collectSectionsFromDom() {
     const rowsById = new Map(section.rows.map((row) => [row.id, row]));
     const title = sectionElement.querySelector(".section-title");
     if (title) section.title = title.value;
+    const sectionNumber = sectionElement.querySelector(".section-number-input");
+    if (sectionNumber && draft.sectionNumberingMode === "manual") section.manualNumber = ChecklistNumbering.normalizeSectionNumber(sectionNumber.value);
     section.collapsed = sectionElement.classList.contains("collapsed");
     sectionElement.querySelectorAll("th[data-column-id]").forEach((columnElement) => {
       const column = columnsById.get(columnElement.dataset.columnId);
@@ -2302,6 +2306,49 @@ async function moveSelectedRows(targetId, newTitle = "") {
 
 let selectionCopyBusy = false;
 
+let selectionCopyOptionsResolver = null;
+
+function updateSelectionCopyOptions() {
+  const withSections = document.querySelector('[name="selectionCopyGrouping"]:checked').value === "sections";
+  document.getElementById("selectionCopyTitleField").hidden = withSections;
+  document.getElementById("selectionCopySectionNumbersOption").hidden = !withSections;
+  document.getElementById("selectionCopyPreserveSectionNumbers").disabled = !withSections;
+  document.getElementById("selectionCopyGroupingHint").hidden = withSections;
+}
+
+function askSelectionCopyOptions(ids) {
+  document.querySelector('[name="selectionCopyGrouping"][value="sections"]').checked = true;
+  document.getElementById("selectionCopyTitle").value = "Выбранные пункты";
+  document.getElementById("selectionCopyPreserveRowNumbers").checked = true;
+  document.getElementById("selectionCopyPreserveSectionNumbers").checked = true;
+  const sections = draft.sections.filter(section => section.rows.some(row => ids.has(row.id)));
+  const count = sections.reduce((sum, section) => sum + section.rows.filter(row => ids.has(row.id)).length, 0);
+  document.getElementById("selectionCopyOptionsSummary").textContent = `Выбрано пунктов: ${count} · разделов: ${sections.length}`;
+  updateSelectionCopyOptions();
+  document.getElementById("selectionCopyOptionsModal").hidden = false;
+  syncBodyModalOverflow();
+  document.querySelector('[name="selectionCopyGrouping"]:checked').focus();
+  return new Promise(resolve => { selectionCopyOptionsResolver = resolve; });
+}
+
+function resolveSelectionCopyOptions(accepted) {
+  if (!selectionCopyOptionsResolver) return;
+  const resolve = selectionCopyOptionsResolver;
+  selectionCopyOptionsResolver = null;
+  const grouping = document.querySelector('[name="selectionCopyGrouping"]:checked').value;
+  const options = accepted ? {
+    grouping,
+    title: document.getElementById("selectionCopyTitle").value.trim() || "Выбранные пункты",
+    preserveRows: document.getElementById("selectionCopyPreserveRowNumbers").checked,
+    preserveSections: grouping === "sections" && document.getElementById("selectionCopyPreserveSectionNumbers").checked,
+  } : null;
+  document.getElementById("selectionCopyOptionsModal").hidden = true;
+  syncBodyModalOverflow();
+  resolve(options);
+}
+
+
+
 async function saveSelectionCopy(before, next) {
   const db = await openDatabase();
   let sourceRecord, copyRecord;
@@ -2336,11 +2383,8 @@ async function copySelectedRowsToNewChecklist() {
   updateSelectionUi();
   closeSelectionMenus();
   try {
-    const numberingChoice = await askConfirmation(
-      "Сохранить номера выбранных пунктов из текущего чек-листа? Для ретеста они останутся неизменными и будут доступны для ручного редактирования. При пересчёте номера начнутся заново в новой копии.",
-      { title: "Нумерация нового чек-листа", confirmText: "Сохранить номера", alternativeText: "Пересчитать" },
-    );
-    if (!numberingChoice) return;
+    const copyOptions = await askSelectionCopyOptions(ids);
+    if (!copyOptions) return;
     if (draft.draftId !== documentId) throw new Error("Отчёт изменился. Выберите строки заново.");
     clearTimeout(saveTimer);
     if (await saveDraft() === false) throw new Error("Не удалось сохранить текущий чек-лист. Проверьте сохранение и повторите копирование.");
@@ -2348,8 +2392,11 @@ async function copySelectedRowsToNewChecklist() {
     flushDraftFromDom();
     const before = clone(draft);
     const beforeContent = serializeDraft();
-    const sections = window.QaReportSelection.copySections(before.sections, ids, () => crypto.randomUUID(),
-      numberingChoice === true ? ChecklistNumbering.rowNumbers(before) : null);
+    const sections = window.QaReportSelection.copySelection(before.sections, ids, () => crypto.randomUUID(), {
+      grouping: copyOptions.grouping, title: copyOptions.title,
+      rowNumbers: copyOptions.preserveRows ? ChecklistNumbering.rowNumbers(before) : null,
+      sectionNumbers: copyOptions.preserveSections ? ChecklistNumbering.sectionNumbers(before) : null,
+    });
     if (!sections.length) return;
     const next = normalizeDraft({
       ...clone(DEFAULT_DRAFT),
@@ -2358,7 +2405,7 @@ async function copySelectedRowsToNewChecklist() {
       draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId(),
       revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId,
     });
-    ChecklistNumbering.configureImport(next, numberingChoice === true, before.numberingMode);
+    ChecklistNumbering.configureImport(next, copyOptions.preserveRows, before.numberingMode, copyOptions.preserveSections);
     await saveSelectionCopy(before, next);
     const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
     const unchanged = () => {
@@ -2453,6 +2500,7 @@ function renderSections() {
     closeSelectionMenus();
   }
   const rowNumbers = ChecklistNumbering.rowNumbers(draft);
+  const sectionNumbers = ChecklistNumbering.sectionNumbers(draft);
   elements.sections.innerHTML = "";
   draft.sections.forEach((section) => {
     const fragment = elements.sectionTemplate.content.cloneNode(true);
@@ -2461,7 +2509,25 @@ function renderSections() {
     sectionElement.draggable = true;
     sectionElement.classList.toggle("collapsed", Boolean(section.collapsed));
 
-    fragment.querySelector(".section-number").textContent = `${draft.sections.indexOf(section) + 1}.`;
+    const sectionNumber = fragment.querySelector(".section-number");
+    if (draft.sectionNumberingMode === "manual") {
+      const input = document.createElement("input");
+      input.type = "text"; input.className = "section-number-input"; input.placeholder = "№";
+      input.value = sectionNumbers.get(section.id); input.maxLength = 60;
+      input.setAttribute("aria-label", `Номер раздела «${section.title}»`);
+      input.addEventListener("input", () => {
+        section.manualNumber = ChecklistNumbering.normalizeSectionNumber(input.value);
+        if (draft.numberingMode === "hierarchical") {
+          const numbers = ChecklistNumbering.rowNumbers(draft);
+          sectionElement.querySelectorAll("tr[data-row-id]").forEach(row => {
+            row.querySelector(".row-number-text").textContent = numbers.get(row.dataset.rowId);
+          });
+        }
+        scheduleSave();
+      });
+      input.addEventListener("change", () => { flushDraftFromDom(); renderSections(); saveLocalMutationNow(); });
+      sectionNumber.replaceWith(input);
+    } else sectionNumber.textContent = `${sectionNumbers.get(section.id)}.`;
     const title = fragment.querySelector(".section-title");
     title.value = section.title;
     title.addEventListener("input", () => {
@@ -4127,13 +4193,19 @@ function fillChecklistSettingsForm() {
   elements.jiraSettingsModal.querySelectorAll('[name="numberingMode"]').forEach((input) => {
     input.checked = input.value === ChecklistNumbering.normalizeMode(draft.numberingMode);
   });
+  elements.jiraSettingsModal.querySelectorAll('[name="sectionNumberingMode"]').forEach((input) => {
+    input.checked = input.value === ChecklistNumbering.normalizeSectionMode(draft.sectionNumberingMode);
+  });
 }
 
 function saveChecklistSettings() {
   const mode = ChecklistNumbering.normalizeMode(elements.jiraSettingsModal.querySelector('[name="numberingMode"]:checked')?.value);
-  if (draft.numberingMode === mode) return;
+  const sectionMode = ChecklistNumbering.normalizeSectionMode(elements.jiraSettingsModal.querySelector('[name="sectionNumberingMode"]:checked')?.value);
+  if (draft.numberingMode === mode && draft.sectionNumberingMode === sectionMode) return;
   flushDraftFromDom();
+  // Freeze row labels before changing section numbering, so the two settings stay independent.
   ChecklistNumbering.setMode(draft, mode);
+  ChecklistNumbering.setSectionMode(draft, sectionMode);
   renderSections();
   saveLocalMutationNow();
 }
@@ -6801,7 +6873,7 @@ async function applyImport() {
     const before = serializeDraft();
     let candidate, rowIds;
     if (placement.mode === "replace") {
-      ChecklistNumbering.configureImport(imported, importWizard.preserveNumbers(), draft.numberingMode);
+      ChecklistNumbering.configureImport(imported, importWizard.preserveNumbers(), draft.numberingMode, placement.preserveSectionNumbers ?? importWizard.preserveNumbers());
       candidate = importedDraftInCurrentReport(imported);
       rowIds = candidate.sections.flatMap(s => s.rows.map(r => r.id));
     } else {
@@ -6840,8 +6912,8 @@ async function applyImport() {
 
 async function chooseImportedNumbering(imported) {
   let preserve = true;
-  if (ChecklistNumbering.hasSourceNumbers(imported)) {
-    const choice = await askConfirmation("Сохранить номера из исходного чек-листа для ретеста? Их можно будет редактировать вручную, удаление строк не изменит остальные номера.", {
+  if ((ChecklistNumbering.hasSourceNumbers(imported) || ChecklistNumbering.hasSourceSectionNumbers(imported))) {
+    const choice = await askConfirmation("Сохранить номера разделов и пунктов из исходного чек-листа для ретеста? Их можно будет редактировать вручную, удаление строк не изменит остальные номера.", {
       title: "Нумерация импортируемых пунктов", confirmText: "Сохранить номера", alternativeText: "Пересчитать",
     });
     if (choice === false) return false;
@@ -7770,6 +7842,10 @@ selectionUi.CreateForm.addEventListener("submit", (event) => {
   else selectionUi.NewTitle.focus();
 });
 selectionUi.CopyButton.addEventListener("click", copySelectedRowsToNewChecklist);
+document.querySelectorAll('[name="selectionCopyGrouping"]').forEach(input => input.addEventListener("change", updateSelectionCopyOptions));
+document.getElementById("closeSelectionCopyOptions").addEventListener("click", () => resolveSelectionCopyOptions(false));
+document.getElementById("cancelSelectionCopyOptions").addEventListener("click", () => resolveSelectionCopyOptions(false));
+document.getElementById("acceptSelectionCopyOptions").addEventListener("click", () => resolveSelectionCopyOptions(true));
 selectionUi.Delete.addEventListener("click", deleteSelectedRows);
 // Dismiss on the start of an outside interaction, not the click produced when
 // a text-selection gesture starts inside an input and ends outside the popover.
@@ -8762,6 +8838,10 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape") {
+    if (!document.getElementById("selectionCopyOptionsModal").hidden) {
+      resolveSelectionCopyOptions(false);
+      return;
+    }
     if (!document.getElementById("htmlCopyScopeModal").hidden) {
       closeHtmlCopyScope();
       return;

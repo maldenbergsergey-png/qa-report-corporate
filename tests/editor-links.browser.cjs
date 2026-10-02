@@ -213,6 +213,16 @@ async function main() {
     await link.click();
     const bounds = await page.locator('#linkPopover').boundingBox();
     assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 1440 && bounds.y + bounds.height <= 1000);
+    assert.ok(bounds.width <= 300 && bounds.height <= 240, 'compact link popover');
+    for (const [id, label] of [['openLinkButton', 'Открыть в новой вкладке'], ['removeLinkButton', 'Удалить ссылку, оставить текст'], ['applyLinkButton', 'Применить изменения']]) {
+      const button = page.locator('#' + id);
+      assert.equal(await button.getAttribute('aria-label'), label);
+      assert.ok(await button.getAttribute('title'));
+      assert.equal(await button.locator('svg').count(), 1);
+      assert.equal((await button.textContent()).trim(), '');
+      const size = await button.boundingBox();
+      assert.ok(size.width >= 24 && size.width <= 36 && size.height >= 24 && size.height <= 36);
+    }
     if (screenshots) await page.screenshot({ path: path.join(screenshots, `${theme}.png`) });
     await page.locator('#closeLinkPopoverButton').click();
   }

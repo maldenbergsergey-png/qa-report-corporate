@@ -436,7 +436,7 @@ let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
 
 function syncBodyModalOverflow() {
-  document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden])")
+  document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open]")
     ? "hidden"
     : "";
 }
@@ -6069,6 +6069,117 @@ function replaceStoredObjectWithLink(object, kind) {
   showToast("Объект заменён ссылкой");
 }
 
+let viewingFileCard = null;
+let fileViewerTextContent = "";
+const fileViewer = Object.fromEntries([
+  "Dialog", "Title", "Meta", "Encoding", "Wrap", "Message", "Text", "State",
+].map(name => [name, document.getElementById(`fileViewer${name}`)]));
+const copyFileViewerButton = document.getElementById("copyFileViewerButton");
+
+function updateFileViewer() {
+  fileViewer.Text.value = "";
+  fileViewerTextContent = "";
+  fileViewer.Message.hidden = true;
+  fileViewer.Text.hidden = true;
+  copyFileViewerButton.disabled = true;
+  copyFileViewerButton.textContent = "Копировать текст";
+  fileViewer.State.textContent = "Только просмотр";
+  const name = viewingFileCard.dataset.fileName || viewingFileCard.dataset.jiraName || "Файл";
+  fileViewer.Meta.textContent = `${getFileExtension(name, viewingFileCard.dataset.mimeType)} · ${formatFileSize(viewingFileCard.dataset.fileSize)}`;
+  try {
+    const preview = window.QaReportFilePreview.decode({
+      name, type: viewingFileCard.dataset.mimeType || "",
+      dataUrl: viewingFileCard.dataset.dataUrl || "",
+    }, fileViewer.Encoding.value);
+    fileViewerTextContent = preview.text;
+    fileViewer.Text.value = preview.text;
+    fileViewer.Text.hidden = false;
+    fileViewer.Text.scrollTop = 0; fileViewer.Text.scrollLeft = 0;
+    copyFileViewerButton.disabled = !preview.text;
+    fileViewer.Meta.textContent = `${getFileExtension(name, viewingFileCard.dataset.mimeType)} · ${formatFileSize(preview.size)} · ${preview.encoding.toUpperCase()}`;
+    const lineCount = preview.text.split(/\r\n|\r|\n/).length;
+    fileViewer.State.textContent = preview.text ? `${lineCount} ${pluralizeLines(lineCount)} · Только просмотр` : "Пустой файл";
+  } catch (error) {
+    fileViewer.Message.textContent = error.message;
+    fileViewer.Message.hidden = false;
+  }
+}
+
+function openFileViewer(card) {
+  if (card.classList.contains("jira-attachment-reference")) {
+    showToast("Сначала сохраните файл в браузере через меню «Ещё действия».");
+    return;
+  }
+  closeFloatingMenu();
+  viewingFileCard = card;
+  fileViewer.Title.textContent = card.dataset.fileName || card.dataset.jiraName || "Файл";
+  fileViewer.Title.title = fileViewer.Title.textContent;
+  fileViewer.Meta.textContent = `${getFileExtension(fileViewer.Title.textContent, card.dataset.mimeType)} · ${formatFileSize(card.dataset.fileSize)}`;
+  fileViewer.Encoding.value = "auto";
+  fileViewer.Wrap.checked = true;
+  fileViewer.Text.setAttribute("wrap", "soft");
+  fileViewer.Encoding.disabled = !window.QaReportFilePreview.isText(fileViewer.Title.textContent, card.dataset.mimeType);
+  updateFileViewer();
+  fileViewer.Dialog.showModal();
+  syncBodyModalOverflow();
+  if (!fileViewer.Text.hidden) fileViewer.Text.focus();
+}
+
+function closeFileViewer() {
+  fileViewer.Dialog.close();
+}
+
+fileViewer.Dialog.addEventListener("close", () => {
+  const card = viewingFileCard;
+  viewingFileCard = null;
+  fileViewerTextContent = "";
+  fileViewer.Text.value = "";
+  fileViewer.Message.textContent = "";
+  syncBodyModalOverflow();
+  if (card?.isConnected) card.focus({ preventScroll: true });
+});
+fileViewer.Dialog.addEventListener("cancel", event => {
+  event.preventDefault(); closeFileViewer();
+});
+fileViewer.Dialog.addEventListener("keydown", event => {
+  event.stopPropagation();
+  if (event.key !== "Tab") return;
+  const targets = [...fileViewer.Dialog.querySelectorAll("button:not(:disabled), select:not(:disabled), input:not(:disabled), textarea:not(:disabled)")]
+    .filter(node => node.getClientRects().length);
+  const first = targets[0], last = targets.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+fileViewer.Dialog.addEventListener("click", event => {
+  if (event.target !== fileViewer.Dialog) return;
+  const rect = fileViewer.Dialog.getBoundingClientRect();
+  if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeFileViewer();
+});
+document.getElementById("closeFileViewerButton").addEventListener("click", closeFileViewer);
+fileViewer.Encoding.addEventListener("change", updateFileViewer);
+fileViewer.Wrap.addEventListener("change", () => fileViewer.Text.setAttribute("wrap", fileViewer.Wrap.checked ? "soft" : "off"));
+document.getElementById("downloadFileViewerButton").addEventListener("click", () => {
+  if (viewingFileCard) downloadFileCard(viewingFileCard);
+});
+copyFileViewerButton.addEventListener("click", async () => {
+  const card = viewingFileCard;
+  const text = fileViewerTextContent;
+  if (!text) return;
+  try {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      // The fallback must be inside the modal: the rest of the page is inert.
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      fileViewer.Dialog.append(textarea);
+      textarea.select();
+      try { if (!document.execCommand("copy")) throw new Error("copy"); }
+      finally { textarea.remove(); copyFileViewerButton.focus(); }
+    }
+    if (viewingFileCard === card && fileViewerTextContent === text) copyFileViewerButton.textContent = "Скопировано";
+  } catch { fileViewer.State.textContent = "Не удалось скопировать. Выделите текст и нажмите Ctrl/⌘+C."; }
+});
+
 function showFileMenu(card, anchor = card) {
   const stored = isStoredObjectUrl(card.dataset.dataUrl);
   const storageAction = stored
@@ -6076,10 +6187,15 @@ function showFileMenu(card, anchor = card) {
       : objectStorageConfigured
         ? { label: "Загрузить в хранилище", icon: "download", action: () => uploadEditorObjectToStorage(card, "file") }
         : null;
-  showFloatingMenu(anchor, [
+  const items = [
     storageAction,
+    ...(!card.classList.contains("jira-attachment-reference") ? [{ label: "Просмотреть файл", icon: "eye", action: () => openFileViewer(card) }] : []),
     { label: card.classList.contains("jira-attachment-reference") ? "Скачать в браузер" : "Скачать файл", icon: "download", action: () => downloadFileCard(card) },
-  ].filter(Boolean));
+  ].filter(Boolean);
+  // Focusing a card action may scroll its table; position the menu afterwards.
+  requestAnimationFrame(() => {
+    if (card.isConnected && anchor.isConnected && !fileViewer.Dialog.open) showFloatingMenu(anchor, items);
+  });
 }
 
 function enhanceFileControls(root = document) {
@@ -7766,7 +7882,7 @@ function validLinkUrl(value) {
 function positionLinkPopover() {
   const anchor = linkPopoverAnchor?.isConnected ? linkPopoverAnchor : elements.linkButton;
   const anchorRect = anchor.getBoundingClientRect();
-  const popoverWidth = Math.min(360, window.innerWidth - 24);
+  const popoverWidth = Math.min(300, window.innerWidth - 24);
   const left = Math.max(12, Math.min(anchorRect.left, window.innerWidth - popoverWidth - 12));
   elements.linkPopover.style.width = `${popoverWidth}px`;
   elements.linkPopover.style.left = `${left}px`;
@@ -8217,6 +8333,7 @@ document.addEventListener("click", (event) => {
     document.querySelectorAll(".cell-code-block.code-selected").forEach((item) => item.classList.remove("code-selected"));
     fileCard.classList.add("file-selected");
     fileCard.focus({ preventScroll: true });
+    if ((suppressObjectOpenUntil.get(fileCard) || 0) <= Date.now() && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) openFileViewer(fileCard);
     return;
   }
   document.querySelectorAll(".cell-image.image-selected").forEach((item) => {
@@ -8628,7 +8745,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (focusedObject.matches(".cell-code-block")) openCodeEditor(focusedObject);
     else if (focusedObject.matches(".cell-image")) openMediaViewer(focusedObject.querySelector("img"));
-    else downloadFileCard(focusedObject);
+    else openFileViewer(focusedObject);
     return;
   }
   if (event.key === "Backspace" || event.key === "Delete") {
@@ -8809,7 +8926,7 @@ updateReleaseIndicator();
 let pwaPendingOperations = 0;
 window.preparePwaUpdate = async function () {
   if (publishInProgress || pwaPendingOperations || codeEditorIsDirty() ||
-      document.querySelector('.modal-backdrop:not([hidden])')) {
+      document.querySelector('.modal-backdrop:not([hidden]), #fileViewerDialog[open]')) {
     throw new Error('Завершите текущую операцию и закройте диалог перед обновлением.');
   }
   clearTimeout(saveTimer);

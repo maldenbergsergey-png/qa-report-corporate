@@ -125,3 +125,29 @@ test('copying selected sections preserves schemas, rich content, manual numbers 
   assert.deepEqual(copySections(sections, new Set(), id), []);
   assert.deepEqual(copySections(sections, new Set(['stale']), id), []);
 });
+
+for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
+  test(`selection copy can preserve original ${mode} numbers before IDs and positions change`, () => {
+    const numbering = require('../checklist-numbering');
+    const { copySections } = require('../checklist-selection');
+    const document = { numberingMode: mode, sections: [
+      section('omitted', [row('empty'), row('ignored')]),
+      section('kept', [row('skip'), { ...row('chosen'), manualNumber: '7.2' }]),
+      section('last', [{ ...row('last-row'), manualNumber: '' }]),
+    ] };
+    const before = structuredClone(document);
+    const selected = new Set(['chosen', 'last-row']);
+    const numbers = numbering.rowNumbers(document);
+    const copy = { numberingMode: mode, sections: copySections(document.sections, selected, id, numbers) };
+    numbering.configureImport(copy, true, mode);
+    assert.equal(copy.numberingMode, 'manual');
+    assert.deepEqual([...numbering.rowNumbers(copy).values()], [numbers.get('chosen'), numbers.get('last-row')]);
+    assert.deepEqual(document, before);
+    numbering.configureImport(copy, false, mode);
+    assert.equal(copy.numberingMode, mode === 'manual' ? 'section' : mode);
+    assert.ok(copy.sections.every(s => s.rows.every(r => !Object.hasOwn(r, 'manualNumber'))));
+    assert.deepEqual([...numbering.rowNumbers(copy).values()], {
+      section: ['1.', '1.'], continuous: ['1.', '2.'], hierarchical: ['1.1', '2.1'], manual: ['1.', '1.'],
+    }[mode]);
+  });
+}

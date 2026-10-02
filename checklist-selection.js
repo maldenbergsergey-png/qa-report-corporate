@@ -42,14 +42,17 @@
   }
 
   // Copy whole selected sections or just their selected rows without sharing objects.
-  function copySections(sections, selectedIds, createId) {
+  function copySections(sections, selectedIds, createId, rowNumbers = null) {
     return sections.flatMap((section) => {
       const rows = section.rows.filter((row) => selectedIds.has(row.id));
       if (!rows.length) return [];
       const copy = JSON.parse(JSON.stringify({ ...section, rows }));
       copy.id = createId();
       copy.collapsed = false;
-      copy.rows.forEach((row) => { row.id = createId(); });
+      copy.rows.forEach((row) => {
+        if (rowNumbers) row.manualNumber = rowNumbers.get(row.id) ?? "";
+        row.id = createId();
+      });
       return [copy];
     });
   }

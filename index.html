@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=116" />
+    <link rel="stylesheet" href="/styles.css?v=117" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -341,7 +341,7 @@
             </div>
             <button id="selectionCopyButton" type="button" disabled>Копировать в новый чек-лист</button>
             <button id="selectionDelete" type="button" class="selection-delete" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-trash"></use></svg> Удалить</button>
-            <button id="selectionExit" type="button" class="selection-exit">× <span>Выйти из режима выделения</span></button>
+            <button id="selectionExit" type="button" class="selection-exit" aria-label="Выйти из режима выделения" title="Выйти из режима выделения">×</button>
           </div>
           <div class="link-popover" id="linkPopover" hidden>
             <div class="link-popover-heading">
@@ -535,6 +535,41 @@
             <button class="button button-ghost" id="cancelPublishScopeButton" type="button">Отмена</button>
             <button class="button button-primary" id="acceptPublishScopeButton" type="button">Отправить в Jira</button>
           </div>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="htmlCopyScopeModal" hidden>
+      <section class="modal publish-scope-modal html-copy-scope-modal" role="dialog" aria-modal="true" aria-labelledby="htmlCopyScopeTitle" aria-describedby="htmlCopyScopeHint">
+        <header class="modal-header">
+          <div>
+            <div class="eyebrow">HTML</div>
+            <h2 id="htmlCopyScopeTitle">Что скопировать как HTML</h2>
+          </div>
+          <button class="icon-button" id="closeHtmlCopyScopeButton" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <div class="publish-scope-body">
+          <p class="publish-scope-hint" id="htmlCopyScopeHint">В копию попадут заполненные пункты с выбранными статусами из отмеченных разделов. Номера пунктов сохранятся.</p>
+          <h3 class="publish-scope-heading">Статусы строк</h3>
+          <label class="publish-scope-option publish-scope-option-all">
+            <input id="htmlCopyStatusSelectAll" type="checkbox" checked />
+            <span>Все статусы</span>
+          </label>
+          <div id="htmlCopyStatusList" class="publish-status-list"></div>
+          <h3 class="publish-scope-heading">Разделы</h3>
+          <label class="publish-scope-option publish-scope-option-all">
+            <input id="htmlCopySectionSelectAll" type="checkbox" checked />
+            <span>Все разделы</span>
+          </label>
+          <div class="publish-scope-list" id="htmlCopySectionList"></div>
+          <p class="publish-scope-hint">Разделы без подходящих пунктов не копируются. Описание и реквизиты отчёта сохраняются.</p>
+        </div>
+        <footer class="modal-footer html-copy-scope-footer">
+          <div>
+            <span id="htmlCopyScopeSummary" aria-live="polite"></span>
+            <p id="htmlCopyScopeFeedback" role="status" hidden></p>
+          </div>
+          <button class="button button-primary" id="acceptHtmlCopyScopeButton" type="button" aria-live="polite">Копировать HTML</button>
         </footer>
       </section>
     </div>
@@ -983,17 +1018,17 @@
     </template>
 
     <script src="/jira-markup-import.js?v=10"></script>
-    <script src="/checklist-selection.js?v=3"></script>
+    <script src="/checklist-selection.js?v=4"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=42"></script>
+    <script src="/release-notes.js?v=43"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
     <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=122"></script>
+    <script src="/app.js?v=123"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

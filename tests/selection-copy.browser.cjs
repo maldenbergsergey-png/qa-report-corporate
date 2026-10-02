@@ -71,6 +71,21 @@ async function main() {
   await page.check('#selectionAll');
   await page.uncheck('[data-selection-row="two"]');
   const originalUrl = page.url();
+  const historyBeforeCancel = await page.evaluate(async () => (await getAllReports()).length);
+  await page.click('#selectionCopyButton');
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (process.env.QA_REPORT_COPY_SCREENSHOTS) await page.screenshot({ path: path.join(temp, 'numbering-mobile.png') });
+  assert.ok(await page.locator('#confirmModal .modal-footer button').evaluateAll(nodes => nodes.every(n => {
+    const r = n.getBoundingClientRect(); return r.x >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+  })));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.click('#cancelConfirmButton');
+  await page.waitForFunction(() => !selectionCopyBusy);
+  assert.equal(await page.evaluate(async () => (await getAllReports()).length), historyBeforeCancel);
+  assert.equal(await page.evaluate(() => selectedRowIds.size), 2);
+
   if (process.env.QA_REPORT_COPY_SCREENSHOTS) {
     await page.screenshot({ path: path.join(temp, 'copy-desktop.png') });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -80,6 +95,9 @@ async function main() {
   }
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
+  await page.click('#acceptConfirmButton');
+  await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
   assert.match(await page.locator('#confirmModalMessage').textContent(), /Скопировано пунктов: 2/);
   await page.click('#cancelConfirmButton');
   assert.equal(page.url(), originalUrl);
@@ -101,6 +119,9 @@ async function main() {
   assert.equal(copies.sections[1].collapsed, false);
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.equal(await page.locator('#confirmModalTitle').textContent(), 'Нумерация нового чек-листа');
+  await page.click('#acceptConfirmButton');
+  await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
   await page.click('#acceptConfirmButton');
   await page.waitForFunction(() => !selectionCopyBusy && draft.reportId !== window.originalId);
   assert.notEqual(page.url(), originalUrl);
@@ -119,6 +140,8 @@ async function main() {
     openDatabase = async () => { throw Error('Test storage failure'); };
   });
   await page.click('#selectionCopyButton');
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  await page.click('#acceptConfirmButton');
   await page.waitForFunction(() => !selectionCopyBusy);
   assert.equal(page.url(), originalUrl);
   assert.equal(await page.locator('#confirmModal').isHidden(), true);
@@ -143,6 +166,7 @@ async function main() {
     const count = (await getAllReports()).length;
     const first = copySelectedRowsToNewChecklist();
     await copySelectedRowsToNewChecklist(); // Duplicate click while busy is a no-op.
+    resolveConfirmation(true);
     await first;
     saveSelectionCopy = realSave;
     if (draft.intro !== '<p>Concurrent edit</p>') throw Error('Concurrent edit lost');
@@ -150,6 +174,48 @@ async function main() {
   });
   assert.equal(page.url(), originalUrl);
   assert.equal(await page.locator('#confirmModal').isHidden(), true);
+  // Exercise both numbering choices in all modes, around omitted sections and rows.
+  for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
+    for (const preserve of [true, false]) {
+      const expected = await page.evaluate(async ({ mode }) => {
+        applyDraftLocally({ ...draft, numberingMode: mode, intro: '', sections: [
+          { id: 'omitted', title: 'Omitted', columns: [{ id: 'text', title: 'Check' }], rows: [
+            { id: 'ignore', status: 'OK', cells: { text: 'Ignore' } },
+          ] },
+          { id: 'second', title: 'Second', columns: [{ id: 'text', title: 'Check' }], rows: [
+            { id: 'skip', status: 'OK', cells: { text: 'Skip' } },
+            { id: 'pick', status: 'НЕ ОК', manualNumber: '9.3', cells: { text: 'Pick' } },
+          ] },
+          { id: 'third', title: 'Third', columns: [{ id: 'text', title: 'Check' }], rows: [
+            { id: 'last', status: 'НЕ ПРОВЕРЕНО', manualNumber: '', cells: { text: 'Last' } },
+          ] },
+        ] });
+        await saveDraft();
+        if (!selectionMode) setSelectionMode(true);
+        selectedRowIds = new Set(['pick', 'last']);
+        updateSelectionUi();
+        const numbers = ChecklistNumbering.rowNumbers(draft);
+        window.numberingSource = JSON.stringify(draftContentSnapshot());
+        window.historyBeforeNumbering = new Set((await getAllReports()).map(r => r.id));
+        return [numbers.get('pick'), numbers.get('last')];
+      }, { mode });
+      await page.click('#selectionCopyButton');
+      await page.waitForSelector('#confirmModal:not([hidden])');
+      await page.click(preserve ? '#acceptConfirmButton' : '#alternativeConfirmButton');
+      await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
+      await page.click('#cancelConfirmButton');
+      await page.waitForFunction(() => !selectionCopyBusy);
+      const actual = await page.evaluate(async () => {
+        if (JSON.stringify(draftContentSnapshot()) !== window.numberingSource) throw Error('Numbering choice mutated source');
+        const copy = (await getAllReports()).find(r => !window.historyBeforeNumbering.has(r.id));
+        return { mode: copy.document.numberingMode, labels: [...ChecklistNumbering.rowNumbers(copy.document).values()] };
+      });
+      assert.equal(actual.mode, preserve ? 'manual' : mode === 'manual' ? 'section' : mode);
+      assert.deepEqual(actual.labels, preserve ? expected : {
+        section: ['1.', '1.'], continuous: ['1.', '2.'], hierarchical: ['1.1', '2.1'], manual: ['1.', '1.'],
+      }[mode]);
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ version: path.basename(root), copied: 2, stay: true, open: true, reload: true, sourceHistory: true, storageFailure: true, rollback: true }));
 }

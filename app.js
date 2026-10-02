@@ -2333,13 +2333,20 @@ async function copySelectedRowsToNewChecklist() {
   updateSelectionUi();
   closeSelectionMenus();
   try {
+    const numberingChoice = await askConfirmation(
+      "Сохранить номера выбранных пунктов из текущего чек-листа? Для ретеста они останутся неизменными и будут доступны для ручного редактирования. При пересчёте номера начнутся заново в новой копии.",
+      { title: "Нумерация нового чек-листа", confirmText: "Сохранить номера", alternativeText: "Пересчитать" },
+    );
+    if (!numberingChoice) return;
+    if (draft.draftId !== documentId) throw new Error("Отчёт изменился. Выберите строки заново.");
     clearTimeout(saveTimer);
     if (await saveDraft() === false) throw new Error("Не удалось сохранить текущий чек-лист. Проверьте сохранение и повторите копирование.");
     if (draft.draftId !== documentId) throw new Error("Отчёт изменился. Выберите строки заново.");
     flushDraftFromDom();
     const before = clone(draft);
     const beforeContent = serializeDraft();
-    const sections = window.QaReportSelection.copySections(before.sections, ids, () => crypto.randomUUID());
+    const sections = window.QaReportSelection.copySections(before.sections, ids, () => crypto.randomUUID(),
+      numberingChoice === true ? ChecklistNumbering.rowNumbers(before) : null);
     if (!sections.length) return;
     const next = normalizeDraft({
       ...clone(DEFAULT_DRAFT),
@@ -2348,6 +2355,7 @@ async function copySelectedRowsToNewChecklist() {
       draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId(),
       revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId,
     });
+    ChecklistNumbering.configureImport(next, numberingChoice === true, before.numberingMode);
     await saveSelectionCopy(before, next);
     const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
     const unchanged = () => {
@@ -3782,7 +3790,7 @@ function byId(items = []) {
   return new Map(items.filter((item) => item?.id).map((item) => [item.id, item]));
 }
 
-function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
+function generateVisualPreview(sourceDraft = draft, compareDraft = null, options = {}) {
   if (sourceDraft === draft) collectDocumentFields();
   const previewDraft = normalizeDraft(sourceDraft);
   const rowNumbers = ChecklistNumbering.rowNumbers(previewDraft);
@@ -3800,7 +3808,7 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null) {
     intro.innerHTML = previewEditorHtml(previewDraft.intro);
     wrapper.append(intro);
   }
-  previewDraft.sections.forEach((section) => {
+  sectionsForPublication(options.sectionIds, previewDraft, options.statuses).forEach((section) => {
     const oppositeSection = oppositeSections.get(section.id);
     const sectionOnlyHere = Boolean(oppositeDraft && !oppositeSection);
     const oppositeColumns = byId(oppositeSection?.columns || []);
@@ -3875,9 +3883,9 @@ function wrapPortableUrls(container) {
   });
 }
 
-function generatePortableHtml() {
+function generatePortableHtml(options = {}) {
   const container = document.createElement("div");
-  container.innerHTML = generateVisualPreview();
+  container.innerHTML = generateVisualPreview(draft, null, options);
   container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
   container.style.color = "#202124";
   container.style.background = "#ffffff";
@@ -6826,33 +6834,134 @@ async function savePreviewMarkupToDraft() {
   }
 }
 
-async function copyVisualReport() {
+let htmlCopyScopeSession = null;
+
+function htmlCopyScopeOptions() {
+  return {
+    sectionIds: [...document.querySelectorAll('#htmlCopySectionList input:checked')].map((input) => input.value),
+    statuses: [...document.querySelectorAll('#htmlCopyStatusList input:checked')].map((input) => input.value),
+  };
+}
+
+function updateHtmlCopyScopeState(resetFeedback = true) {
+  for (const type of ["Status", "Section"]) {
+    const inputs = [...document.querySelectorAll(`#htmlCopy${type}List input`)];
+    const count = inputs.filter((input) => input.checked).length;
+    const all = document.getElementById(`htmlCopy${type}SelectAll`);
+    all.checked = inputs.length > 0 && count === inputs.length;
+    all.indeterminate = count > 0 && count < inputs.length;
+  }
+  const { sectionIds, statuses } = htmlCopyScopeOptions();
+  const sections = sectionsForPublication(sectionIds, draft, statuses);
+  const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
+  document.getElementById("htmlCopyScopeSummary").textContent = `К копированию: разделов — ${sections.length}, пунктов — ${count}`;
+  document.getElementById("acceptHtmlCopyScopeButton").disabled = !count || Boolean(htmlCopyScopeSession?.busy);
+  if (resetFeedback) {
+    document.getElementById("acceptHtmlCopyScopeButton").textContent = "Копировать HTML";
+    document.getElementById("htmlCopyScopeFeedback").hidden = true;
+  }
+}
+
+function openHtmlCopyScope(event) {
+  if (htmlCopyScopeSession) return;
+  flushDraftFromDom();
   if (!draft.sections.some((section) => section.rows.some(hasRowContent))) {
     showToast("Добавьте хотя бы одну заполненную строку");
     return;
   }
-  const html = generatePortableHtml();
-  try {
-    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-      throw new Error("Расширенный буфер обмена недоступен");
+  htmlCopyScopeSession = { documentId: draft.draftId, busy: false, trigger: event?.currentTarget || elements.copyVisualButton };
+  closeHeaderDropdowns();
+  const populate = (type, options) => {
+    const list = document.getElementById(`htmlCopy${type}List`);
+    list.replaceChildren();
+    for (const [value, title] of options) {
+      const label = document.createElement("label");
+      label.className = "publish-scope-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = true;
+      input.value = value;
+      input.addEventListener("change", updateHtmlCopyScopeState);
+      const text = document.createElement("span");
+      text.textContent = title;
+      label.append(input, text);
+      list.append(label);
     }
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([html], { type: "text/plain" }),
-      }),
-    ]);
-  } catch {
-    const textarea = document.createElement("textarea");
-    textarea.value = html;
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
+  };
+  populate("Status", Object.keys(STATUS_META).map((status) => [status, status]));
+  populate("Section", draft.sections.map((section, index) => [section.id, section.title.trim() || `Раздел ${index + 1}`]));
+  document.querySelectorAll('#htmlCopyScopeModal input').forEach((input) => { input.disabled = false; });
+  updateHtmlCopyScopeState();
+  document.getElementById("htmlCopyScopeModal").hidden = false;
+  syncBodyModalOverflow();
+  document.getElementById("htmlCopyStatusSelectAll").focus();
+}
+
+function closeHtmlCopyScope() {
+  if (!htmlCopyScopeSession) return;
+  const trigger = htmlCopyScopeSession.trigger;
+  htmlCopyScopeSession = null;
+  document.getElementById("htmlCopyScopeModal").hidden = true;
+  syncBodyModalOverflow();
+  (trigger === elements.copyVisualButton ? elements.copyMenuButton : trigger).focus();
+}
+
+async function copyVisualReport() {
+  const session = htmlCopyScopeSession;
+  if (!session || session.busy) return;
+  flushDraftFromDom();
+  if (draft.draftId !== session.documentId) {
+    closeHtmlCopyScope();
+    showToast("Отчёт изменился. Откройте копирование HTML заново.");
+    return;
   }
-  showToast("HTML-разметка скопирована");
+  const options = htmlCopyScopeOptions();
+  if (!sectionsForPublication(options.sectionIds, draft, options.statuses).length) return;
+  session.busy = true;
+  updateHtmlCopyScopeState();
+  document.getElementById("acceptHtmlCopyScopeButton").textContent = "Копирование…";
+  document.querySelectorAll('#htmlCopyScopeModal input').forEach((input) => { input.disabled = true; });
+  try {
+    const html = generatePortableHtml(options);
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+        throw new Error("Расширенный буфер обмена недоступен");
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([html], { type: "text/plain" }),
+        }),
+      ]);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = html;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.append(textarea);
+      textarea.select();
+      try {
+        if (!document.execCommand("copy")) throw new Error("Не удалось скопировать HTML. Разрешите доступ к буферу обмена и повторите.");
+      } finally { textarea.remove(); }
+    }
+    if (htmlCopyScopeSession === session) {
+      document.getElementById("acceptHtmlCopyScopeButton").textContent = "Скопировано в буфер обмена";
+      document.getElementById("htmlCopyScopeFeedback").hidden = true;
+    }
+  } catch (error) {
+    if (htmlCopyScopeSession === session) {
+      document.getElementById("acceptHtmlCopyScopeButton").textContent = "Копировать HTML";
+      document.getElementById("htmlCopyScopeFeedback").textContent = error.message || "Не удалось скопировать HTML";
+      document.getElementById("htmlCopyScopeFeedback").hidden = false;
+    }
+  } finally {
+    if (htmlCopyScopeSession === session) {
+      session.busy = false;
+      document.querySelectorAll('#htmlCopyScopeModal input').forEach((input) => { input.disabled = false; });
+      updateHtmlCopyScopeState(false);
+      document.getElementById("acceptHtmlCopyScopeButton").focus();
+    }
+  }
 }
 
 const XLSX_STATUS_STYLES = {
@@ -8084,10 +8193,10 @@ elements.feedbackButton.addEventListener("click", openFeedback);
 elements.closeFeedbackButton.addEventListener("click", closeFeedback);
 elements.cancelFeedbackButton.addEventListener("click", closeFeedback);
 elements.copyButton.addEventListener("click", copyMarkup);
-elements.copyVisualButton.addEventListener("click", copyVisualReport);
+elements.copyVisualButton.addEventListener("click", openHtmlCopyScope);
 elements.exportXlsxButton.addEventListener("click", exportChecklistXlsx);
 elements.modalCopyButton.addEventListener("click", copyPreviewMarkup);
-elements.modalCopyVisualButton.addEventListener("click", copyVisualReport);
+elements.modalCopyVisualButton.addEventListener("click", openHtmlCopyScope);
 elements.modalSaveMarkupButton.addEventListener("click", savePreviewMarkupToDraft);
 elements.closePreviewButton.addEventListener("click", closePreview);
 elements.clearButton.addEventListener("click", resetDraft);
@@ -8245,6 +8354,14 @@ elements.publishScopeSelectAll.addEventListener("change", () => {
   });
   updatePublishScopeState();
 });
+for (const type of ["Status", "Section"]) {
+  document.getElementById(`htmlCopy${type}SelectAll`).addEventListener("change", (event) => {
+    document.querySelectorAll(`#htmlCopy${type}List input`).forEach((input) => { input.checked = event.target.checked; });
+    updateHtmlCopyScopeState();
+  });
+}
+document.getElementById("closeHtmlCopyScopeButton").addEventListener("click", closeHtmlCopyScope);
+document.getElementById("acceptHtmlCopyScopeButton").addEventListener("click", copyVisualReport);
 elements.closePublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
 elements.cancelPublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
 elements.acceptPublishScopeButton.addEventListener("click", () => resolvePublishScope(true));
@@ -8427,6 +8544,10 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape") {
+    if (!document.getElementById("htmlCopyScopeModal").hidden) {
+      closeHtmlCopyScope();
+      return;
+    }
     if (!elements.publishScopeModal.hidden) {
       resolvePublishScope(false);
       return;

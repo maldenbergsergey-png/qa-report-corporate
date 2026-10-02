@@ -279,6 +279,7 @@ const elements = {
   linkPopoverError: document.querySelector("#linkPopoverError"),
   closeLinkPopoverButton: document.querySelector("#closeLinkPopoverButton"),
   removeLinkButton: document.querySelector("#removeLinkButton"),
+  openLinkButton: document.querySelector("#openLinkButton"),
   applyLinkButton: document.querySelector("#applyLinkButton"),
   textColorInput: document.querySelector("#textColorInput"),
   textColorMenu: document.querySelector("#textColorMenu"),
@@ -418,6 +419,8 @@ const selectionUi = Object.fromEntries([
 ].map((name) => [name, document.getElementById(`selection${name}`)]));
 let linkEditorRange = null;
 let editingLink = null;
+let linkPopoverAnchor = null;
+let pointerLinkGesture = null;
 let publishAbortController = null;
 let publishInProgress = false;
 let publishScopeResolver = null;
@@ -7740,50 +7743,106 @@ elements.linkButton.addEventListener("pointerdown", () => {
   }
 });
 function anchorFromRange(range) {
-  if (!range) return null;
+  if (!range || !activeEditor?.contains(range.startContainer) || !activeEditor.contains(range.endContainer)) return null;
   const parentAnchor = (node) =>
     (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest?.("a") || null;
-  return (
-    parentAnchor(range.startContainer) ||
-    parentAnchor(range.endContainer) ||
-    parentAnchor(range.commonAncestorContainer)
-  );
+  const start = parentAnchor(range.startContainer);
+  const end = parentAnchor(range.endContainer);
+  if (start && start === end) return start;
+  // Selecting a whole anchor can put both range boundaries in its parent.
+  const anchors = [...activeEditor.querySelectorAll("a")].filter(anchor => range.intersectsNode(anchor));
+  return anchors.length === 1 && range.toString() === anchors[0].textContent ? anchors[0] : null;
+}
+
+function validLinkUrl(value) {
+  const url = normalizeLinkUrl(value);
+  if (!/^https?:\/\/\S+$/i.test(url)) return "";
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) && parsed.hostname ? url : "";
+  } catch { return ""; }
 }
 
 function positionLinkPopover() {
-  const buttonRect = elements.linkButton.getBoundingClientRect();
+  const anchor = linkPopoverAnchor?.isConnected ? linkPopoverAnchor : elements.linkButton;
+  const anchorRect = anchor.getBoundingClientRect();
   const popoverWidth = Math.min(360, window.innerWidth - 24);
-  const left = Math.max(12, Math.min(buttonRect.left, window.innerWidth - popoverWidth - 12));
+  const left = Math.max(12, Math.min(anchorRect.left, window.innerWidth - popoverWidth - 12));
   elements.linkPopover.style.width = `${popoverWidth}px`;
   elements.linkPopover.style.left = `${left}px`;
-  elements.linkPopover.style.top = `${buttonRect.bottom + 8}px`;
+  const height = elements.linkPopover.getBoundingClientRect().height;
+  const below = anchorRect.bottom + 8;
+  const top = below + height <= window.innerHeight - 12 ? below : anchorRect.top - height - 8;
+  elements.linkPopover.style.top = `${Math.max(12, Math.min(top, window.innerHeight - height - 12))}px`;
 }
 
-function closeLinkPopover() {
+function closeLinkPopover(restoreFocus = false) {
+  const range = linkEditorRange?.cloneRange();
   elements.linkPopover.hidden = true;
   elements.linkPopoverError.hidden = true;
+  elements.linkButton.setAttribute("aria-expanded", "false");
   linkEditorRange = null;
   editingLink = null;
+  linkPopoverAnchor = null;
+  if (restoreFocus && activeEditor?.isConnected) {
+    activeEditor.focus({ preventScroll: true });
+    if (range && activeEditor.contains(range.commonAncestorContainer)) {
+      const selection = window.getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+      savedEditorRange = range.cloneRange();
+    }
+  }
 }
 
-function openLinkPopover() {
-  linkEditorRange = savedEditorRange?.cloneRange() || null;
-  editingLink = anchorFromRange(linkEditorRange);
+function openLinkPopover(anchor = null, focusInputs = true) {
+  if (anchor) {
+    const editor = anchor.closest(".cell-editor, .intro-editor");
+    if (!editor || !anchor.isConnected) return;
+    activeEditor = editor;
+    linkEditorRange = document.createRange();
+    linkEditorRange.selectNode(anchor);
+    editingLink = anchor;
+  } else {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount && activeEditor?.contains(selection.anchorNode)
+      ? selection.getRangeAt(0) : savedEditorRange;
+    linkEditorRange = range && activeEditor?.isConnected && activeEditor.contains(range.startContainer) && activeEditor.contains(range.endContainer)
+      ? range.cloneRange() : null;
+    editingLink = anchorFromRange(linkEditorRange);
+  }
+  linkPopoverAnchor = anchor || elements.linkButton;
   const selectedText = linkEditorRange?.toString().trim() || "";
   const selectedUrl = isPlainUrl(selectedText) ? normalizeLinkUrl(selectedText) : "";
   elements.linkPopoverTitle.textContent = editingLink ? "Изменить ссылку" : "Добавить ссылку";
   elements.linkTextInput.value = editingLink?.textContent || selectedText || "";
   elements.linkUrlInput.value = editingLink?.getAttribute("href") || selectedUrl;
   elements.removeLinkButton.hidden = !editingLink;
+  elements.openLinkButton.hidden = !editingLink && !selectedUrl;
+  elements.openLinkButton.disabled = !validLinkUrl(elements.linkUrlInput.value);
   elements.linkPopoverError.hidden = true;
   elements.linkPopover.hidden = false;
+  elements.linkButton.setAttribute("aria-expanded", "true");
   positionLinkPopover();
-  requestAnimationFrame(() =>
-    (elements.linkTextInput.value ? elements.linkUrlInput : elements.linkTextInput).focus(),
-  );
+  // A click keeps the caret available for a second click or text selection.
+  if (focusInputs) requestAnimationFrame(() => {
+    if (!elements.linkPopover.hidden) (elements.linkTextInput.value ? elements.linkUrlInput : elements.linkTextInput).focus();
+  });
+}
+
+function linkEditContextIsCurrent() {
+  return activeEditor?.isConnected && (!editingLink || (editingLink.isConnected && activeEditor.contains(editingLink))) &&
+    (!linkEditorRange || (activeEditor.contains(linkEditorRange.startContainer) && activeEditor.contains(linkEditorRange.endContainer)));
+}
+
+function openLinkFromPopover() {
+  if (!linkEditContextIsCurrent()) return closeLinkPopover();
+  const url = validLinkUrl(elements.linkUrlInput.value);
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function applyLinkFromPopover() {
+  if (!linkEditContextIsCurrent()) return closeLinkPopover();
   const title = elements.linkTextInput.value.trim();
   const url = normalizeLinkUrl(elements.linkUrlInput.value);
   if (!title) {
@@ -7791,7 +7850,7 @@ function applyLinkFromPopover() {
     elements.linkPopoverError.hidden = false;
     return;
   }
-  if (!/^https?:\/\/\S+$/i.test(url)) {
+  if (!validLinkUrl(url)) {
     elements.linkPopoverError.textContent =
       "Введите адрес, начинающийся с www., http:// или https://";
     elements.linkPopoverError.hidden = false;
@@ -7809,18 +7868,26 @@ function applyLinkFromPopover() {
 }
 
 function removeEditedLink() {
-  if (!editingLink?.isConnected) return closeLinkPopover();
-  const text = document.createTextNode(editingLink.textContent || "");
-  editingLink.replaceWith(text);
+  if (!editingLink || !linkEditContextIsCurrent()) return closeLinkPopover();
+  // Keep inline formatting when removing only the hyperlink.
+  const range = document.createRange();
+  range.selectNodeContents(editingLink);
+  const content = range.extractContents();
+  editingLink.replaceWith(content);
   activeEditor.dispatchEvent(new Event("input", { bubbles: true }));
   closeLinkPopover();
   activeEditor.focus();
 }
 
-elements.linkButton.addEventListener("click", openLinkPopover);
+elements.linkButton.addEventListener("click", () => openLinkPopover());
 elements.applyLinkButton.addEventListener("click", applyLinkFromPopover);
 elements.removeLinkButton.addEventListener("click", removeEditedLink);
-elements.closeLinkPopoverButton.addEventListener("click", closeLinkPopover);
+elements.openLinkButton.addEventListener("click", openLinkFromPopover);
+elements.closeLinkPopoverButton.addEventListener("click", () => closeLinkPopover(true));
+elements.linkUrlInput.addEventListener("input", () => {
+  elements.openLinkButton.disabled = !validLinkUrl(elements.linkUrlInput.value);
+  elements.linkPopoverError.hidden = true;
+});
 [elements.linkTextInput, elements.linkUrlInput].forEach((input) => {
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -7829,10 +7896,43 @@ elements.closeLinkPopoverButton.addEventListener("click", closeLinkPopover);
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      closeLinkPopover();
-      activeEditor.focus();
+      closeLinkPopover(true);
     }
   });
+});
+function editorLinkFromTarget(target) {
+  const anchor = target?.closest?.("a[href]");
+  return anchor?.closest(".cell-editor, .intro-editor") && !anchor.closest(".cell-file, .cell-image, .cell-code-block, [data-editor-ui]") ? anchor : null;
+}
+
+document.addEventListener("pointerdown", event => {
+  const anchor = editorLinkFromTarget(event.target);
+  pointerLinkGesture = anchor ? { anchor, x: event.clientX, y: event.clientY, moved: false } : null;
+}, true);
+document.addEventListener("pointermove", event => {
+  if (pointerLinkGesture && Math.hypot(event.clientX - pointerLinkGesture.x, event.clientY - pointerLinkGesture.y) > 5) pointerLinkGesture.moved = true;
+}, true);
+document.addEventListener("pointercancel", () => { pointerLinkGesture = null; }, true);
+document.addEventListener("dragstart", () => { if (pointerLinkGesture) pointerLinkGesture.moved = true; }, true);
+document.addEventListener("click", event => {
+  const anchor = editorLinkFromTarget(event.target);
+  const dragged = pointerLinkGesture?.moved;
+  pointerLinkGesture = null;
+  if (!anchor) return;
+  // Every editor-link click is handled here; navigation requires the open button.
+  event.preventDefault();
+  if (dragged || selectionMode || event.detail > 1 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !window.getSelection()?.isCollapsed) return;
+  openLinkPopover(anchor, false);
+}, true);
+document.addEventListener("auxclick", event => {
+  if (editorLinkFromTarget(event.target)) event.preventDefault();
+}, true);
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k" && event.target.closest?.(".cell-editor, .intro-editor")) {
+    event.preventDefault();
+    activeEditor = event.target.closest(".cell-editor, .intro-editor");
+    openLinkPopover();
+  }
 });
 elements.textColorInput.addEventListener("pointerdown", () => {
   const selection = window.getSelection();
@@ -8503,6 +8603,7 @@ window.addEventListener("scroll", (event) => {
   // Scrolling an options list does not move its anchor or change the sticky stack.
   if (event.target === selectionUi.Destinations || event.target === selectionUi.StatusOptions) return;
   closeFloatingMenu();
+  if (!elements.linkPopover.hidden && !elements.linkPopover.contains(event.target)) positionLinkPopover();
   scheduleStickySectionUpdate();
 }, true);
 document.addEventListener("keydown", (event) => {
@@ -8557,8 +8658,7 @@ document.addEventListener("keydown", (event) => {
       return;
     }
     if (!elements.linkPopover.hidden) {
-      closeLinkPopover();
-      activeEditor.focus();
+      closeLinkPopover(true);
       return;
     }
     if (!elements.codeEditorModal.hidden) {

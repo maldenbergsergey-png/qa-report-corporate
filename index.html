@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=117" />
+    <link rel="stylesheet" href="/styles.css?v=118" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -54,6 +54,7 @@
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
       <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></symbol>
       <symbol id="icon-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1" /></symbol>
+      <symbol id="icon-external" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" /></symbol>
       <symbol id="icon-paperclip" viewBox="0 0 24 24"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L10 17.4a2 2 0 0 1-2.8-2.8l8.5-8.5" /></symbol>
       <symbol id="icon-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></symbol>
       <symbol id="icon-list-ordered" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11" /><path d="M4 5h1v4M3.5 9h3M3.5 11.5h2.2c.8 0 1.3.5 1.3 1.2 0 .5-.2.9-.7 1.3l-2.8 2.5H7M4 18h1.6c.8 0 1.4.4 1.4 1.1 0 .6-.4 1-1.2 1.1.9.1 1.4.5 1.4 1.2 0 .8-.6 1.2-1.5 1.2H4" /></symbol>
@@ -280,7 +281,7 @@
             <button type="button" class="toolbar-icon-button" data-command="insertOrderedList" title="Нумерованный список" aria-label="Нумерованный список">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-list-ordered"></use></svg>
             </button>
-            <button type="button" id="linkButton" class="toolbar-icon-button" title="Добавить ссылку" aria-label="Добавить ссылку">
+            <button type="button" id="linkButton" class="toolbar-icon-button" title="Ссылка (Ctrl/⌘+K)" aria-label="Добавить или изменить ссылку" aria-haspopup="dialog" aria-expanded="false" aria-controls="linkPopover">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg>
               <svg class="toolbar-chevron" aria-hidden="true"><use href="#icon-chevron-down"></use></svg>
             </button>
@@ -343,7 +344,7 @@
             <button id="selectionDelete" type="button" class="selection-delete" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-trash"></use></svg> Удалить</button>
             <button id="selectionExit" type="button" class="selection-exit" aria-label="Выйти из режима выделения" title="Выйти из режима выделения">×</button>
           </div>
-          <div class="link-popover" id="linkPopover" hidden>
+          <div class="link-popover" id="linkPopover" role="dialog" aria-labelledby="linkPopoverTitle" aria-describedby="linkPopoverHint" hidden>
             <div class="link-popover-heading">
               <strong id="linkPopoverTitle">Добавить ссылку</strong>
               <button class="link-popover-close" id="closeLinkPopoverButton" type="button" aria-label="Закрыть">×</button>
@@ -356,7 +357,9 @@
               <span>Адрес</span>
               <input id="linkUrlInput" type="url" placeholder="https://example.com" />
             </label>
-            <div class="link-popover-error" id="linkPopoverError" hidden></div>
+            <p class="link-popover-hint" id="linkPopoverHint">Для перехода нажмите «Открыть в новой вкладке». Выделение и копирование текста не открывают ссылку.</p>
+            <button class="button button-ghost link-popover-open" id="openLinkButton" type="button" hidden>Открыть в новой вкладке <svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg></button>
+            <div class="link-popover-error" id="linkPopoverError" role="alert" hidden></div>
             <div class="link-popover-actions">
               <button class="button button-ghost danger-text" id="removeLinkButton" type="button" hidden>
                 Удалить ссылку
@@ -1021,14 +1024,14 @@
     <script src="/checklist-selection.js?v=4"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=3"></script>
-    <script src="/release-notes.js?v=43"></script>
+    <script src="/release-notes.js?v=44"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=5"></script>
     <script src="/import-wizard.js?v=5"></script>
     <script src="/report-file.js?v=1"></script>
-    <script src="/app.js?v=123"></script>
+    <script src="/app.js?v=124"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

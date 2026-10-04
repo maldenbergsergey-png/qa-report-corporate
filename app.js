@@ -2417,8 +2417,8 @@ async function copySelectedRowsToNewChecklist() {
       return;
     }
     const open = await askConfirmation(
-      `Скопировано пунктов: ${count}. Новый чек-лист: /report/${next.publicId}. Оба чек-листа сохранены в истории. Открыть новый чек-лист?`,
-      { title: "Новый чек-лист создан", confirmText: "Да, открыть", cancelText: "Нет, остаться" },
+      `Скопировано ${count} ${window.QaReportImportOptions.itemWord(count)}. Оба чек-листа доступны в истории.`,
+      { title: "Новый чек-лист создан", confirmText: "Открыть новый", cancelText: "Остаться в текущем" },
     );
     if (open && unchanged()) {
       applyDraftLocally(next);

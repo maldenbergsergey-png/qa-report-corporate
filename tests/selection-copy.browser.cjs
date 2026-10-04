@@ -96,7 +96,7 @@ async function main() {
   await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.click('#acceptSelectionCopyOptions');
   await page.waitForFunction(() => elements.confirmModalTitle.textContent === 'Новый чек-лист создан' && !elements.confirmModal.hidden);
-  assert.match(await page.locator('#confirmModalMessage').textContent(), /Скопировано пунктов: 2/);
+  assert.match(await page.locator('#confirmModalMessage').textContent(), /Скопировано 2 пункта/);
   await page.click('#cancelConfirmButton');
   assert.equal(page.url(), originalUrl);
   await page.waitForFunction(() => !selectionCopyBusy);

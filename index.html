@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=120" />
+    <link rel="stylesheet" href="/styles.css?v=122" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -548,26 +548,51 @@
     </div>
 
     <div class="modal-backdrop" id="selectionCopyOptionsModal" hidden>
-      <section class="modal selection-copy-options-modal" role="dialog" aria-modal="true" aria-labelledby="selectionCopyOptionsTitle">
+      <section class="modal selection-copy-options-modal" role="dialog" aria-modal="true" aria-labelledby="selectionCopyOptionsTitle" aria-describedby="selectionCopyOptionsSummary">
         <header class="modal-header">
-          <div><div class="eyebrow">Новый чек-лист</div><h2 id="selectionCopyOptionsTitle">Как скопировать выбранное</h2></div>
+          <div>
+            <div class="eyebrow">Новый чек-лист</div>
+            <h2 id="selectionCopyOptionsTitle">Как скопировать выбранное</h2>
+            <p id="selectionCopyOptionsSummary" class="selection-copy-summary"></p>
+          </div>
           <button class="icon-button" id="closeSelectionCopyOptions" type="button" aria-label="Закрыть">×</button>
         </header>
         <div class="selection-copy-options-body">
-          <p id="selectionCopyOptionsSummary" class="settings-note"></p>
-          <fieldset class="numbering-settings">
+          <fieldset class="selection-copy-structure" aria-describedby="selectionCopyStructureHint">
             <legend>Структура копии</legend>
-            <label class="settings-toggle-card"><input type="radio" name="selectionCopyGrouping" value="sections" checked /><span><strong>Сохранить разделы</strong><small>Названия, столбцы и выбранные пункты остаются в своих разделах.</small></span></label>
-            <label class="settings-toggle-card"><input type="radio" name="selectionCopyGrouping" value="rows" /><span><strong>Собрать пункты в один раздел</strong><small>Пункты объединяются; разные столбцы и вложения сохраняются.</small></span></label>
+            <p class="selection-copy-help" id="selectionCopyStructureHint">Выберите один вариант.</p>
+            <div class="selection-copy-choices">
+              <label class="selection-copy-choice">
+                <input type="radio" name="selectionCopyGrouping" value="sections" checked aria-labelledby="selectionCopySectionsLabel" aria-describedby="selectionCopySectionsHint" />
+                <span><strong id="selectionCopySectionsLabel">Сохранить разделы</strong><small id="selectionCopySectionsHint">Выбранные пункты останутся в своих разделах с прежними названиями и столбцами.</small></span>
+              </label>
+              <label class="selection-copy-choice">
+                <input type="radio" name="selectionCopyGrouping" value="rows" aria-labelledby="selectionCopyRowsLabel" aria-describedby="selectionCopyRowsHint" />
+                <span><strong id="selectionCopyRowsLabel">Объединить в один раздел</strong><small id="selectionCopyRowsHint">Выбранные пункты будут вместе. Разные столбцы и вложения сохранятся.</small></span>
+              </label>
+            </div>
+            <label class="selection-copy-title" id="selectionCopyTitleField" hidden>Название нового раздела<input id="selectionCopyTitle" type="text" value="Выбранные пункты" maxlength="200" aria-describedby="selectionCopyGroupingHint" /></label>
+            <p id="selectionCopyGroupingHint" class="selection-copy-help" hidden>Новый раздел получит номер 1.</p>
           </fieldset>
-          <label class="selection-copy-title" id="selectionCopyTitleField" hidden>Название нового раздела<input id="selectionCopyTitle" type="text" value="Выбранные пункты" maxlength="200" /></label>
-          <label class="settings-toggle-card"><input id="selectionCopyPreserveRowNumbers" type="checkbox" checked /><span><strong>Сохранить номера пунктов</strong><small>Исходные номера остаются для ретеста и редактируются вручную. Без флажка — пересчитываются.</small></span></label>
-          <label class="settings-toggle-card" id="selectionCopySectionNumbersOption"><input id="selectionCopyPreserveSectionNumbers" type="checkbox" checked /><span><strong>Сохранить номера разделов</strong><small>Например, разделы 4 и 8 сохранят свои номера. Без флажка — начнутся с 1.</small></span></label>
-          <p id="selectionCopyGroupingHint" class="settings-note" hidden>Общий новый раздел получит номер 1. Номера пунктов можно сохранить независимо.</p>
+          <fieldset class="selection-copy-numbering" aria-describedby="selectionCopyNumberingHint">
+            <legend>Нумерация</legend>
+            <p class="selection-copy-help" id="selectionCopyNumberingHint">Выберите, какие исходные номера сохранить.</p>
+            <div class="selection-copy-number-options">
+              <label class="selection-copy-number-option">
+                <input id="selectionCopyPreserveRowNumbers" type="checkbox" checked aria-labelledby="selectionCopyRowNumbersLabel" aria-describedby="selectionCopyRowNumbersHint" />
+                <span><strong id="selectionCopyRowNumbersLabel">Сохранить номера пунктов</strong><small id="selectionCopyRowNumbersHint">Без флажка — пересчитать номера пунктов.</small></span>
+              </label>
+              <label class="selection-copy-number-option" id="selectionCopySectionNumbersOption">
+                <input id="selectionCopyPreserveSectionNumbers" type="checkbox" checked aria-labelledby="selectionCopySectionNumbersLabel" aria-describedby="selectionCopySectionNumbersHint" />
+                <span><strong id="selectionCopySectionNumbersLabel">Сохранить номера разделов</strong><small id="selectionCopySectionNumbersHint">Без флажка — нумеровать разделы с 1.</small></span>
+              </label>
+            </div>
+            <p class="selection-copy-help">Сохранённые номера можно редактировать вручную.</p>
+          </fieldset>
         </div>
         <footer class="modal-footer">
           <button class="button button-ghost" id="cancelSelectionCopyOptions" type="button">Отмена</button>
-          <button class="button button-primary" id="acceptSelectionCopyOptions" type="button">Копировать</button>
+          <button class="button button-primary" id="acceptSelectionCopyOptions" type="button">Создать копию</button>
         </footer>
       </section>
     </div>
@@ -1102,7 +1127,7 @@
     <script src="/checklist-selection.js?v=5"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=46"></script>
+    <script src="/release-notes.js?v=47"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>

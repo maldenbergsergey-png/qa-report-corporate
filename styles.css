@@ -5608,10 +5608,35 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .section-numbering-settings { margin-bottom: 24px; }
 .section-number-input { flex: 0 0 64px; width: 64px; min-width: 0; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--ink); font: inherit; font-size: 17px; font-weight: 700; text-align: center; }
 .section-number-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.selection-copy-options-modal { width: min(560px, 100%); height: auto; max-height: 88dvh; grid-template-rows: auto minmax(0, 1fr) auto; }
-.selection-copy-options-body { overflow-y: auto; min-height: 0; display: grid; gap: 16px; padding: 20px 22px; }
+.selection-copy-options-modal { width: min(620px, 100%); height: auto; max-height: 88dvh; grid-template-rows: auto minmax(0, 1fr) auto; }
+.selection-copy-options-modal .modal-header { align-items: flex-start; gap: 16px; }
+.selection-copy-options-modal .modal-header > div { min-width: 0; }
+.selection-copy-options-modal .modal-header h2 { margin: 4px 0 0; font-size: 22px; line-height: 1.25; }
+.selection-copy-options-modal .modal-header .icon-button { flex-shrink: 0; color: var(--muted); }
+.selection-copy-summary { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.selection-copy-options-body { overflow-y: auto; min-height: 0; display: grid; gap: 24px; padding: 22px; }
 .selection-copy-options-body [hidden] { display: none; }
-.selection-copy-options-body .settings-note { margin: 0; }
+.selection-copy-options-body fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.selection-copy-options-body legend { margin-bottom: 6px; padding: 0; font-size: 16px; font-weight: 700; }
+.selection-copy-help { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.selection-copy-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.selection-copy-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.selection-copy-choice:hover { border-color: var(--muted); }
+.selection-copy-choice:has(input:checked) { border-color: var(--primary); background: color-mix(in srgb, var(--surface) 94%, var(--primary)); box-shadow: inset 0 0 0 1px var(--primary); }
+.selection-copy-choice:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 3px; }
+.selection-copy-options-body input:is([type="radio"], [type="checkbox"]) { width: 18px; height: 18px; flex: 0 0 18px; margin: 1px 0 0; accent-color: var(--primary); cursor: pointer; }
+.selection-copy-options-body :is(.selection-copy-choice, .selection-copy-number-option) > span { display: grid; gap: 5px; min-width: 0; }
+.selection-copy-options-body :is(.selection-copy-choice, .selection-copy-number-option) strong { color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.4; }
+.selection-copy-options-body :is(.selection-copy-choice, .selection-copy-number-option) small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.selection-copy-number-options { border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); }
+.selection-copy-number-option { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 12px 14px; cursor: pointer; }
+.selection-copy-number-option + .selection-copy-number-option { border-top: 1px solid var(--line); }
 .selection-copy-options-modal .modal-footer { justify-content: flex-end; gap: 8px; }
+.selection-copy-options-modal :is(button, input):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .selection-copy-title { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
 .selection-copy-title input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); color: var(--ink); font: inherit; }
+@media (max-width: 540px) {
+  .selection-copy-choices { grid-template-columns: minmax(0, 1fr); }
+  .selection-copy-options-modal .modal-header, .selection-copy-options-modal .modal-footer, .selection-copy-options-body { padding: 18px; }
+  .selection-copy-options-modal .modal-header h2 { font-size: 20px; }
+}

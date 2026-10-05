@@ -14,7 +14,7 @@ const SHELL = [
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
   '/styles.css?v=122', '/app.js?v=127', '/pwa.js?v=5',
   '/jira-markup-import.js?v=11', '/checklist-selection.js?v=5',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=48',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=50',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

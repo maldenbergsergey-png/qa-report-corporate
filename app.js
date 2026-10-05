@@ -279,7 +279,7 @@ const elements = {
   linkUrlInput: document.querySelector("#linkUrlInput"),
   linkPopoverError: document.querySelector("#linkPopoverError"),
   closeLinkPopoverButton: document.querySelector("#closeLinkPopoverButton"),
-  removeLinkButton: document.querySelector("#removeLinkButton"),
+  showLinkUrlButton: document.querySelector("#showLinkUrlButton"),
   openLinkButton: document.querySelector("#openLinkButton"),
   applyLinkButton: document.querySelector("#applyLinkButton"),
   textColorInput: document.querySelector("#textColorInput"),
@@ -8008,7 +8008,7 @@ function openLinkPopover(anchor = null, focusInputs = true) {
   elements.linkPopoverTitle.textContent = editingLink ? "Изменить ссылку" : "Добавить ссылку";
   elements.linkTextInput.value = editingLink?.textContent || selectedText || "";
   elements.linkUrlInput.value = editingLink?.getAttribute("href") || selectedUrl;
-  elements.removeLinkButton.hidden = !editingLink;
+  elements.showLinkUrlButton.hidden = !editingLink;
   elements.openLinkButton.hidden = !editingLink && !selectedUrl;
   elements.openLinkButton.disabled = !validLinkUrl(elements.linkUrlInput.value);
   elements.linkPopoverError.hidden = true;
@@ -8035,13 +8035,8 @@ function openLinkFromPopover() {
 
 function applyLinkFromPopover() {
   if (!linkEditContextIsCurrent()) return closeLinkPopover();
-  const title = elements.linkTextInput.value.trim();
   const url = normalizeLinkUrl(elements.linkUrlInput.value);
-  if (!title) {
-    elements.linkPopoverError.textContent = "Введите текст ссылки";
-    elements.linkPopoverError.hidden = false;
-    return;
-  }
+  const title = elements.linkTextInput.value.trim() || url;
   if (!validLinkUrl(url)) {
     elements.linkPopoverError.textContent =
       "Введите адрес, начинающийся с www., http:// или https://";
@@ -8059,21 +8054,15 @@ function applyLinkFromPopover() {
   activeEditor.focus();
 }
 
-function removeEditedLink() {
+function showEditedLinkUrl() {
   if (!editingLink || !linkEditContextIsCurrent()) return closeLinkPopover();
-  // Keep inline formatting when removing only the hyperlink.
-  const range = document.createRange();
-  range.selectNodeContents(editingLink);
-  const content = range.extractContents();
-  editingLink.replaceWith(content);
-  activeEditor.dispatchEvent(new Event("input", { bubbles: true }));
-  closeLinkPopover();
-  activeEditor.focus();
+  elements.linkTextInput.value = "";
+  applyLinkFromPopover();
 }
 
 elements.linkButton.addEventListener("click", () => openLinkPopover());
 elements.applyLinkButton.addEventListener("click", applyLinkFromPopover);
-elements.removeLinkButton.addEventListener("click", removeEditedLink);
+elements.showLinkUrlButton.addEventListener("click", showEditedLinkUrl);
 elements.openLinkButton.addEventListener("click", openLinkFromPopover);
 elements.closeLinkPopoverButton.addEventListener("click", () => closeLinkPopover(true));
 elements.linkUrlInput.addEventListener("input", () => {

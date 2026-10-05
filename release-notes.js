@@ -1,5 +1,12 @@
 window.QaReportReleases = [
-  { version: "0.19.0", date: "2026-10-05", changes: { new: [], improvements: [], fixes: [] } },
+  {
+    version: "0.19.0", date: "2026-10-05",
+    changes: {
+      new: [],
+      improvements: ["Показывайте полный адрес вместо подписи: нажмите «Показать полный адрес» в окне ссылки или сохраните её с пустым текстом. Ссылка остаётся активной."],
+      fixes: []
+    }
+  },
   {
     version: "0.18.0", date: "2026-10-04",
     changes: {

@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=122" />
+    <link rel="stylesheet" href="/styles.css?v=123" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -351,21 +351,21 @@
               <button class="link-popover-close" id="closeLinkPopoverButton" type="button" title="Закрыть (Esc)" aria-label="Закрыть"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
             </div>
             <label>
-              <span>Текст ссылки</span>
-              <input id="linkTextInput" type="text" placeholder="Например, документация" />
+              <span>Текст ссылки (необязательно)</span>
+              <input id="linkTextInput" type="text" placeholder="Пусто — показывать полный адрес" />
             </label>
             <label>
               <span>Адрес</span>
               <input id="linkUrlInput" type="url" placeholder="https://example.com" />
             </label>
-            <p class="sr-only" id="linkPopoverHint">Для перехода используйте кнопку «Открыть в новой вкладке».</p>
+            <p class="sr-only" id="linkPopoverHint">Оставьте текст пустым, чтобы показать полный адрес. Для перехода используйте кнопку «Открыть в новой вкладке».</p>
             <div class="link-popover-error" id="linkPopoverError" role="alert" hidden></div>
             <div class="link-popover-actions">
               <button class="link-popover-action link-popover-open" id="openLinkButton" type="button" title="Открыть в новой вкладке" aria-label="Открыть в новой вкладке" hidden>
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg>
               </button>
-              <button class="link-popover-action link-popover-remove" id="removeLinkButton" type="button" title="Удалить ссылку, оставить текст" aria-label="Удалить ссылку, оставить текст" hidden>
-                <svg class="ui-icon" aria-hidden="true"><use href="#icon-unlink"></use></svg>
+              <button class="link-popover-action" id="showLinkUrlButton" type="button" title="Показать полный адрес" aria-label="Показать полный адрес" hidden>
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-eye"></use></svg>
               </button>
               <button class="link-popover-action link-popover-apply" id="applyLinkButton" type="button" title="Применить изменения (Enter)" aria-label="Применить изменения">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-check"></use></svg>
@@ -1127,7 +1127,7 @@
     <script src="/checklist-selection.js?v=5"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=50"></script>
+    <script src="/release-notes.js?v=51"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1135,7 +1135,7 @@
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=1"></script>
     <script src="/report-file.js?v=2"></script>
-    <script src="/app.js?v=127"></script>
+    <script src="/app.js?v=128"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

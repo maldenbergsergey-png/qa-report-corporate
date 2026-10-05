@@ -106,13 +106,47 @@ async function main() {
   assert.equal(await link.textContent(), 'Макет выдачи результатов');
   await page.evaluate(() => redo());
   assert.equal(await link.textContent(), 'Новое имя');
+  // Removing the label keeps the complete address as a clickable link.
   await fixture();
   await link.click();
-  await page.locator('#removeLinkButton').click();
-  assert.equal(await editor.locator('a').count(), 1);
-  assert.equal(await editor.locator('strong').textContent(), 'Макет выдачи результатов');
-  await page.evaluate(() => undo());
+  await page.locator('#showLinkUrlButton').click();
   assert.equal(await editor.locator('a').count(), 2);
+  assert.equal(await link.textContent(), 'https://docs.example/design');
+  assert.equal(await link.getAttribute('href'), 'https://docs.example/design');
+  assert.equal(await editor.locator('a').nth(1).textContent(), 'Описание');
+  assert.equal(await editor.innerText(), 'До https://docs.example/design после; Описание');
+  assert.equal(await page.locator('#linkPopover').isVisible(), false);
+  assert.ok(await page.evaluate(() => generateMarkup().includes('[https://docs.example/design|https://docs.example/design]')));
+  noNavigation();
+  await page.evaluate(() => undo());
+  assert.equal(await link.textContent(), 'Макет выдачи результатов');
+  assert.equal(await link.locator('strong').textContent(), 'Макет выдачи результатов');
+  await page.evaluate(() => redo());
+  assert.equal(await link.textContent(), 'https://docs.example/design');
+  await page.waitForFunction(() => !hasUnsavedLocalChanges);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('tr[data-row-id="links-row"] a')?.textContent === 'https://docs.example/design');
+  assert.equal(await link.getAttribute('href'), 'https://docs.example/design');
+
+  // Blank and whitespace-only labels use the currently entered, normalized URL.
+  for (const title of ['', '   ']) {
+    await fixture();
+    await link.click();
+    await page.locator('#linkTextInput').fill(title);
+    await page.locator('#linkUrlInput').fill('www.docs.example/full?view=1&size=2');
+    await page.locator('#linkTextInput').press('Enter');
+    assert.equal(await link.textContent(), 'https://www.docs.example/full?view=1&size=2');
+    assert.equal(await link.getAttribute('href'), 'https://www.docs.example/full?view=1&size=2');
+    assert.equal(await editor.locator('a').count(), 2);
+    noNavigation();
+  }
+  await fixture();
+  await link.click();
+  await page.locator('#linkUrlInput').fill('https://docs.example/changed');
+  await page.locator('#showLinkUrlButton').click();
+  assert.equal(await link.textContent(), 'https://docs.example/changed');
+  assert.equal(await link.getAttribute('href'), 'https://docs.example/changed');
+  await fixture();
 
   // The toolbar finds a caret inside a link and selection of the whole anchor.
   for (const wholeLink of [false, true]) {
@@ -177,15 +211,23 @@ async function main() {
   });
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K');
   assert.equal(await page.locator('#linkTextInput').inputValue(), 'Документация');
-  for (const invalid of ['javascript:alert(1)', 'data:text/html,test', 'file:///tmp/a', 'https://', 'https://bad host']) {
+  for (const invalid of ['', 'javascript:alert(1)', 'data:text/html,test', 'file:///tmp/a', 'https://', 'https://bad host']) {
     await page.locator('#linkUrlInput').fill(invalid);
     assert.equal(await page.locator('#openLinkButton').isDisabled(), true);
-    await page.locator('#applyLinkButton').click();
-    assert.equal(await page.locator('#linkPopoverError').isVisible(), true);
-    noNavigation();
+    for (const action of ['#applyLinkButton', '#showLinkUrlButton']) {
+      await page.locator(action).click();
+      assert.equal(await page.locator('#linkPopoverError').isVisible(), true);
+      assert.equal(await page.locator('#introEditor a').getAttribute('href'), 'https://docs.example/intro');
+      assert.equal(await page.locator('#introEditor a').textContent(), 'Документация');
+      noNavigation();
+    }
   }
   await page.locator('#linkUrlInput').fill('https://docs.example/intro');
-  await page.locator('#closeLinkPopoverButton').click();
+  await page.locator('#showLinkUrlButton').click();
+  assert.equal(await page.locator('#introEditor a').textContent(), 'https://docs.example/intro');
+  assert.equal(await page.locator('#introEditor a').getAttribute('href'), 'https://docs.example/intro');
+  await page.evaluate(() => undo());
+  assert.equal(await page.locator('#introEditor a').textContent(), 'Документация');
 
   // Name a new link from selected text, escape its title and retain surrounding text.
   await editor.evaluate(node => {
@@ -204,6 +246,24 @@ async function main() {
   assert.equal(await editor.locator('script').count(), 0);
   assert.equal(await editor.innerText(), 'До Материал <script> после');
   noNavigation();
+
+  // New links can also be inserted at the caret with an address and no label.
+  await editor.evaluate(node => {
+    node.innerHTML = '<p>До  после</p>';
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+    node.focus(); const range = document.createRange();
+    range.setStart(node.firstChild.firstChild, 3); range.collapse(true);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await page.locator('#linkButton').click();
+  assert.equal(await page.locator('#linkTextInput').inputValue(), '');
+  assert.equal(await page.locator('#showLinkUrlButton').isVisible(), false);
+  await page.locator('#linkUrlInput').fill('http://docs.example/raw?view=1&size=2');
+  await page.locator('#applyLinkButton').click();
+  assert.equal(await editor.locator('a').textContent(), 'http://docs.example/raw?view=1&size=2');
+  assert.equal(await editor.locator('a').getAttribute('href'), 'http://docs.example/raw?view=1&size=2');
+  assert.equal(await editor.innerText(), 'До http://docs.example/raw?view=1&size=2 после');
+  noNavigation();
   await fixture();
 
   // The popover fits every theme and a narrow viewport, including near the bottom.
@@ -214,7 +274,7 @@ async function main() {
     const bounds = await page.locator('#linkPopover').boundingBox();
     assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 1440 && bounds.y + bounds.height <= 1000);
     assert.ok(bounds.width <= 300 && bounds.height <= 240, 'compact link popover');
-    for (const [id, label] of [['openLinkButton', 'Открыть в новой вкладке'], ['removeLinkButton', 'Удалить ссылку, оставить текст'], ['applyLinkButton', 'Применить изменения']]) {
+    for (const [id, label] of [['openLinkButton', 'Открыть в новой вкладке'], ['showLinkUrlButton', 'Показать полный адрес'], ['applyLinkButton', 'Применить изменения']]) {
       const button = page.locator('#' + id);
       assert.equal(await button.getAttribute('aria-label'), label);
       assert.ok(await button.getAttribute('title'));
@@ -232,7 +292,7 @@ async function main() {
   assert.ok(narrow.x >= 0 && narrow.y >= 0 && narrow.x + narrow.width <= 390 && narrow.y + narrow.height <= 844);
   if (screenshots) await page.screenshot({ path: path.join(screenshots, 'mobile.png') });
   assert.deepEqual(errors, []);
-  console.log('Passed: explicit opening, editing, persistence, exports, undo/redo, copy/selection protection, keyboard, URL validation, themes and narrow layout.');
+  console.log('Passed: full-address labels, blank-label editing/creation, explicit opening, persistence, exports, undo/redo, copy/selection protection, keyboard, URL validation, themes and narrow layout.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

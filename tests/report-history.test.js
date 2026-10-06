@@ -33,18 +33,21 @@ function element() {
     set innerHTML(value) { this.html = value; this.children = []; },
     get innerHTML() { return this.html || ""; },
     append(...items) { this.children.push(...items); },
+    setAttribute(name, value) { (this.attributes ||= {})[name] = value; },
     addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; },
   };
 }
 
 function harness(records = new Map()) {
   const ctx = vm.createContext({
-    URL, localEditGeneration: 0, document: { createElement: element },
+    URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, document: { createElement: element },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
+      historyModal: { hidden: true }, clearHistoryButton: element(), saveHistorySnapshotButton: element(),
       introEditor: element(), sections: element(), historySearch: element(), historyList: element(), historyUsage: element(),
     },
+    requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
     clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
     getReportRecord: async id => structuredClone(records.get(id)),
     dbTransaction: async (mode, action) => action({ put: record => records.set(record.id, structuredClone(record)) }),
@@ -53,7 +56,7 @@ function harness(records = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -127,4 +130,75 @@ test("legacy history entries with only an issue key retain their label", async (
   const ctx = harness(new Map([[record.id, record]]));
   await ctx.renderHistoryList();
   assert.equal(historyLabel(ctx), "QA-123");
+});
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+function historyRecord(key) {
+  return { id: key, publicId: "abc12345", issueKey: key, title: key, source: "local", updatedAt: "2026-10-06T12:00:00Z" };
+}
+
+test("opening history shows loading before saving and applies search typed during the wait", async () => {
+  const ctx = harness();
+  const saving = deferred(), loading = deferred();
+  let saveCalls = 0, loadCalls = 0;
+  ctx.saveReportSnapshot = () => { saveCalls++; return saving.promise; };
+  ctx.getAllHistoryReports = () => { loadCalls++; return loading.promise; };
+  const opened = ctx.openHistory();
+  assert.equal(ctx.elements.historyModal.hidden, false);
+  assert.equal(saveCalls, 0);
+  assert.match(ctx.elements.historyList.innerHTML, /Загружаем историю…/);
+  assert.equal((ctx.elements.historyList.innerHTML.match(/class="history-item history-skeleton"/g) || []).length, 3);
+  assert.equal(ctx.elements.historyList.attributes["aria-busy"], "true");
+  assert.equal(ctx.elements.clearHistoryButton.disabled, true);
+  await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
+  assert.equal(saveCalls, 1);
+  assert.equal(loadCalls, 0);
+  saving.resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(loadCalls, 1);
+  ctx.elements.historySearch.value = "qa-2";
+  loading.resolve([historyRecord("QA-1"), historyRecord("QA-2")]);
+  await opened;
+  assert.equal(historyLabel(ctx), "QA-2");
+  assert.equal(ctx.elements.historyList.children.length, 1);
+  assert.equal(ctx.elements.historyList.attributes["aria-busy"], "false");
+  assert.equal(ctx.elements.clearHistoryButton.disabled, false);
+  assert.equal(ctx.elements.saveHistorySnapshotButton.disabled, false);
+});
+
+test("a closed history request cannot overwrite a newly opened list", async () => {
+  const ctx = harness();
+  const old = deferred(), current = deferred();
+  ctx.elements.historyModal.hidden = false;
+  ctx.getAllHistoryReports = () => old.promise;
+  const first = ctx.renderHistoryList({ showLoading: true });
+  ctx.closeHistory();
+  ctx.elements.historyModal.hidden = false;
+  ctx.getAllHistoryReports = () => current.promise;
+  const second = ctx.renderHistoryList({ showLoading: true });
+  old.resolve([historyRecord("QA-OLD")]);
+  await first;
+  assert.equal(ctx.elements.historyList.attributes["aria-busy"], "true");
+  assert.match(ctx.elements.historyList.innerHTML, /Загружаем историю…/);
+  current.resolve([historyRecord("QA-NEW")]);
+  await second;
+  assert.equal(historyLabel(ctx), "QA-NEW");
+});
+
+test("empty and failed loads leave loading and restore the history controls", async () => {
+  const ctx = harness();
+  await ctx.renderHistoryList({ showLoading: true });
+  assert.match(ctx.elements.historyList.innerHTML, /Отчётов пока нет/);
+  assert.equal(ctx.historyLoading, false);
+  ctx.getAllHistoryReports = async () => { throw Error("unavailable"); };
+  await ctx.renderHistoryList({ showLoading: true });
+  assert.match(ctx.elements.historyList.innerHTML, /Не удалось загрузить историю/);
+  assert.match(ctx.elements.historyList.innerHTML, /data-retry-history/);
+  assert.equal(ctx.historyLoading, false);
+  assert.equal(ctx.elements.saveHistorySnapshotButton.disabled, false);
 });

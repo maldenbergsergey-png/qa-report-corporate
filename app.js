@@ -435,6 +435,8 @@ let versionConflictChoice = "";
 let pendingCopyChoice = null;
 let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
+let historyRenderRequestId = 0;
+let historyLoading = false;
 
 function syncBodyModalOverflow() {
   document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open]")
@@ -4937,10 +4939,9 @@ function setFocusMode(enabled) {
 }
 
 async function openHistory() {
-  await saveReportSnapshot("open-history").catch(() => {});
   elements.historyModal.hidden = false;
   syncBodyModalOverflow();
-  await renderHistoryList();
+  await renderHistoryList({ showLoading: true, saveSnapshot: true });
 }
 
 async function saveHistoryCommentNow(report, commentField) {
@@ -4968,12 +4969,59 @@ async function flushVisibleHistoryComments() {
 
 function closeHistory() {
   flushVisibleHistoryComments().catch(() => setSaveStatus("Ошибка комментария"));
+  historyRenderRequestId++;
+  setHistoryLoading(false);
   elements.historyModal.hidden = true;
   syncBodyModalOverflow();
 }
 
-async function renderHistoryList() {
-  const reports = await getAllHistoryReports();
+function setHistoryLoading(loading) {
+  historyLoading = loading;
+  elements.historyList.setAttribute("aria-busy", String(loading));
+  elements.clearHistoryButton.disabled = loading;
+  elements.saveHistorySnapshotButton.disabled = loading;
+  if (!loading) return;
+  elements.historyUsage.textContent = "";
+  elements.historyList.scrollTop = 0;
+  const card = `<div class="history-item history-skeleton" aria-hidden="true">
+    <div class="history-item-info">
+      <div class="history-skeleton-bar history-skeleton-title"></div>
+      <div class="history-skeleton-bar history-skeleton-meta"></div>
+    </div>
+    <div class="history-skeleton-bar history-skeleton-comment"></div>
+    <div class="history-item-actions">
+      <div class="history-skeleton-bar history-skeleton-action"></div>
+      <div class="history-skeleton-bar history-skeleton-action history-skeleton-action-wide"></div>
+      <div class="history-skeleton-bar history-skeleton-action"></div>
+      <div class="history-skeleton-bar history-skeleton-action"></div>
+    </div>
+  </div>`;
+  elements.historyList.innerHTML = `<div class="history-loading-status" role="status">Загружаем историю…</div>${card.repeat(3)}`;
+}
+
+async function renderHistoryList({ showLoading = false, saveSnapshot = false } = {}) {
+  const requestId = ++historyRenderRequestId;
+  if (showLoading) setHistoryLoading(true);
+  let reports;
+  try {
+    if (saveSnapshot) {
+      // Let the loading cards paint before collecting a potentially large report.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (requestId !== historyRenderRequestId) return;
+      await saveReportSnapshot("open-history").catch(() => {});
+    }
+    if (requestId !== historyRenderRequestId) return;
+    reports = await getAllHistoryReports();
+  } catch {
+    if (requestId !== historyRenderRequestId) return;
+    setHistoryLoading(false);
+    elements.historyUsage.textContent = "";
+    elements.historyList.innerHTML = `<div class="history-empty" role="status"><p>Не удалось загрузить историю</p><button class="button button-secondary" type="button" data-retry-history>Повторить</button></div>`;
+    elements.historyList.querySelector("[data-retry-history]")?.addEventListener("click", () => renderHistoryList({ showLoading: true }));
+    return;
+  }
+  if (requestId !== historyRenderRequestId) return;
+  setHistoryLoading(false);
   const query = elements.historySearch.value.trim().toLowerCase();
   const filtered = reports.filter((report) =>
     `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""}`.toLowerCase().includes(query),
@@ -8568,7 +8616,9 @@ elements.undoButton.addEventListener("click", undo);
 elements.redoButton.addEventListener("click", redo);
 elements.historyButton.addEventListener("click", openHistory);
 elements.closeHistoryButton.addEventListener("click", closeHistory);
-elements.historySearch.addEventListener("input", () => renderHistoryList().catch(() => {}));
+elements.historySearch.addEventListener("input", () => {
+  if (!historyLoading) renderHistoryList().catch(() => {});
+});
 elements.saveHistorySnapshotButton.addEventListener("click", async () => {
   await saveReportSnapshot("manual");
   await renderHistoryList();

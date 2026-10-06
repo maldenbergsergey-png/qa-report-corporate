@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=123" />
+    <link rel="stylesheet" href="/styles.css?v=124" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -870,35 +870,35 @@
 
     <div class="modal-backdrop" id="jiraSettingsModal" hidden>
       <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="jiraSettingsTitle">
-        <header class="modal-header">
+        <header class="modal-header settings-header">
           <div>
-            <div class="eyebrow">Настройки</div>
-            <h2 id="jiraSettingsTitle">Настройки приложения</h2>
+            <h2 id="jiraSettingsTitle">Настройки</h2>
+            <p class="settings-description">Настройте QA Report под свой рабочий процесс</p>
           </div>
           <button class="icon-button" id="closeJiraSettingsButton" type="button" aria-label="Закрыть настройки">×</button>
         </header>
         <div class="settings-layout">
           <nav class="settings-sidebar" aria-label="Разделы настроек">
-            <button class="settings-nav-item settings-nav-parent" id="settingsChecklistSectionButton" type="button">
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-list-ordered"></use></svg>
-              <span>Чек-лист</span>
-            </button>
-            <div class="settings-subnav" aria-label="Настройки чек-листа">
-              <button class="settings-nav-item active" type="button" data-settings-section="checklist">Нумерация</button>
-              <button class="settings-nav-item" type="button" data-settings-section="columns">Столбцы</button>
-              <button class="settings-nav-item" type="button" data-settings-section="pinning">Закрепление столбцов</button>
+            <div class="settings-nav-group">
+              <div class="settings-nav-heading">Чек-лист</div>
+              <button class="settings-nav-item active" id="settingsChecklistSectionButton" type="button" data-settings-section="checklist" aria-current="page"><svg class="ui-icon" aria-hidden="true"><use href="#icon-list-ordered"></use></svg><span>Нумерация</span></button>
+              <button class="settings-nav-item" type="button" data-settings-section="columns"><svg class="ui-icon" aria-hidden="true"><use href="#icon-table"></use></svg><span>Столбцы</span></button>
             </div>
-
-            <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history">
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg>
-              <span>История</span>
-            </button>
-            <button class="settings-nav-item" type="button" data-settings-section="appearance"><svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg><span>Внешний вид</span></button>
-            <button class="settings-nav-item settings-nav-parent" id="settingsIntegrationsButton" type="button" data-settings-section="jira"><svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg><span>Интеграции</span></button>
-            <div class="settings-subnav"><button class="settings-nav-item" type="button" data-settings-section="jira">Jira</button></div>
+            <div class="settings-nav-group">
+              <div class="settings-nav-heading">Данные</div>
+              <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history"><svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg><span>Синхронизация</span></button>
+            </div>
+            <div class="settings-nav-group">
+              <div class="settings-nav-heading">Интеграции</div>
+              <button class="settings-nav-item" type="button" data-settings-section="jira"><svg class="ui-icon" aria-hidden="true"><use href="#icon-jira"></use></svg><span>Jira</span></button>
+            </div>
+            <div class="settings-nav-group">
+              <div class="settings-nav-heading">Приложение</div>
+              <button class="settings-nav-item" type="button" data-settings-section="appearance"><svg class="ui-icon" aria-hidden="true"><use href="#icon-contrast"></use></svg><span>Внешний вид</span></button>
+            </div>
           </nav>
-          <div class="settings-body">
-            <section class="settings-section" data-settings-panel="appearance" hidden><h3>Внешний вид</h3><p class="settings-note">Выберите тему приложения.</p>          <div class="theme-selector">
+          <div class="settings-body" id="settingsContent">
+            <section class="settings-section" data-settings-panel="appearance" hidden><header class="settings-page-header"><h3>Внешний вид</h3><p>Выберите тему приложения.</p></header>          <div class="theme-selector">
             <button class="header-icon-button theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="Выберите тему" aria-label="Выберите тему">
               <svg class="ui-icon theme-icon" aria-hidden="true"><use href="#icon-moon"></use></svg>
             </button>
@@ -919,6 +919,7 @@
           </div></section>
 
             <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
+              <header class="settings-page-header"><h3>Нумерация</h3><p>Настройте нумерацию разделов и пунктов.</p></header>
               <fieldset class="numbering-settings section-numbering-settings">
                 <legend>Нумерация разделов</legend>
                 <p class="settings-note">Настройка сохраняется в текущем чек-листе и не зависит от нумерации пунктов.</p>
@@ -953,11 +954,11 @@
               </fieldset>
             </section>
             <section class="settings-section" data-settings-panel="columns" hidden>
-              <h3>Столбцы по умолчанию</h3>
+              <header class="settings-page-header"><h3>Столбцы</h3><p>Настройте состав и поведение столбцов чек-листа.</p></header>
               <div class="settings-note">Настройка применяется к новым чек-листам и разделам. Существующие таблицы и столбцы из импорта не изменяются. Номер и статус всегда остаются в наборе.</div>
               <div class="default-columns-editor">
                 <div class="default-columns-editor-heading">
-                  <strong>Состав и порядок</strong>
+                  <strong>Состав и порядок столбцов</strong>
                   <small>Перетащите карточку за маркер или используйте стрелки.</small>
                 </div>
                 <div id="defaultColumnsList" class="default-columns-list" aria-label="Столбцы по умолчанию"></div>
@@ -966,10 +967,8 @@
                   <button type="button" class="button button-ghost" id="resetDefaultColumns"><svg class="ui-icon" aria-hidden="true"><use href="#icon-undo"></use></svg><span>Вернуть стандартный набор</span></button>
                 </div>
               </div>
-              <div class="settings-note default-columns-save-note">Нажмите «Сохранить настройки», чтобы использовать этот набор для новых чек-листов и разделов в текущем браузере.</div>
-            </section>
-            <section class="settings-section" id="settingsPinningSection" data-settings-panel="pinning" hidden>
-              <fieldset class="numbering-settings">
+              <div class="settings-note default-columns-save-note">Нажмите «Сохранить», чтобы использовать этот набор для новых чек-листов и разделов в текущем браузере.</div>
+              <fieldset class="numbering-settings" id="settingsPinningSection">
                 <legend>Закрепление столбцов</legend>
                 <p class="settings-note">Для всех чек-листов в этом браузере, включая новые. Закреплённые столбцы остаются видимыми при горизонтальной прокрутке.</p>
                 <label class="settings-toggle-card pinning-option">
@@ -984,6 +983,7 @@
               </fieldset>
             </section>
             <section class="settings-section" id="settingsJiraSection" data-settings-panel="jira" hidden>
+              <header class="settings-page-header"><h3>Jira</h3><p>Управляйте подключениями Jira для публикации отчётов.</p></header>
               <div class="settings-note">
                 Подключите каждую Jira один раз. После подтверждения задачи, комментарии и вложения создаются от вашей Jira-учётной записи и с вашими правами.
               </div>
@@ -992,6 +992,7 @@
               </div>
             </section>
             <section class="settings-section" id="settingsHistorySection" data-settings-panel="history" hidden>
+              <header class="settings-page-header"><h3>Синхронизация</h3><p>Настройте хранение и синхронизацию чек-листов.</p></header>
               <div class="settings-note">
                 Включите синхронизацию, чтобы открывать одну историю чек-листов в разных браузерах.
               </div>
@@ -1017,10 +1018,10 @@
             </section>
           </div>
         </div>
-        <footer class="modal-footer settings-footer" id="settingsFooter" hidden>
+        <footer class="modal-footer settings-footer" id="settingsFooter">
           <button class="button button-primary" id="saveJiraSettingsButton" type="button">
             <span class="settings-save-check" id="settingsSaveCheck" aria-hidden="true" hidden>✓</span>
-            <span class="settings-save-label">Сохранить настройки</span>
+            <span class="settings-save-label">Сохранить</span>
           </button>
         </footer>
       </section>
@@ -1127,7 +1128,7 @@
     <script src="/checklist-selection.js?v=5"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=51"></script>
+    <script src="/release-notes.js?v=52"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1135,7 +1136,7 @@
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=1"></script>
     <script src="/report-file.js?v=2"></script>
-    <script src="/app.js?v=128"></script>
+    <script src="/app.js?v=129"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

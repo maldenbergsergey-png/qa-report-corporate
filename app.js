@@ -4075,7 +4075,7 @@ function updateCloudHistorySettingsState() {
 function setSettingsSavedState(saved) {
   elements.saveJiraSettingsButton.classList.toggle("is-saved", saved);
   elements.settingsSaveCheck.hidden = !saved;
-  elements.saveJiraSettingsButton.querySelector(".settings-save-label").textContent = saved ? "Сохранено" : "Сохранить настройки";
+  elements.saveJiraSettingsButton.querySelector(".settings-save-label").textContent = saved ? "Сохранено" : "Сохранить";
 }
 
 function markSettingsDirty() {
@@ -4125,9 +4125,7 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "pinning", "jira", "history", "appearance"].includes(section) ? section : "checklist";
-  document.getElementById("settingsIntegrationsButton").classList.toggle("group-active", selected === "jira");
-  elements.settingsChecklistSectionButton.classList.toggle("group-active", ["checklist", "columns", "pinning"].includes(selected));
+  const selected = ["checklist", "columns", "jira", "history", "appearance"].includes(section) ? section : "checklist";
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
     button.classList.toggle("active", active);
@@ -4138,7 +4136,9 @@ function setSettingsSection(section) {
     panel.hidden = panel.dataset.settingsPanel !== selected;
     panel.classList.toggle("active", !panel.hidden);
   });
-  elements.settingsFooter.hidden = selected === "jira";
+  document.getElementById("settingsContent").scrollTop = 0;
+  document.getElementById("themeMenu").hidden = true;
+  elements.themeToggle.setAttribute("aria-expanded", "false");
 }
 
 function loadPinnedColumns() {
@@ -8662,7 +8662,6 @@ elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCo
 document.querySelectorAll('.settings-sidebar [data-settings-section]').forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });
-elements.settingsChecklistSectionButton.addEventListener("click", () => setSettingsSection("checklist"));
 
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
 elements.jiraSettingsModal.addEventListener("change", markSettingsDirty);

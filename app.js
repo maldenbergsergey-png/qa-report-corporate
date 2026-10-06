@@ -8150,7 +8150,7 @@ document.addEventListener("click", event => {
   if (!anchor) return;
   // Every editor-link click is handled here; navigation requires the open button.
   event.preventDefault();
-  if (dragged || selectionMode || event.detail > 1 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !window.getSelection()?.isCollapsed) return;
+  if (dragged || event.detail > 1 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !window.getSelection()?.isCollapsed) return;
   openLinkPopover(anchor, false);
 }, true);
 document.addEventListener("auxclick", event => {

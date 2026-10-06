@@ -199,10 +199,26 @@ async function main() {
   await page.mouse.up();
   assert.equal(await page.locator('#linkPopover').isVisible(), false);
   noNavigation();
-  await page.evaluate(() => setSelectionMode(true));
+  // Opening a link in row selection mode keeps the selected rows and report intact.
+  await page.locator('#selectionToggle').click();
+  await page.locator('[data-selection-row="links-row"]').check();
+  const selectedBefore = await page.evaluate(() => ({ rows: [...selectedRowIds], report: serializeDraft() }));
   await link.click();
-  assert.equal(await page.locator('#linkPopover').isVisible(), false);
-  await page.evaluate(() => setSelectionMode(false));
+  assert.equal(await page.locator('#linkPopover').isVisible(), true);
+  assert.equal(await page.locator('#linkUrlInput').inputValue(), 'https://docs.example/design');
+  noNavigation();
+  const selectedOpened = context.waitForEvent('page');
+  await page.locator('#openLinkButton').click();
+  const selectedPopup = await selectedOpened;
+  await selectedPopup.waitForURL('https://docs.example/design');
+  assert.equal(await selectedPopup.evaluate(() => window.opener), null);
+  await selectedPopup.close();
+  await page.locator('#closeLinkPopoverButton').click();
+  assert.equal(await page.locator('#selectionToggle').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('[data-selection-row="links-row"]').isChecked(), true);
+  assert.deepEqual(await page.evaluate(() => ({ rows: [...selectedRowIds], report: serializeDraft() })), selectedBefore);
+  noNavigation();
+  await page.locator('#selectionToggle').click();
 
   // Keyboard creation also works in the introduction; invalid URLs cannot open.
   await page.locator('#introEditor a').evaluate(anchor => {

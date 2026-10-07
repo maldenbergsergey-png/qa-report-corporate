@@ -2898,7 +2898,7 @@ function createColumnHeader(section, column, index) {
     }
     items.push({
       label: "Очистить столбец",
-      icon: "trash",
+      icon: "broom",
       danger: true,
       action: () => clearSectionColumn(section.id, column.id),
     });
@@ -2973,7 +2973,7 @@ function createStatusHeader(section) {
       },
       {
         label: "Очистить столбец",
-        icon: "trash",
+        icon: "broom",
         danger: true,
         action: () => clearSectionColumn(section.id),
       },
@@ -4167,7 +4167,7 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  const selected = ["checklist", "columns", "environments", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
     button.classList.toggle("active", active);
@@ -4332,6 +4332,7 @@ async function disconnectJira(instanceId) {
 function openJiraSettings() {
   fillReportIdentityForm();
   fillChecklistSettingsForm();
+  fillEnvironmentSettingsForm();
   fillPinnedColumnsForm();
   setSettingsSection("checklist");
   setSettingsSavedState(false);
@@ -4354,7 +4355,10 @@ function closeJiraSettings() {
 
 function saveJiraSettings() {
   try {
+    saveEnvironmentSettings();
     saveReportIdentitySettings();
+    if (environmentSettingsWorkspace !== reportWorkspaceKey) fillEnvironmentSettingsForm();
+    renderEnvironmentOptions();
     saveDefaultColumnsSettings();
     saveChecklistSettings();
     savePinnedColumns();
@@ -6979,7 +6983,7 @@ async function applyImport() {
       showToast("Чек-лист изменился при сохранении. Проверьте открытую версию перед повторным импортом.", 9000); return;
     }
     await saveReportSnapshot("import-complete");
-    renderEnvironmentOptions(draft.environment);
+    renderEnvironmentOptions();
     updateChecklistUrl(draft.publicId);
     showImportResult(placement.mode === "replace" ? `Чек-лист заменён · Пунктов: ${rowIds.length}`
       : `Добавлено пунктов: ${rowIds.length}${placement.mode === "sections" ? ` · Разделов: ${imported.sections.length}` : ""}`, rowIds);
@@ -7030,7 +7034,7 @@ async function applyImportedChecklist(imported, metadata = {}) {
   forceLocalDraftSave = true;
   await saveDraft();
   await saveReportSnapshot("inbound-import");
-  renderEnvironmentOptions(draft.environment);
+  renderEnvironmentOptions();
   return true;
 }
 
@@ -7962,31 +7966,119 @@ elements.addSectionButton.addEventListener("click", () => {
   saveLocalMutationNow();
 });
 
-function renderEnvironmentOptions(value = "") {
-  const key = `qa-report-environments-v1:${reportWorkspaceKey || "local"}`;
-  let values = [];
+const DEFAULT_ENVIRONMENTS = ["DEV", "STAGE", "PROD"];
+let environmentSettingsDraft = [];
+let environmentSettingsWorkspace = "";
+
+function environmentSettingsKey() {
+  return "qa-report-environment-settings-v1:" + (reportWorkspaceKey || "local");
+}
+
+function normalizeEnvironments(values) {
+  if (!Array.isArray(values)) return [];
+  return values.filter(value => typeof value === "string").map(value => value.trim())
+    .filter((value, index, all) => value && all.findIndex(other => other.toLocaleLowerCase() === value.toLocaleLowerCase()) === index);
+}
+
+function loadEnvironments() {
   try {
-    const stored = JSON.parse(localStorage.getItem(key) || "[]");
-    if (Array.isArray(stored)) values = stored.filter((item) => typeof item === "string");
+    const saved = JSON.parse(localStorage.getItem(environmentSettingsKey()));
+    if (Array.isArray(saved)) return normalizeEnvironments(saved);
   } catch {}
-  const next = String(value).trim();
-  values = [next, ...values].filter((item, index, all) => item &&
-    all.findIndex((other) => other.toLocaleLowerCase() === item.toLocaleLowerCase()) === index).slice(0, 50);
-  if (next) {
-    try { localStorage.setItem(key, JSON.stringify(values)); } catch {}
-  }
+  let previous = [];
+  try { previous = normalizeEnvironments(JSON.parse(localStorage.getItem("qa-report-environments-v1:" + (reportWorkspaceKey || "local")))); } catch {}
+  return normalizeEnvironments([...DEFAULT_ENVIRONMENTS, ...previous]);
+}
+
+function renderEnvironmentOptions() {
   const list = document.getElementById("environmentOptions");
   list.replaceChildren();
-  for (const item of [...values, "STAGE", "DEV", "PROD", "Локально"].filter((item, index, all) =>
-    all.findIndex((other) => other.toLocaleLowerCase() === item.toLocaleLowerCase()) === index)) {
+  for (const value of loadEnvironments()) {
     const option = document.createElement("option");
-    option.value = item;
+    option.value = value;
     list.append(option);
   }
 }
 
+function setEnvironmentSettingsError(message = "", input) {
+  const error = document.getElementById("environmentSettingsError");
+  error.textContent = message;
+  error.hidden = !message;
+  document.querySelectorAll("#environmentSettingsList input, #newEnvironmentName").forEach(node => node.removeAttribute("aria-invalid"));
+  if (message && input) { input.setAttribute("aria-invalid", "true"); input.focus(); }
+}
+
+function renderEnvironmentSettings() {
+  const list = document.getElementById("environmentSettingsList");
+  list.replaceChildren();
+  if (!environmentSettingsDraft.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-note environment-empty";
+    empty.textContent = "Список пуст. Добавьте окружение ниже.";
+    list.append(empty);
+  }
+  environmentSettingsDraft.forEach((value, index) => {
+    const row = document.createElement("div"); row.className = "environment-settings-row";
+    const input = document.createElement("input"); input.type = "text"; input.value = value;
+    input.setAttribute("aria-label", "Окружение " + (index + 1));
+    input.setAttribute("aria-describedby", "environmentSettingsError");
+    const remove = document.createElement("button"); remove.type = "button";
+    remove.className = "environment-remove"; remove.append(createUiIcon("trash"));
+    const describeRemove = () => { remove.title = "Удалить " + (input.value.trim() || "окружение"); remove.setAttribute("aria-label", remove.title); };
+    describeRemove();
+    input.addEventListener("input", () => { environmentSettingsDraft[index] = input.value; describeRemove(); setEnvironmentSettingsError(); markSettingsDirty(); });
+    remove.addEventListener("click", () => {
+      environmentSettingsDraft.splice(index, 1); renderEnvironmentSettings(); setEnvironmentSettingsError(); markSettingsDirty();
+      const remaining = list.querySelectorAll("input");
+      (remaining[Math.min(index, remaining.length - 1)] || document.getElementById("newEnvironmentName")).focus();
+    });
+    row.append(input, remove); list.append(row);
+  });
+}
+
+function fillEnvironmentSettingsForm() {
+  environmentSettingsDraft = loadEnvironments();
+  environmentSettingsWorkspace = reportWorkspaceKey;
+  document.getElementById("newEnvironmentName").value = "";
+  setEnvironmentSettingsError(); renderEnvironmentSettings();
+}
+
+function addEnvironmentSetting() {
+  const input = document.getElementById("newEnvironmentName"), value = input.value.trim();
+  if (!value) { setEnvironmentSettingsError("Введите название окружения.", input); return; }
+  if (environmentSettingsDraft.some(other => other.trim().toLocaleLowerCase() === value.toLocaleLowerCase())) {
+    setEnvironmentSettingsError("Такое окружение уже есть в списке.", input); return;
+  }
+  environmentSettingsDraft.push(value); input.value = "";
+  setEnvironmentSettingsError(); renderEnvironmentSettings(); markSettingsDirty(); input.focus();
+}
+
+function saveEnvironmentSettings() {
+  const pending = document.getElementById("newEnvironmentName");
+  if (pending.value.trim()) {
+    addEnvironmentSetting();
+    if (pending.value.trim()) { setSettingsSection("environments"); throw new Error("Такое окружение уже есть в списке."); }
+  }
+  const values = environmentSettingsDraft.map(value => value.trim());
+  const invalid = values.findIndex((value, index) => !value || values.findIndex(other => other.toLocaleLowerCase() === value.toLocaleLowerCase()) !== index);
+  if (invalid >= 0) {
+    setSettingsSection("environments");
+    const message = values[invalid] ? "Названия окружений не должны повторяться." : "Введите название окружения или удалите пустую строку.";
+    setEnvironmentSettingsError(message, document.querySelectorAll("#environmentSettingsList input")[invalid]);
+    throw new Error(message);
+  }
+  localStorage.setItem(environmentSettingsKey(), JSON.stringify(values));
+  environmentSettingsDraft = values; renderEnvironmentSettings(); renderEnvironmentOptions(); setEnvironmentSettingsError();
+}
+
+document.getElementById("addEnvironment").addEventListener("click", addEnvironmentSetting);
+document.getElementById("newEnvironmentName").addEventListener("input", () => { setEnvironmentSettingsError(); markSettingsDirty(); });
+document.getElementById("newEnvironmentName").addEventListener("keydown", event => {
+  if (event.key === "Enter") { event.preventDefault(); addEnvironmentSetting(); }
+});
+
 elements.issueUrl.addEventListener("change", () => getLocalAttachmentLimits());
-elements.environment.addEventListener("change", () => renderEnvironmentOptions(elements.environment.value));
+elements.environment.addEventListener("change", () => renderEnvironmentOptions());
 elements.environment.addEventListener("focus", () => renderEnvironmentOptions());
 renderEnvironmentOptions();
 

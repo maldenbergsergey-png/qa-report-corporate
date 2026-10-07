@@ -50,7 +50,7 @@ async function main() {
   await page.goto(origin);
   await page.waitForSelector('.cell-editor');
   await page.click('#settingsButton');
-  const panels = corporate ? ['checklist', 'columns', 'history', 'jira', 'appearance'] : ['checklist', 'columns', 'history', 'files', 'bugs', 'connect', 'jira', 'eva', 'appearance'];
+  const panels = corporate ? ['checklist', 'columns', 'environments', 'history', 'connect', 'jira', 'appearance'] : ['checklist', 'columns', 'environments', 'history', 'files', 'bugs', 'connect', 'jira', 'eva', 'appearance'];
   assert.deepEqual(await page.locator('.settings-sidebar [data-settings-section]').evaluateAll(nodes => nodes.map(n => n.dataset.settingsSection)), panels);
   assert.equal(await page.locator('[data-settings-section="pinning"]').count(), 0);
   assert.equal(await page.locator('[data-settings-panel="pinning"]').count(), 0);
@@ -94,18 +94,73 @@ async function main() {
       await content.evaluate(el => { el.scrollTop = el.scrollHeight; });
       await select('appearance');
       assert.equal(await content.evaluate(el => el.scrollTop), 0);
-      if (process.env.QA_REPORT_SCREENSHOTS && viewport.width === 1600) {
+      if (process.env.QA_REPORT_SCREENSHOTS && (viewport.width === 1600 || viewport.width === 390)) {
         await page.waitForFunction(() => !document.getElementById('toast').classList.contains('visible'));
         fs.mkdirSync(process.env.QA_REPORT_SCREENSHOTS, { recursive: true });
-        for (const key of ['checklist', 'columns', 'appearance']) {
+        for (const key of ['checklist', 'columns', 'environments', 'appearance']) {
           await select(key);
-          await modal.screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, `${theme}-${key}.png`) });
+          await modal.screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, `${theme}-${viewport.width}-${key}.png`) });
         }
       }
     }
   }
 
   await page.setViewportSize({ width: 1280, height: 900 });
+  // Environment choices are explicitly managed; deleting presets must not rewrite reports or resurrect them.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await select('environments');
+  const environmentInputs = page.locator('#environmentSettingsList input');
+  const choices = () => page.locator('#environmentOptions option').evaluateAll(nodes => nodes.map(node => node.value));
+  assert.deepEqual(await environmentInputs.evaluateAll(nodes => nodes.map(node => node.value)), ['DEV', 'STAGE', 'PROD']);
+  const reportEnvironment = await page.locator('#environment').inputValue();
+  await page.fill('#newEnvironmentName', 'QA');
+  await page.press('#newEnvironmentName', 'Enter');
+  assert.equal(await environmentInputs.count(), 4);
+  assert.deepEqual(await choices(), ['DEV', 'STAGE', 'PROD'], 'unsaved choices stay out of the report');
+  await page.fill('#newEnvironmentName', ' qa ');
+  await page.click('#addEnvironment');
+  assert.match(await page.textContent('#environmentSettingsError'), /уже есть/);
+  assert.equal(await environmentInputs.count(), 4);
+  await page.click('#closeJiraSettingsButton');
+  await page.click('#settingsButton'); await select('environments');
+  assert.equal(await environmentInputs.count(), 3, 'closing discards edits');
+  await environmentInputs.first().fill('Sandbox');
+  await page.locator('#environmentSettingsList .environment-remove').nth(1).click();
+  await page.locator('#environmentSettingsList .environment-remove').nth(1).click();
+  await page.fill('#newEnvironmentName', 'QA'); await page.click('#addEnvironment');
+  await page.fill('#newEnvironmentName', 'UAT');
+  await page.click('#saveJiraSettingsButton');
+  assert.equal(await page.locator('.settings-save-label').textContent(), 'Сохранено');
+  assert.deepEqual(await choices(), ['Sandbox', 'QA', 'UAT'], 'save also includes the pending name');
+  assert.equal(await page.locator('#environment').inputValue(), reportEnvironment);
+  await page.click('#closeJiraSettingsButton'); await page.reload(); await page.waitForSelector('.cell-editor');
+  assert.deepEqual(await choices(), ['Sandbox', 'QA', 'UAT']);
+  await page.locator('#environment').focus();
+  assert.deepEqual(await choices(), ['Sandbox', 'QA', 'UAT'], 'the current STAGE value does not restore a deleted preset');
+  await page.click('#settingsButton'); await select('environments');
+  await environmentInputs.nth(1).fill('sandbox'); await page.click('#saveJiraSettingsButton');
+  assert.equal(await page.locator('.settings-save-label').textContent(), 'Сохранить');
+  assert.match(await page.textContent('#environmentSettingsError'), /повторяться/);
+  await environmentInputs.nth(1).fill('QA');
+  while (await environmentInputs.count()) await page.locator('#environmentSettingsList .environment-remove').first().click();
+  await page.click('#saveJiraSettingsButton');
+  assert.deepEqual(await choices(), []);
+  await page.click('#closeJiraSettingsButton'); await page.reload(); await page.waitForSelector('.cell-editor');
+  assert.deepEqual(await choices(), [], 'all presets can be removed permanently');
+  await page.click('#settingsButton'); await select('environments');
+  await page.fill('#newEnvironmentName', 'QA'); await page.click('#addEnvironment'); await page.click('#saveJiraSettingsButton');
+  await page.click('#closeJiraSettingsButton');
+  await page.fill('#environment', 'QA'); await page.locator('#environment').blur();
+  assert.equal(await page.locator('#environment').inputValue(), 'QA');
+  await page.click('.section-header-table .column-menu-button');
+  const clear = page.locator('.floating-context-menu button', { hasText: 'Очистить столбец' });
+  assert.equal(await clear.locator('use').getAttribute('href'), '#icon-broom');
+  assert.equal(await page.locator('.floating-context-menu button', { hasText: 'Удалить столбец' }).locator('use').getAttribute('href'), '#icon-trash');
+  await page.screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS || temp, 'column-menu.png') });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#dictationDestination').count(), 0);
+  await page.click('#settingsButton');
+
   // Closing without saving must retain the old numbering and pinning choices.
   await select('checklist');
   const oldMode = await page.locator('[name="numberingMode"]:checked').inputValue();

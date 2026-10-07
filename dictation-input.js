@@ -2,11 +2,10 @@
   "use strict";
   function init({ api, capture, insert, setup }) {
     const button = document.getElementById("dictationButton"), toolbar = button.closest(".editor-toolbar");
-    const status = document.getElementById("dictationStatus"), destination = document.getElementById("dictationDestination");
+    const status = document.getElementById("dictationStatus");
     const cancel = document.getElementById("dictationCancel"), recovery = document.getElementById("dictationRecovery"), result = document.getElementById("dictationResult");
     let phase = "idle", attempt = 0, candidate = null, target = null, speech, delivering = false;
     const busy = () => ["starting", "recording", "stopping", "transcribing", "processing"].includes(phase);
-    function describe() { destination.textContent = (busy() ? target : candidate)?.label || "В буфер обмена"; destination.title = destination.textContent; }
     function state(next, message) {
       phase = next; toolbar.dataset.dictationPhase = phase;
       button.disabled = ["starting", "stopping", "transcribing", "processing"].includes(phase);
@@ -14,7 +13,7 @@
       button.setAttribute("aria-label", phase === "recording" ? "Завершить диктовку" : "Надиктовать текст");
       button.title = button.getAttribute("aria-label");
       status.textContent = message; status.hidden = !message;
-      cancel.hidden = !busy(); describe();
+      cancel.hidden = !busy();
       document.getElementById("dictationSetup").hidden = next !== "error";
       if (!busy()) { target?.editor?.classList.remove("dictation-target"); target = null; }
     }
@@ -93,18 +92,16 @@
     cancel.addEventListener("click", abort);
     document.addEventListener("keydown", event => { if (event.key === "Escape" && busy()) { event.preventDefault(); abort(); } });
     window.addEventListener("pagehide", abort);
-    document.addEventListener("selectionchange", () => { if (!busy() && document.activeElement?.matches(".cell-editor, .intro-editor, .section-title")) { candidate = capture(); describe(); } });
+    document.addEventListener("selectionchange", () => { if (!busy() && document.activeElement?.matches(".cell-editor, .intro-editor, .section-title")) { candidate = capture(); } });
     document.addEventListener("focusin", event => {
       if (busy()) return;
       if (event.target.matches(".cell-editor, .intro-editor, .section-title")) candidate = capture();
       else if (!toolbar.contains(event.target)) candidate = null;
-      describe();
     });
     document.addEventListener("pointerdown", event => {
       if (busy()) return;
       if (event.target.closest("#dictationButton")) candidate = capture() || candidate;
       else if (!event.target.closest(".cell-editor, .intro-editor, .section-title, .editor-toolbar")) candidate = null;
-      describe();
     });
     document.getElementById("dictationCopy").addEventListener("click", async () => {
       if (await clipboard(result.value)) { result.value = ""; recovery.hidden = true; state("idle", "Текст скопирован в буфер обмена"); }
@@ -112,7 +109,6 @@
     });
     document.getElementById("dictationDiscard").addEventListener("click", () => { result.value = ""; recovery.hidden = true; state("idle", ""); });
     document.getElementById("dictationSetup").addEventListener("click", setup);
-    describe();
     return { cancel: abort };
   }
   window.QaReportDictation = { init };

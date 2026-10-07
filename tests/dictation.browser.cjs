@@ -52,7 +52,7 @@ async function main() {
   const stop = async () => { await page.click("#dictationButton"); await page.waitForFunction(() => ["idle", "error"].includes(document.querySelector(".editor-toolbar").dataset.dictationPhase)); assert.equal(await page.locator(".editor-toolbar").getAttribute("data-dictation-phase"),"idle",await page.textContent("#dictationStatus")); };
   await fixture(); await focus(3); await start();
   assert.equal(await page.locator(cell).evaluate(node => node.classList.contains("dictation-target")),true);
-  assert.match(await page.textContent("#dictationDestination"), /Проверка/);
+  assert.equal(await page.locator("#dictationDestination").count(), 0);
   assert.match(await page.textContent("#dictationStatus"), /REC/);
   assert.equal(await page.evaluate(() => window.dictationFixture.language),"en-US");
   await page.screenshot({path:path.join(temp,"recording-light.png"),fullPage:true});

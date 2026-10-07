@@ -102,17 +102,22 @@ test("replacement and inbound import keep the open report; cancel performs no sa
     }
   }
 });
-test("environment history survives reload, deduplicates and separates workspaces", () => {
-  const stored=new Map(); const list={replaceChildren(){this.items=[];},append(item){this.items.push(item.value);},items:[]};
-  const ctx=vm.createContext({reportWorkspaceKey:"a",localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value)},
-    document:{getElementById:()=>list,createElement:()=>({})}});
-  vm.runInContext(functionSource("renderEnvironmentOptions"),ctx);
-  ctx.renderEnvironmentOptions("  QA-LOCAL  ");ctx.renderEnvironmentOptions("qa-local");ctx.renderEnvironmentOptions();
-  assert.equal(list.items.filter(x=>x.toLowerCase()==="qa-local").length,1);
-  ctx.reportWorkspaceKey="b";ctx.renderEnvironmentOptions();
-  assert.equal(list.items.some(x=>x.toLowerCase()==="qa-local"),false);
-  ctx.reportWorkspaceKey="a";ctx.renderEnvironmentOptions();
-  assert.equal(list.items.some(x=>x.toLowerCase()==="qa-local"),true);
+test("environment preferences migrate history, keep removals and separate workspaces", () => {
+  const stored = new Map([["qa-report-environments-v1:a", JSON.stringify(["  QA-LOCAL  ", "qa-local", "stage"])]]);
+  const list = { replaceChildren() { this.items = []; }, append(item) { this.items.push(item.value); }, items: [] };
+  const ctx = vm.createContext({ reportWorkspaceKey: "a", DEFAULT_ENVIRONMENTS: ["DEV", "STAGE", "PROD"],
+    localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
+    document: { getElementById: () => list, createElement: () => ({}) } });
+  for (const name of ["environmentSettingsKey", "normalizeEnvironments", "loadEnvironments", "renderEnvironmentOptions"]) vm.runInContext(functionSource(name), ctx);
+  ctx.renderEnvironmentOptions();
+  assert.deepEqual(list.items, ["DEV", "STAGE", "PROD", "QA-LOCAL"]);
+  stored.set("qa-report-environment-settings-v1:a", JSON.stringify(["QA-LOCAL"]));
+  ctx.renderEnvironmentOptions("PROD");
+  assert.deepEqual(list.items, ["QA-LOCAL"], "deleted presets do not return when a report uses them");
+  ctx.reportWorkspaceKey = "b"; ctx.renderEnvironmentOptions();
+  assert.deepEqual(list.items, ["DEV", "STAGE", "PROD"]);
+  ctx.reportWorkspaceKey = "a"; stored.set("qa-report-environment-settings-v1:a", "[]"); ctx.renderEnvironmentOptions();
+  assert.deepEqual(list.items, [], "an intentionally empty list survives reload");
 });
 
 function additionHarness(mode = 'rows') {

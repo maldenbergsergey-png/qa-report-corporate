@@ -5824,10 +5824,9 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   #jiraSettingsModal .theme-menu { min-width: 0; width: 100%; }
 }
 
-/* Dictation shares the editor toolbar and keeps its destination visible. */
+/* Dictation shares the editor toolbar. */
 .dictation-tools { display:flex; align-items:center; gap:7px; margin-left:auto; min-width:0; }
 .dictation-caption { display:flex; flex-direction:column; min-width:0; max-width:210px; font-size:11px; line-height:1.45; color:var(--muted); }
-#dictationDestination { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #dictationStatus { overflow-wrap:anywhere; }
 .editor-toolbar .dictation-button { color:#0052cc; background:color-mix(in srgb, #0052cc 8%, transparent); border:1px solid color-mix(in srgb, #0052cc 22%, transparent); flex-shrink:0; }
 .dictation-icon-stop, .dictation-icon-spinner { display:none; }
@@ -5851,3 +5850,29 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .editor-toolbar[data-dictation-phase="recording"] .dictation-button { color:#de350b; background:color-mix(in srgb, #de350b 10%, transparent); }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .editor-toolbar .dictation-button { color:#8fbcff; background:color-mix(in srgb, #4c9aff 14%, transparent); }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .editor-toolbar[data-dictation-phase="recording"] .dictation-button { color:#ff9d8a; }
+
+/* Environment preferences use the shared settings cards, fields and buttons. */
+.environment-settings-editor { display: grid; gap: 16px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--surface) 96%, var(--canvas)); }
+.environment-settings-list { display: grid; gap: 10px; min-width: 0; }
+.environment-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: center; gap: 8px; min-width: 0; }
+.environment-settings-row input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--surface); font: inherit; }
+.environment-remove { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.environment-remove:hover { color: var(--danger, #c9372c); background: color-mix(in srgb, var(--danger, #c9372c) 8%, transparent); }
+.environment-remove .ui-icon { width: 18px; height: 18px; }
+.environment-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); min-width: 0; }
+.environment-add-row .field { min-width: 0; }
+.environment-add-row .button { min-height: 40px; justify-content: center; gap: 6px; }
+.environment-settings-error { margin: 0; color: var(--danger, #c9372c); font-size: 13px; line-height: 1.5; }
+.environment-settings-error[hidden] { display: none; }
+.environment-settings-editor input[aria-invalid="true"] { border-color: var(--danger, #c9372c); }
+@media (max-width: 600px) {
+  .environment-settings-editor { padding: 12px; }
+  .environment-add-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-height: 620px) and (min-width: 521px) {
+  #jiraSettingsModal .settings-sidebar { gap: 4px; padding: 8px 12px; }
+  #jiraSettingsModal .settings-nav-group { gap: 0; }
+  #jiraSettingsModal .settings-nav-heading { padding: 0 8px 2px; }
+  #jiraSettingsModal .settings-nav-item { min-height: 28px; padding: 4px 8px; gap: 8px; line-height: 1.3; }
+}

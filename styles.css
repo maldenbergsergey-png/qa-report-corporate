@@ -5816,3 +5816,31 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   #jiraSettingsModal .agent-test-row { display: grid; grid-template-columns: minmax(0, 1fr); }
   #jiraSettingsModal .theme-menu { min-width: 0; width: 100%; }
 }
+
+/* Dictation shares the editor toolbar and keeps its destination visible. */
+.dictation-tools { display:flex; align-items:center; gap:7px; margin-left:auto; min-width:0; }
+.dictation-caption { display:flex; flex-direction:column; min-width:0; max-width:210px; font-size:11px; line-height:1.45; color:var(--muted); }
+#dictationDestination { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#dictationStatus { overflow-wrap:anywhere; }
+.editor-toolbar .dictation-button { color:#0052cc; background:color-mix(in srgb, #0052cc 8%, transparent); border:1px solid color-mix(in srgb, #0052cc 22%, transparent); flex-shrink:0; }
+.dictation-icon-stop, .dictation-icon-spinner { display:none; }
+[data-dictation-phase="recording"] .dictation-icon-mic { display:none; }
+[data-dictation-phase="recording"] .dictation-icon-stop { display:block; }
+[data-dictation-phase="recording"] .dictation-button, [data-dictation-phase="recording"] #dictationStatus { color:#de350b; }
+[data-dictation-phase="recording"] #dictationStatus::before { content:""; display:inline-block; width:6px; height:6px; margin-right:5px; border-radius:50%; background:currentColor; animation:dictation-pulse 1.2s ease-in-out infinite; }
+:is([data-dictation-phase="starting"], [data-dictation-phase="stopping"], [data-dictation-phase="transcribing"], [data-dictation-phase="processing"]) .dictation-icon-mic { display:none; }
+:is([data-dictation-phase="starting"], [data-dictation-phase="stopping"], [data-dictation-phase="transcribing"], [data-dictation-phase="processing"]) .dictation-icon-spinner { display:block; animation:dictation-spin 1s linear infinite; }
+[data-dictation-phase="error"] #dictationStatus { color:#de350b; }
+.dictation-target { outline:2px solid #4c9aff; outline-offset:2px; }
+.dictation-recovery { padding:12px; margin:0 0 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+#dictationResult { width:100%; resize:vertical; min-height:72px; padding:8px; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:6px; font:inherit; }
+.editor-toolbar .dictation-setup { font-size:11px; padding:5px; }
+@keyframes dictation-pulse { 50% { opacity:.3; } }
+@keyframes dictation-spin { to { transform:rotate(360deg); } }
+@media(max-width:700px) { .editor-toolbar { flex-wrap:wrap; } .dictation-tools { flex-basis:100%; justify-content:flex-end; padding-top:4px; border-top:1px solid var(--line); } .dictation-caption { max-width:none; flex:1; } }
+@media(prefers-reduced-motion:reduce) { .dictation-icon-spinner, #dictationStatus::before { animation:none !important; } }
+
+.dictation-tools [hidden], .dictation-recovery[hidden], #dictationConnectLaunch[hidden] { display:none !important; }
+.editor-toolbar[data-dictation-phase="recording"] .dictation-button { color:#de350b; background:color-mix(in srgb, #de350b 10%, transparent); }
+:root:is([data-theme="dark"], [data-theme="graphite"]) .editor-toolbar .dictation-button { color:#8fbcff; background:color-mix(in srgb, #4c9aff 14%, transparent); }
+:root:is([data-theme="dark"], [data-theme="graphite"]) .editor-toolbar[data-dictation-phase="recording"] .dictation-button { color:#ff9d8a; }

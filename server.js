@@ -166,7 +166,7 @@ const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; media-src 'self' data: https:",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), payment=(), usb=()",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   "X-Content-Type-Options": "nosniff",
@@ -1701,6 +1701,10 @@ function serveStatic(request, response) {
   });
 }
 
+const dictationService = require("./connect-dictation-server").createDictationService({
+  database: getReportsDb, readJson, sendJson, origin: requestOrigin, owner: resolveReportOwner, verifyCsrf, audit,
+});
+
 const server = http.createServer(async (request, response) => {
   applySecurityHeaders(response);
   try {
@@ -1730,6 +1734,8 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (await localImportService.producer(request, response, requestOrigin(request))) return;
+    // A device key grants access only to its speech queue, never to session-protected APIs.
+    if (await dictationService.machine(request, response)) return;
     request.user = sessionFromRequest(request);
     if (request.method === "GET" && requestPath === "/api/auth/session") {
       if (!request.user) sendJson(response, 401, { error: "Unauthorized" });
@@ -1756,6 +1762,7 @@ const server = http.createServer(async (request, response) => {
       response.end();
       return;
     }
+    if (await dictationService.browser(request, response)) return;
     if (requestPath.startsWith("/api/local-import/sessions")) {
       const owner = resolveReportOwner(request);
       if (await localImportService.browser(request, response, {

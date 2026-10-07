@@ -4127,7 +4127,7 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  const selected = ["checklist", "columns", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
     button.classList.toggle("active", active);
@@ -4138,6 +4138,7 @@ function setSettingsSection(section) {
     panel.hidden = panel.dataset.settingsPanel !== selected;
     panel.classList.toggle("active", !panel.hidden);
   });
+  if (selected === "connect") refreshDictationConnect();
   document.getElementById("settingsContent").scrollTop = 0;
   document.getElementById("themeMenu").hidden = true;
   elements.themeToggle.setAttribute("aria-expanded", "false");
@@ -9088,3 +9089,71 @@ document.querySelectorAll('.topbar .header-dropdown').forEach(dropdown => {
     }, 0);
   });
 });
+
+// Freeze the caret and content at recording start, independently of later focus.
+function captureDictationTarget() {
+  const editor = document.activeElement;
+  if (!editor?.matches(".cell-editor, .intro-editor, .section-title") || !editor.isConnected || selectionMode) return null;
+  const isInput = editor.matches("input"), target = { editor, reportId: draft.reportId, value: isInput ? editor.value : editor.innerHTML };
+  if (isInput) { target.start = editor.selectionStart; target.end = editor.selectionEnd; target.label = "Название раздела"; return target; }
+  const selection = window.getSelection();
+  if (selection?.rangeCount && editor.contains(selection.anchorNode) && editor.contains(selection.focusNode)) target.range = selection.getRangeAt(0).cloneRange();
+  else { target.range = document.createRange(); target.range.selectNodeContents(editor); target.range.collapse(false); }
+  const section = draft.sections.find(item => item.id === editor.closest("[data-section-id]")?.dataset.sectionId);
+  const row = editor.closest("tr[data-row-id]");
+  const column = section?.columns.find(item => item.id === editor.dataset.columnId);
+  target.label = editor.matches(".intro-editor") ? "Вводный текст" : `${section?.title || "Раздел"} · строка ${row?.querySelector(".row-number-input")?.value || (section?.rows.findIndex(item => item.id === row?.dataset.rowId) ?? 0) + 1} · ${column?.title || "Текст"}`;
+  return target;
+}
+function insertDictationText(target, text) {
+  const { editor } = target, isInput = editor.matches("input");
+  if (!editor.isConnected || target.reportId !== draft.reportId || (isInput ? editor.value : editor.innerHTML) !== target.value) return false;
+  if (!isInput && (!target.range.startContainer.isConnected || !editor.contains(target.range.startContainer) || !editor.contains(target.range.endContainer))) return false;
+  const left = isInput ? editor.value.slice(0, target.start) : (() => { const range = document.createRange(); range.selectNodeContents(editor); range.setEnd(target.range.startContainer, target.range.startOffset); return range.toString(); })();
+  const right = isInput ? editor.value.slice(target.end) : (() => { const range = document.createRange(); range.selectNodeContents(editor); range.setStart(target.range.endContainer, target.range.endOffset); return range.toString(); })();
+  if (/[\p{L}\p{N}]$/u.test(left) && /^[\p{L}\p{N}]/u.test(text)) text = " " + text;
+  if (/\S$/.test(text) && /^[\p{L}\p{N}]/u.test(right)) text += " ";
+  // Commit previous typing first, so a complete dictation fragment has its own undo step.
+  clearTimeout(historyTimer);
+  const before = serializeDraft();
+  if (before !== historyCurrent) { undoStack.push(historyCurrent); historyCurrent = before; }
+  if (isInput) { editor.focus(); editor.setRangeText(text, target.start, target.end, "end"); editor.dispatchEvent(new Event("input", { bubbles:true })); }
+  else { activeEditor = editor; editor.focus(); insertHtmlAtSelection(escapeHtml(text).replace(/\r?\n/g, "<br>"), target.range); }
+  clearTimeout(historyTimer);
+  const after = serializeDraft();
+  if (after !== before) { undoStack.push(before); historyCurrent = after; redoStack = []; updateHistoryButtons(); }
+  return true;
+}
+window.QaReportDictation.init({ api: dictationConnectApi, capture: captureDictationTarget, insert: insertDictationText, setup: openDictationConnectSetup });
+
+async function dictationConnectApi(path, options = {}) {
+  if (options.method === "POST") {
+    const { csrfToken } = await reportApi("/api/auth/csrf");
+    options = { ...options, body: JSON.stringify({ ...JSON.parse(options.body || "{}"), csrfToken }) };
+  }
+  return reportApi(path, options);
+}
+function openDictationConnectSetup() { openJiraSettings(); setSettingsSection("connect"); }
+async function refreshDictationConnect() {
+  const output = document.getElementById("dictationConnectState");
+  try {
+    const value = await reportApi("/api/agent/status");
+    output.textContent = value.connected ? "QA Report Connect подключён" : "QA Report Connect не подключён. Откройте приложение на компьютере.";
+    if (value.connected) { document.getElementById("dictationConnectLaunch").hidden = true; document.getElementById("dictationConnectPair").hidden = true; }
+    else document.getElementById("dictationConnectPair").hidden = false;
+  } catch (error) { output.textContent = error.message; }
+}
+let dictationConnectExpiry;
+document.getElementById("dictationConnectPair").addEventListener("click", async event => {
+  const button = event.currentTarget, link = document.getElementById("dictationConnectLaunch"), hint = document.getElementById("dictationConnectHint");
+  button.disabled = true;
+  try {
+    const value = await dictationConnectApi("/api/agent/pairings", { method:"POST", body:"{}" });
+    const url = new URL("qareport-agent://connect"); url.searchParams.set("server", value.serverUrl); url.searchParams.set("code", value.code); url.searchParams.set("theme", document.documentElement.dataset.theme || "light");
+    link.href = url.href; link.hidden = false; hint.textContent = "Откройте Connect и подтвердите подключение. Затем нажмите «Проверить подключение».";
+    clearTimeout(dictationConnectExpiry);
+    dictationConnectExpiry = setTimeout(() => { link.hidden = true; link.removeAttribute("href"); hint.textContent = "Ссылка истекла. Подключите Connect заново."; }, Math.max(0, Date.parse(value.expiresAt) - Date.now()));
+  } catch (error) { hint.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+document.getElementById("dictationConnectCheck").addEventListener("click", refreshDictationConnect);

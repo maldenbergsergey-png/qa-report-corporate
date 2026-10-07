@@ -1,0 +1,37 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict"), { DatabaseSync } = require("node:sqlite");
+const {createDictationService,audioInput} = require("../connect-dictation-server");
+test("corporate speech pairing and queues isolate owners, sessions, CSRF and device credentials", async t => {
+  const database = new DatabaseSync(":memory:"); t.after(()=>database.close());
+  const service = createDictationService({database:()=>database,readJson:async req=>req.body||{},sendJson:(res,status,value)=>Object.assign(res,{status,value}),origin:()=>"https://report.example.test",owner:req=>{if(!req.user)throw Object.assign(Error("Unauthorized"),{status:401});return {source:"session",id:req.user};},verifyCsrf:(req,token)=>token==="fixture-csrf",audit:()=>{}});
+  const call = async (channel,url,{user="alice",method="POST",body={},token}={}) => {
+    const response={}; await service[channel]({url,method,user,body,headers:token?{authorization:token}:{}},response); return response;
+  };
+  await assert.rejects(call("browser","/api/agent/pairings",{user:null}),{status:401});
+  await assert.rejects(call("browser","/api/agent/pairings"),{status:403});
+  const pairing=(await call("browser","/api/agent/pairings",{body:{csrfToken:"fixture-csrf"}})).value;
+  const paired=(await call("machine","/api/agent/pair",{body:{code:pairing.code,name:"Fixture"}})).value;
+  const token=`Bearer ${paired.deviceId}.${paired.secret}`;
+  await assert.rejects(call("machine","/api/agent/pair",{body:{code:pairing.code}}),{status:404});
+  assert.equal(database.prepare("SELECT token_hash FROM dictation_devices").get().token_hash.includes(paired.secret),false);
+  assert.equal((await call("browser","/api/agent/status",{method:"GET",user:"bob"})).value.devices.length,0);
+  await assert.rejects(call("browser","/api/ai/refine",{user:"bob",body:{csrfToken:"fixture-csrf",text:"Секрет другой учётной записи",selection:"snapshot"}}),{status:503});
+  const queued=(await call("browser","/api/ai/refine",{body:{csrfToken:"fixture-csrf",text:"Текст",selection:"snapshot",profileId:"foreign"}})).value;
+  await assert.rejects(call("browser",`/api/agent/jobs/${queued.jobId}`,{user:"bob",method:"GET"}),{status:404});
+  await assert.rejects(call("machine","/api/agent/poll",{token:"Bearer invalid"}),{status:401});
+  const job=(await call("machine","/api/agent/poll",{token})).value.job;
+  assert.equal(job.id,queued.jobId); assert.deepEqual(job.payload,{text:"Текст",selection:"snapshot"});
+  await call("machine",`/api/agent/jobs/${job.id}/result`,{token,body:{ok:true,result:{text:"Готовый текст"}}});
+  assert.equal(database.prepare("SELECT payload_json FROM dictation_jobs").get().payload_json,"{}");
+  const result=(await call("browser",`/api/agent/jobs/${job.id}`,{method:"GET"})).value.job;
+  assert.equal(result.result.text,"Готовый текст");
+  const response={};
+  assert.equal(await service.machine({url:"/api/reports",method:"GET",headers:{authorization:token}},response),false);
+  assert.equal(await service.machine({url:"/api/ai/refine",method:"POST",headers:{authorization:token}},response),false);
+  database.prepare("UPDATE dictation_jobs SET expires_at = '2000-01-01'").run();
+  await assert.rejects(call("browser",`/api/agent/jobs/${job.id}`,{method:"GET"}),{status:404});
+  assert.equal(database.prepare("SELECT count(*) AS count FROM dictation_jobs").get().count,0);
+});
+test("corporate audio validation rejects malformed and oversized data before queuing", () => {
+  for(const audio of [{type:"audio/webm",dataBase64:"AAAA"},{type:"audio/wav",dataBase64:"!!!!"},{type:"audio/wav",dataBase64:"A".repeat(7680064)}]) assert.throws(()=>audioInput(audio));
+});

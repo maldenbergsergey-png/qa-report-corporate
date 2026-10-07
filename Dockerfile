@@ -12,6 +12,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --chown=node:node server.js auth.js jira-oauth.js app.js draft-storage-worker.js report-file.js file-preview.js login.js login-theme.js jira-markup-import.js index.html login.html styles.css favicon.svg ./
 COPY --chown=node:node checklist-selection.js checklist-table.js checklist-numbering.js release-notes.js pwa.js sw.js manifest.webmanifest ./
 COPY --chown=node:node local-import-server.js jira-attachment-transfer.js attachment-limits.js attachment-import.js import-options.js import-wizard.js jira-attachment-reuse.js local-import-client.js ./
+COPY --chown=node:node dictation-input.js bug-voice-input.js connect-dictation-server.js ./
 COPY --chown=node:node icons ./icons
 RUN mkdir -p /app/reports-data && chown -R node:node /app/reports-data
 

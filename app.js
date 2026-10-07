@@ -2156,6 +2156,8 @@ function flushDraftFromDom() {
 function render() {
   elements.issueUrl.value = draft.issueUrl || "";
   elements.environment.value = draft.environment;
+  environmentPicker.close();
+  renderEnvironmentOptions();
   elements.overallStatus.value = draft.overallStatus;
   setStatusClass(elements.overallStatus, draft.overallStatus);
   elements.introEditor.innerHTML = draft.intro;
@@ -7990,14 +7992,102 @@ function loadEnvironments() {
   return normalizeEnvironments([...DEFAULT_ENVIRONMENTS, ...previous]);
 }
 
-function renderEnvironmentOptions() {
-  const list = document.getElementById("environmentOptions");
-  list.replaceChildren();
-  for (const value of loadEnvironments()) {
-    const option = document.createElement("option");
-    option.value = value;
-    list.append(option);
+const environmentPicker = (() => {
+  const input = elements.environment, toggle = document.getElementById("environmentToggle");
+  const menu = document.getElementById("environmentOptions"), field = input.closest(".environment-field");
+  let query = "", values = [], activeIndex = -1, selecting = false;
+  const isOpen = () => !menu.hidden;
+  function position() {
+    const rect = input.getBoundingClientRect(), below = innerHeight - rect.bottom - 12, above = rect.top - 12;
+    menu.style.width = rect.width + "px";
+    const upward = below < Math.min(menu.scrollHeight, 240) && above > below;
+    menu.style.left = Math.max(8, Math.min(rect.left, innerWidth - rect.width - 8)) + "px";
+    menu.style.maxHeight = Math.max(48, Math.min(240, upward ? above : below)) + "px";
+    menu.style.top = upward ? "auto" : rect.bottom + 6 + "px";
+    menu.style.bottom = upward ? innerHeight - rect.top + 6 + "px" : "auto";
   }
+  function activate(index, scroll = true) {
+    activeIndex = index;
+    menu.querySelectorAll("[data-value]").forEach((option, i) => option.classList.toggle("is-active", i === index));
+    const option = menu.querySelectorAll("[data-value]")[index];
+    if (option && isOpen()) {
+      input.setAttribute("aria-activedescendant", option.id);
+      if (scroll) option.scrollIntoView({ block: "nearest" });
+    } else input.removeAttribute("aria-activedescendant");
+  }
+  function refresh() {
+    values = loadEnvironments().filter(value => value.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+    menu.replaceChildren();
+    values.forEach((value, index) => {
+      const option = document.createElement("div"); option.className = "environment-option";
+      option.id = "environment-option-" + index; option.dataset.value = value; option.setAttribute("role", "option");
+      const selected = value.toLocaleLowerCase() === input.value.trim().toLocaleLowerCase();
+      option.setAttribute("aria-selected", String(selected));
+      const label = document.createElement("div"); label.className = "environment-option-label"; label.textContent = value;
+      option.append(label); if (selected) option.append(createUiIcon("check"));
+      option.addEventListener("pointerdown", event => event.preventDefault());
+      option.addEventListener("pointermove", event => { if (event.pointerType === "mouse") activate(index, false); });
+      option.addEventListener("click", () => choose(index));
+      menu.append(option);
+    });
+    if (!values.length) {
+      const empty = document.createElement("div"); empty.className = "environment-options-empty";
+      empty.textContent = query ? "Нет совпадений. Можно оставить свой текст." : "Список пуст. Добавьте окружения в настройках.";
+      empty.setAttribute("role", "option"); empty.setAttribute("aria-disabled", "true"); menu.append(empty);
+    }
+    const selected = values.findIndex(value => value.toLocaleLowerCase() === input.value.trim().toLocaleLowerCase());
+    activate(selected, false);
+    if (isOpen()) { position(); activate(selected); }
+  }
+  function close() {
+    const filtered = Boolean(query); query = ""; menu.hidden = true; activeIndex = -1;
+    input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant");
+    toggle.setAttribute("aria-expanded", "false");
+    if (filtered) refresh();
+  }
+  function open(all = true) {
+    query = all ? "" : input.value.trim(); menu.hidden = false;
+    input.setAttribute("aria-expanded", "true"); toggle.setAttribute("aria-expanded", "true"); refresh();
+  }
+  function choose(index) {
+    if (index < 0 || index >= values.length) return;
+    input.value = values[index]; close(); input.focus({ preventScroll: true });
+    selecting = true;
+    try {
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    } finally { selecting = false; }
+  }
+  toggle.addEventListener("pointerdown", event => { if (event.pointerType === "mouse") event.preventDefault(); });
+  toggle.addEventListener("click", () => {
+    input.focus({ preventScroll: true });
+    if (isOpen() && !query) close(); else open();
+  });
+  input.addEventListener("input", event => { if (!selecting && !event.isComposing) open(false); });
+  input.addEventListener("compositionend", () => { if (!selecting) open(false); });
+  input.addEventListener("keydown", event => {
+    if (event.isComposing) return;
+    if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      if (!isOpen()) { open(); if (activeIndex < 0 && values.length) activate(event.key === "ArrowDown" ? 0 : values.length - 1); }
+      else if (values.length) activate(activeIndex < 0 ? (event.key === "ArrowDown" ? 0 : values.length - 1) : (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + values.length) % values.length);
+    } else if (isOpen() && ["Home", "End"].includes(event.key)) {
+      event.preventDefault(); activate(event.key === "Home" ? 0 : values.length - 1);
+    } else if (isOpen() && event.key === "Enter") {
+      event.preventDefault(); if (activeIndex >= 0) choose(activeIndex); else close();
+    } else if (isOpen() && event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); close();
+    } else if (event.key === "Tab") close();
+  });
+  field.addEventListener("focusout", () => queueMicrotask(() => { if (!field.contains(document.activeElement)) close(); }));
+  document.addEventListener("pointerdown", event => { if (!field.contains(event.target)) close(); });
+  window.addEventListener("resize", close);
+  window.addEventListener("scroll", event => { if (isOpen() && !menu.contains(event.target)) close(); }, true);
+  return { refresh, close };
+})();
+
+function renderEnvironmentOptions() {
+  environmentPicker.refresh();
 }
 
 function setEnvironmentSettingsError(message = "", input) {

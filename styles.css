@@ -5876,3 +5876,21 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   #jiraSettingsModal .settings-nav-heading { padding: 0 8px 2px; }
   #jiraSettingsModal .settings-nav-item { min-height: 28px; padding: 4px 8px; gap: 8px; line-height: 1.3; }
 }
+
+/* The environment combobox keeps manual input and opens all choices from its arrow. */
+.environment-field > label { font-size: 12px; }
+.environment-input { position: relative; min-width: 0; }
+.environment-input #environment { padding-right: 42px; }
+.environment-toggle { position: absolute; top: 1px; right: 1px; bottom: 1px; display: flex; align-items: center; justify-content: center; width: 38px; padding: 0; border: 0; border-radius: 0 5px 5px 0; color: var(--muted); background: transparent; cursor: pointer; }
+.environment-toggle:hover, .environment-toggle[aria-expanded="true"] { color: var(--ink); background: var(--line-soft); }
+.environment-toggle .ui-icon { width: 16px; height: 16px; }
+.environment-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.environment-options { position: fixed; z-index: 80; min-width: 0; margin: 0; padding: 4px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
+.environment-options[hidden] { display: none; }
+.environment-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; padding: 9px 10px; border-radius: 5px; cursor: pointer; }
+.environment-field .environment-option-label { min-width: 0; color: inherit; font-size: 14px; line-height: 1.4; font-weight: 400; overflow-wrap: anywhere; }
+.environment-option[aria-selected="true"] { color: var(--primary); font-weight: 600; }
+.environment-option[aria-selected="true"] .environment-option-label { font-weight: 600; }
+.environment-option:hover, .environment-option.is-active { background: var(--line-soft); }
+.environment-option .ui-icon { flex: 0 0 16px; width: 16px; height: 16px; }
+.environment-options-empty { padding: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }

@@ -49,6 +49,83 @@ async function main() {
   page.setDefaultTimeout(10000);
   await page.goto(origin);
   await page.waitForSelector('.cell-editor');
+  // Filled text must never filter the list opened from the arrow.
+  assert.equal(await page.locator('#environment').inputValue(), 'STAGE');
+  const environmentMenu = page.locator('#environmentOptions');
+  const environmentChoices = () => environmentMenu.locator('[data-value]').evaluateAll(nodes => nodes.map(node => node.dataset.value));
+  await page.click('#environmentToggle');
+  assert.equal(await environmentMenu.isVisible(), true);
+  assert.deepEqual(await environmentChoices(), ['DEV', 'STAGE', 'PROD']);
+  assert.equal(await environmentMenu.locator('[aria-selected="true"]').getAttribute('data-value'), 'STAGE');
+  await environmentMenu.locator('[data-value="PROD"]').click();
+  assert.equal(await page.locator('#environment').inputValue(), 'PROD');
+  assert.equal(await environmentMenu.isVisible(), false);
+  await page.click('#environmentToggle');
+  assert.deepEqual(await environmentChoices(), ['DEV', 'STAGE', 'PROD']);
+  await page.press('#environment', 'Home'); await page.press('#environment', 'Enter');
+  assert.equal(await page.locator('#environment').inputValue(), 'DEV');
+  await page.press('#environment', 'ArrowDown'); await page.press('#environment', 'ArrowDown'); await page.press('#environment', 'Enter');
+  assert.equal(await page.locator('#environment').inputValue(), 'STAGE');
+  await page.click('#environmentToggle'); await page.press('#environment', 'ArrowDown'); await page.press('#environment', 'Escape');
+  assert.equal(await page.locator('#environment').inputValue(), 'STAGE', 'Esc cancels the highlighted choice');
+  await page.fill('#environment', 'DE');
+  assert.deepEqual(await environmentChoices(), ['DEV'], 'typing filters suggestions');
+  await page.click('#environmentToggle');
+  assert.deepEqual(await environmentChoices(), ['DEV', 'STAGE', 'PROD'], 'arrow clears the filter without clearing input');
+  assert.equal(await page.locator('#environment').inputValue(), 'DE');
+  await page.press('#environment', 'Tab'); assert.equal(await environmentMenu.isVisible(), false);
+  await page.fill('#environment', 'Custom free text');
+  assert.equal(await page.locator('.environment-options-empty').isVisible(), true);
+  await page.press('#environment', 'Enter');
+  assert.equal(await page.locator('#environment').inputValue(), 'Custom free text');
+  assert.equal(await environmentMenu.isVisible(), false);
+  await page.reload(); await page.waitForSelector('.cell-editor');
+  assert.equal(await page.locator('#environment').inputValue(), 'Custom free text', 'manual text survives reload');
+  await page.click('#environmentToggle'); await environmentMenu.locator('[data-value="STAGE"]').click();
+  await page.reload(); await page.waitForSelector('.cell-editor');
+  assert.equal(await page.locator('#environment').inputValue(), 'STAGE', 'menu choice survives reload');
+  if (process.env.QA_REPORT_SCREENSHOTS) {
+    fs.mkdirSync(process.env.QA_REPORT_SCREENSHOTS, { recursive: true });
+    for (const theme of ['light', 'graphite', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      for (const viewport of [{ width: 1600, height: 1000 }, { width: 390, height: 844 }]) {
+        await page.setViewportSize(viewport); await page.click('#environmentToggle');
+        assert.deepEqual(await environmentChoices(), ['DEV', 'STAGE', 'PROD']);
+        assert.equal(await environmentMenu.evaluate(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }), true, 'dropdown fits the viewport');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await page.screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, theme + '-' + viewport.width + '-environment-dropdown.png') });
+        await page.press('#environment', 'Escape');
+      }
+    }
+    await page.setViewportSize({ width: 1600, height: 1000 });
+  }
+  // Touch selection must work while the input is focused.
+  const touchContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  if (corporate) await touchContext.addCookies(await context.cookies());
+  const touchPage = await touchContext.newPage();
+  await touchPage.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  await touchPage.route('**/api/agent/status', route => route.fulfill({ json: { devices: [] } }));
+  await touchPage.goto(origin); await touchPage.waitForSelector('.cell-editor');
+  await touchPage.locator('#environment').tap(); await touchPage.locator('#environmentToggle').tap();
+  await touchPage.locator('#environmentOptions [data-value="PROD"]').tap();
+  assert.equal(await touchPage.locator('#environment').inputValue(), 'PROD');
+  assert.equal(await touchPage.locator('#environmentOptions').isVisible(), false);
+  await touchPage.evaluate(() => {
+    localStorage.setItem('qa-report-environment-settings-v1:local', JSON.stringify(Array.from({ length: 30 }, (_, i) => 'QA-' + i)));
+    renderEnvironmentOptions();
+  });
+  await touchPage.locator('#environmentToggle').tap();
+  const bounds = await touchPage.locator('#environmentOptions').boundingBox();
+  const touchClient = await touchContext.newCDPSession(touchPage);
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height - 20;
+  await touchClient.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= 8; i++) await touchClient.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - i * 18 }] });
+  await touchClient.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await touchPage.waitForFunction(() => document.getElementById('environmentOptions').scrollTop > 0);
+  assert.equal(await touchPage.locator('#environmentOptions').isVisible(), true, 'touch scrolling keeps the list open');
+  await touchPage.locator('#environmentOptions [data-value="QA-29"]').tap();
+  assert.equal(await touchPage.locator('#environment').inputValue(), 'QA-29');
+  await touchContext.close();
   await page.click('#settingsButton');
   const panels = corporate ? ['checklist', 'columns', 'environments', 'history', 'connect', 'jira', 'appearance'] : ['checklist', 'columns', 'environments', 'history', 'files', 'bugs', 'connect', 'jira', 'eva', 'appearance'];
   assert.deepEqual(await page.locator('.settings-sidebar [data-settings-section]').evaluateAll(nodes => nodes.map(n => n.dataset.settingsSection)), panels);
@@ -110,7 +187,7 @@ async function main() {
   await page.setViewportSize({ width: 1280, height: 900 });
   await select('environments');
   const environmentInputs = page.locator('#environmentSettingsList input');
-  const choices = () => page.locator('#environmentOptions option').evaluateAll(nodes => nodes.map(node => node.value));
+  const choices = () => page.locator('#environmentOptions [data-value]').evaluateAll(nodes => nodes.map(node => node.dataset.value));
   assert.deepEqual(await environmentInputs.evaluateAll(nodes => nodes.map(node => node.value)), ['DEV', 'STAGE', 'PROD']);
   const reportEnvironment = await page.locator('#environment').inputValue();
   await page.fill('#newEnvironmentName', 'QA');
@@ -152,6 +229,9 @@ async function main() {
   await page.click('#closeJiraSettingsButton');
   await page.fill('#environment', 'QA'); await page.locator('#environment').blur();
   assert.equal(await page.locator('#environment').inputValue(), 'QA');
+  await page.click('#environmentToggle');
+  assert.deepEqual(await environmentChoices(), ['QA'], 'saved settings update the dropdown');
+  await page.press('#environment', 'Escape');
   await page.click('.section-header-table .column-menu-button');
   const clear = page.locator('.floating-context-menu button', { hasText: 'Очистить столбец' });
   assert.equal(await clear.locator('use').getAttribute('href'), '#icon-broom');

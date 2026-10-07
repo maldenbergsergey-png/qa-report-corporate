@@ -113,3 +113,68 @@ test('history commit reuses the saved content and reflects edits made during a p
   assert.equal(serializations, 1);
   assert.equal(ctx.historyCurrent, '{"intro":"New typing"}');
 });
+
+function historyHarness() {
+  const ctx = load({ draft: {}, historyCurrent: '', undoStack: [], redoStack: [],
+    savedContentForHistory: null, localEditGeneration: 1,
+    elements: { undoButton: {}, redoButton: {} },
+  }, ['trimHistoryStacks', 'updateHistoryButtons']);
+  for (const name of ['HISTORY_MEMORY_LIMIT', 'HISTORY_STEP_LIMIT']) {
+    vm.runInContext(source.match(new RegExp(`const ${name} = [^;]+;`))[0], ctx);
+  }
+  return ctx;
+}
+
+test('small reports retain 100 nearest steps across undo and redo', () => {
+  const ctx = historyHarness();
+  ctx.undoStack = Array.from({ length: 105 }, (_, i) => `undo-${i}`);
+  ctx.updateHistoryButtons();
+  assert.equal(ctx.undoStack.length, 100);
+  assert.equal(ctx.undoStack[0], 'undo-5');
+  assert.equal(ctx.elements.undoButton.disabled, false);
+  assert.equal(ctx.elements.redoButton.disabled, true);
+  ctx.redoStack = Array.from({ length: 20 }, (_, i) => `redo-${i}`);
+  ctx.updateHistoryButtons();
+  assert.equal(ctx.undoStack.length + ctx.redoStack.length, 100);
+  assert.equal(ctx.undoStack.at(-1), 'undo-104');
+  assert.equal(ctx.redoStack.at(-1), 'redo-19');
+});
+
+test('large snapshots use a memory budget instead of multiplying attachments by 100', () => {
+  const ctx = historyHarness();
+  const snapshot = 'data:application/octet-stream;base64,' + 'A'.repeat(1024 * 1024);
+  ctx.historyCurrent = snapshot;
+  ctx.undoStack = Array.from({ length: 100 }, (_, i) => snapshot + i);
+  ctx.updateHistoryButtons();
+  const bytes = 2 * (ctx.historyCurrent.length + ctx.undoStack.reduce((sum, value) => sum + value.length, 0));
+  assert.ok(bytes <= 32 * 1024 * 1024);
+  assert.equal(ctx.undoStack.at(-1), snapshot + 99);
+});
+
+test('oversized reports always keep their nearest undo and redo snapshots intact', () => {
+  const ctx = historyHarness();
+  const snapshot = JSON.stringify({ intro: 'A'.repeat(17 * 1024 * 1024) });
+  ctx.historyCurrent = snapshot;
+  ctx.undoStack = [snapshot + 'old', snapshot + 'previous'];
+  ctx.redoStack = [snapshot + 'far', snapshot + 'next'];
+  ctx.updateHistoryButtons();
+  assert.deepEqual(Array.from(ctx.undoStack), [snapshot + 'previous']);
+  assert.deepEqual(Array.from(ctx.redoStack), [snapshot + 'next']);
+  assert.equal(ctx.historyCurrent, snapshot);
+  assert.equal(ctx.elements.undoButton.disabled, false);
+  assert.equal(ctx.elements.redoButton.disabled, false);
+});
+
+test('switching reports or editing invalidates the cached full history copy', () => {
+  const ctx = historyHarness();
+  ctx.savedContentForHistory = { draft: {}, generation: 1, content: 'Old report' };
+  ctx.updateHistoryButtons();
+  assert.equal(ctx.savedContentForHistory, null);
+  ctx.savedContentForHistory = { draft: ctx.draft, generation: 0, content: 'Old edit' };
+  ctx.updateHistoryButtons();
+  assert.equal(ctx.savedContentForHistory, null);
+  const valid = { draft: ctx.draft, generation: 1, content: 'Current edit' };
+  ctx.savedContentForHistory = valid;
+  ctx.updateHistoryButtons();
+  assert.equal(ctx.savedContentForHistory, valid);
+});

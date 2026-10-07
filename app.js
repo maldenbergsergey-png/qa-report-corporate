@@ -388,6 +388,8 @@ let serverReportHashes = loadServerReportHashes();
 let dismissedCloudHashes = loadDismissedCloudHashes();
 let undoStack = [];
 let redoStack = [];
+const HISTORY_MEMORY_LIMIT = 32 * 1024 * 1024;
+const HISTORY_STEP_LIMIT = 100;
 let historyCurrent = "";
 let historyTimer;
 let suppressHistory = false;
@@ -2042,14 +2044,29 @@ function scheduleHistoryCommit() {
       ? cached.content : serializeDraft();
     if (next === historyCurrent) return;
     undoStack.push(historyCurrent);
-    if (undoStack.length > 100) undoStack.shift();
     historyCurrent = next;
     redoStack = [];
     updateHistoryButtons();
   }, 500);
 }
 
+function trimHistoryStacks() {
+  // JSON snapshots include embedded attachments. Count two bytes per character
+  // conservatively, and keep the nearest undo/redo even for an oversized report.
+  let bytes = 2 * (historyCurrent.length + [...undoStack, ...redoStack]
+    .reduce((total, snapshot) => total + snapshot.length, 0));
+  while (bytes > HISTORY_MEMORY_LIMIT || undoStack.length + redoStack.length > HISTORY_STEP_LIMIT) {
+    const stack = undoStack.length > 1 && (redoStack.length <= 1 || undoStack.length >= redoStack.length)
+      ? undoStack : redoStack.length > 1 ? redoStack : null;
+    if (!stack) break;
+    bytes -= 2 * stack.shift().length;
+  }
+}
+
 function updateHistoryButtons() {
+  trimHistoryStacks();
+  if (savedContentForHistory && (savedContentForHistory.draft !== draft
+    || savedContentForHistory.generation !== localEditGeneration)) savedContentForHistory = null;
   elements.undoButton.disabled = undoStack.length === 0;
   elements.redoButton.disabled = redoStack.length === 0;
 }
@@ -2256,7 +2273,6 @@ function commitSelectionMutation(mutate) {
   saveLocalMutationNow();
   clearTimeout(historyTimer);
   undoStack.push(before);
-  if (undoStack.length > 100) undoStack.splice(0, undoStack.length - 100);
   historyCurrent = serializeDraft();
   redoStack = [];
   updateHistoryButtons();
@@ -6867,7 +6883,6 @@ function recordImportHistory(before) {
   clearTimeout(historyTimer);
   if (historyCurrent !== before) undoStack.push(historyCurrent);
   undoStack.push(before);
-  if (undoStack.length > 100) undoStack.splice(0, undoStack.length - 100);
   historyCurrent = serializeDraft();
   redoStack = [];
   updateHistoryButtons();

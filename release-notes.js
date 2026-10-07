@@ -1,5 +1,9 @@
 window.QaReportReleases = [
   {
+    version: "0.21.0", date: "2026-10-07",
+    changes: { new: [], improvements: [], fixes: [] }
+  },
+  {
     version: "0.20.0", date: "2026-10-06",
     changes: {
       new: [],

@@ -4589,6 +4589,13 @@ body.selection-mode .editor-toolbar.is-stuck::after,
   font-size: 24px;
   line-height: 1;
 }
+.selection-transfer-options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.selection-transfer-options legend { margin-bottom: 8px; padding: 0; font-weight: 600; }
+.selection-transfer-options label { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.selection-transfer-options label:has(input:checked) { border-color: var(--selection-accent); background: color-mix(in srgb, var(--surface) 88%, var(--selection-accent)); }
+.selection-transfer-options label:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.selection-transfer-options input { margin: 0; accent-color: var(--selection-accent); }
+.selection-transfer-hint { display: block; margin: 8px 0 14px; line-height: 1.4; }
 .selection-search-label { display: block; margin-bottom: 12px; }
 .selection-menu input[type="search"], .selection-menu input[type="text"] {
   width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;

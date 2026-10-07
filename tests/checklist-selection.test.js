@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { selectByStatus, moveRows, deleteRows } = require('../checklist-selection');
+const { selectByStatus, moveRows, copyRows, deleteRows } = require('../checklist-selection');
 let nextId = 0;
 const id = () => `generated-${++nextId}`;
 const blank = (columns) => ({ id: id(), status: 'НЕ ПРОВЕРЕНО', cells: Object.fromEntries(columns.map((c) => [c.id, ''])) });
@@ -151,3 +151,65 @@ for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
     }[mode]);
   });
 }
+
+test('copying into a section preserves every source and merges schemas without sharing row objects', () => {
+  const rich = '<img src="data:image/png;base64,YQ=="><a href="https://example.test">File</a>';
+  const sections = [
+    { ...section('a', [{ ...row('one', 'OK', { check: rich, shared: 'Steps', duplicate: 'Extra' }), manualNumber: '7.2', metadata: { value: 'original' } }],
+      [...columns, { id: 'shared', title: 'Details' }, { id: 'duplicate', title: 'Details' }]), collapsed: true, statusSort: true },
+    section('b', [row('two', 'НЕ ОК', { own: 'B', shared: 'Actual' })], [{ id: 'own', title: ' проверка ' }, { id: 'shared', title: 'Actual' }]),
+    { ...section('target', [row('existing', 'OK', { text: 'Original' })], [{ id: 'text', title: 'ПРОВЕРКА' }]), collapsed: true },
+  ];
+  const before = structuredClone(sections);
+  assert.equal(copyRows(sections, new Set(['two', 'one']), 'target', id), 2);
+  assert.deepEqual(sections.slice(0, 2), before.slice(0, 2));
+  const target = sections[2];
+  assert.equal(target.collapsed, false);
+  assert.equal(target.columns.length, 4);
+  assert.deepEqual(target.rows.map(r => r.cells.text), ['Original', rich, 'B']);
+  const details = target.columns.filter(c => c.title === 'Details').map(c => c.id);
+  const actual = target.columns.find(c => c.title === 'Actual').id;
+  assert.deepEqual(target.rows.map(r => [r.cells[details[0]], r.cells[details[1]], r.cells[actual]]), [
+    ['', '', ''], ['Steps', 'Extra', ''], ['', '', 'Actual'],
+  ]);
+  assert.equal(new Set(target.columns.map(c => c.id)).size, 4);
+  assert.deepEqual(target.rows.map(r => r.status), ['OK', 'OK', 'НЕ ОК']);
+  assert.equal(target.rows[1].manualNumber, '7.2');
+  assert.ok(target.rows.slice(1).every(r => !['one', 'two', 'existing'].includes(r.id)));
+  target.rows[1].cells.text = 'Changed';
+  target.rows[1].metadata.value = 'Changed';
+  assert.deepEqual(sections.slice(0, 2), before.slice(0, 2));
+});
+
+test('copying to the source itself appends each selected row once with fresh IDs', () => {
+  const sections = [section('a', [row('one'), row('two', 'OK')])];
+  const before = structuredClone(sections[0].rows);
+  assert.equal(copyRows(sections, new Set(['two', 'one']), 'a', id), 2);
+  assert.deepEqual(sections[0].rows.slice(0, 2), before);
+  assert.deepEqual(sections[0].rows.map(r => r.cells.check), ['one', 'two', 'one', 'two']);
+  assert.equal(new Set(sections[0].rows.map(r => r.id)).size, 4);
+});
+
+test('copying includes selected target rows once after fields from other sections are merged', () => {
+  const sections = [section('source', [row('one', 'OK', { extra: 'Extra' })], [{ id: 'extra', title: 'Extra' }]),
+    section('target', [row('two')])];
+  const before = structuredClone(sections[0]);
+  assert.equal(copyRows(sections, new Set(['one', 'two']), 'target', id), 2);
+  assert.deepEqual(sections[0], before);
+  assert.deepEqual(sections[1].rows.map(r => r.cells), [
+    { check: 'two', extra: '' }, { check: '', extra: 'Extra' }, { check: 'two', extra: '' },
+  ]);
+});
+
+test('copying to a fresh empty section keeps source rows; missing destinations and stale selections are no-ops', () => {
+  const sections = [section('a', [row('one')]), section('new', [], [])];
+  const before = structuredClone(sections);
+  for (const [selection, target] of [[new Set(['one']), 'missing'], [new Set(['stale']), 'new'], [new Set(), 'new']]) {
+    assert.equal(copyRows(sections, selection, target, id), 0);
+    assert.deepEqual(sections, before);
+  }
+  assert.equal(copyRows(sections, new Set(['one']), 'new', id), 1);
+  assert.deepEqual(sections[0], before[0]);
+  assert.deepEqual(sections[1].columns, columns);
+  assert.equal(sections[1].rows[0].cells.check, 'one');
+});

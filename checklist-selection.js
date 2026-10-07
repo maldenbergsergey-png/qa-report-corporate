@@ -8,12 +8,12 @@
 
   // Match each column only once. Preserve unmatched fields as additional columns,
   // including attachments and rich HTML, instead of mapping unrelated positions.
-  function moveRows(sections, selectedIds, targetId, createId, createRow) {
+  function transferRows(sections, selectedIds, targetId, createId, createRow, copying) {
     const target = sections.find((section) => section.id === targetId);
     if (!target) return 0;
-    const moved = [];
+    const transferred = [];
     for (const source of sections) {
-      if (source === target) continue;
+      if (source === target && !copying) continue;
       const rows = source.rows.filter((row) => selectedIds.has(row.id));
       if (!rows.length) continue;
       const used = new Set();
@@ -23,7 +23,7 @@
         if (!destination) {
           destination = { ...column, id: target.columns.some((item) => item.id === column.id) ? createId() : column.id };
           target.columns.push(destination);
-          [...target.rows, ...moved].forEach((row) => { row.cells[destination.id] = ""; });
+          [...target.rows, ...transferred].forEach((row) => { row.cells[destination.id] = ""; });
         }
         used.add(destination.id);
         return [column.id, destination.id];
@@ -31,14 +31,27 @@
       for (const row of rows) {
         const cells = Object.fromEntries(target.columns.map((column) => [column.id, ""]));
         mapping.forEach(([from, to]) => { cells[to] = row.cells[from] || ""; });
-        moved.push({ ...row, cells });
+        transferred.push(copying
+          ? { ...JSON.parse(JSON.stringify(row)), id: createId(), cells }
+          : { ...row, cells });
       }
-      source.rows = source.rows.filter((row) => !selectedIds.has(row.id));
-      if (!source.rows.length) source.rows.push(createRow(source.columns));
+      if (!copying) {
+        source.rows = source.rows.filter((row) => !selectedIds.has(row.id));
+        if (!source.rows.length) source.rows.push(createRow(source.columns));
+      }
     }
-    target.rows.push(...moved);
-    if (moved.length) target.collapsed = false;
-    return moved.length;
+    target.rows.push(...transferred);
+    if (transferred.length) target.collapsed = false;
+    return transferred.length;
+  }
+
+  function moveRows(sections, selectedIds, targetId, createId, createRow) {
+    return transferRows(sections, selectedIds, targetId, createId, createRow, false);
+  }
+
+  // Copying also supports the source section as a destination and always assigns fresh row IDs.
+  function copyRows(sections, selectedIds, targetId, createId) {
+    return transferRows(sections, selectedIds, targetId, createId, null, true);
   }
 
   // Copy whole selected sections or just their selected rows without sharing objects.
@@ -83,7 +96,7 @@
     return { sections: remaining, count };
   }
 
-  const api = { selectByStatus, moveRows, copySections, copySelection, deleteRows };
+  const api = { selectByStatus, moveRows, copyRows, copySections, copySelection, deleteRows };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportSelection = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -416,9 +416,10 @@ let pinnedColumns = loadPinnedColumns();
 let selectionMode = false;
 let selectedRowIds = new Set();
 let selectionDraftId = null;
+let selectionTransferAction = "copy";
 const selectionUi = Object.fromEntries([
   "Toggle", "Toolbar", "All", "Count", "StatusButton", "StatusMenu", "StatusOptions", "StatusCount", "StatusApply",
-  "MoveButton", "MoveMenu", "Search", "Destinations", "NewSection", "CreateForm", "NewTitle", "CopyButton", "Delete", "Exit",
+  "MoveButton", "MoveMenu", "TransferHint", "Search", "Destinations", "NewSection", "CreateForm", "CreateSubmit", "NewTitle", "CopyButton", "Delete", "Exit",
 ].map((name) => [name, document.getElementById(`selection${name}`)]));
 let linkEditorRange = null;
 let editingLink = null;
@@ -2204,8 +2205,8 @@ function updateSelectionUi() {
   selectionUi.All.indeterminate = count > 0 && count < rows.length;
   selectionUi.Delete.disabled = count === 0;
   selectionUi.CopyButton.disabled = count === 0 || selectionCopyBusy;
-  selectionUi.MoveButton.disabled = count === 0 || !window.QaReportTable.canMove(draft.sections, selectedRowIds);
-  selectionUi.MoveButton.title = !window.QaReportTable.canMove(draft.sections, selectedRowIds) ? "Верните исходный порядок выбранных строк для переноса" : "Перенести выбранные строки";
+  selectionUi.MoveButton.disabled = count === 0;
+  selectionUi.MoveButton.title = "Копировать или перенести выбранные строки в раздел";
   if (selectionUi.MoveButton.disabled && !selectionUi.MoveMenu.hidden) closeSelectionMenus();
   elements.sections.querySelectorAll("[data-selection-row]").forEach((checkbox) => {
     checkbox.checked = selectedRowIds.has(checkbox.dataset.selectionRow);
@@ -2218,11 +2219,11 @@ function updateSelectionUi() {
     checkbox.checked = selected > 0 && selected === section.rows.length;
     checkbox.indeterminate = selected > 0 && selected < section.rows.length;
   });
-  if (!selectionUi.MoveMenu.hidden) renderSelectionDestinations();
+  if (!selectionUi.MoveMenu.hidden) updateSelectionTransferAction();
 }
 
 function openSelectionMenu(name) {
-  if (name === "Move" && !window.QaReportTable.canMove(draft.sections, selectedRowIds)) return;
+  if (name === "Move" && !selectedRowIds.size) return;
   const opening = selectionUi[`${name}Menu`].hidden;
   closeSelectionMenus();
   if (!opening) return;
@@ -2232,12 +2233,25 @@ function openSelectionMenu(name) {
     flushDraftFromDom();
     selectionUi.Search.value = "";
     setSelectionCreateExpanded(false);
-    renderSelectionDestinations();
+    document.querySelector('[name="selectionTransferAction"][value="copy"]').checked = true;
+    updateSelectionTransferAction();
     selectionUi.Search.focus();
   } else {
     selectionUi.StatusOptions.querySelector("input")?.focus();
   }
   scheduleStickySectionUpdate();
+}
+
+function updateSelectionTransferAction() {
+  selectionTransferAction = document.querySelector('[name="selectionTransferAction"]:checked').value;
+  const copying = selectionTransferAction === "copy";
+  const canTransfer = copying || window.QaReportTable.canMove(draft.sections, selectedRowIds);
+  selectionUi.TransferHint.textContent = copying ? "Исходные строки останутся на месте."
+    : canTransfer ? "Строки будут удалены из исходных разделов."
+    : "Для переноса верните исходный порядок выбранных строк.";
+  selectionUi.CreateSubmit.textContent = copying ? "Копировать в новый раздел" : "Перенести в новый раздел";
+  selectionUi.CreateSubmit.disabled = !selectedRowIds.size || !canTransfer;
+  renderSelectionDestinations();
 }
 
 function renderSelectionDestinations() {
@@ -2249,9 +2263,11 @@ function renderSelectionDestinations() {
     button.type = "button";
     button.textContent = section.title;
     button.title = section.title;
-    button.disabled = !window.QaReportTable.canMove(draft.sections, selectedRowIds, section.id) || !draft.sections.some((source) => source.id !== section.id && source.rows.some((row) => selectedRowIds.has(row.id)));
+    const copying = selectionTransferAction === "copy";
+    const hasRowsElsewhere = draft.sections.some((source) => source.id !== section.id && source.rows.some((row) => selectedRowIds.has(row.id)));
+    button.disabled = !selectedRowIds.size || (!copying && (!window.QaReportTable.canMove(draft.sections, selectedRowIds, section.id) || !hasRowsElsewhere));
     if (button.disabled) button.title = section.statusSort ? "Верните исходный порядок строк в разделе назначения" : "Перенос недоступен: проверьте сортировку и выбранные строки";
-    button.addEventListener("click", () => moveSelectedRows(section.id));
+    button.addEventListener("click", () => transferSelectedRows(section.id));
     selectionUi.Destinations.append(button);
   }
   scheduleStickySectionUpdate();
@@ -2279,22 +2295,28 @@ function commitSelectionMutation(mutate) {
 }
 
 async function moveSelectedRows(targetId, newTitle = "") {
-  if (!window.QaReportTable.canMove(draft.sections, selectedRowIds, targetId)) return;
+  return transferSelectedRows(targetId, newTitle, "move");
+}
+
+async function transferSelectedRows(targetId, newTitle = "", action = selectionTransferAction) {
+  const copying = action === "copy";
+  if (!copying && !window.QaReportTable.canMove(draft.sections, selectedRowIds, targetId)) return;
   flushDraftFromDom();
   const ids = new Set(selectedRowIds);
   const documentId = draft.draftId;
   const target = draft.sections.find((section) => section.id === targetId);
-  const count = draft.sections.filter((section) => section.id !== targetId)
+  const count = draft.sections.filter((section) => copying || section.id !== targetId)
     .reduce((sum, section) => sum + section.rows.filter((row) => ids.has(row.id)).length, 0);
   if (!count || (!target && !newTitle)) return;
   closeSelectionMenus();
   const rowWord = count % 10 === 1 && count % 100 !== 11 ? "строку"
     : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? "строки" : "строк";
+  const verb = copying ? "скопировать" : "перенести";
   const message = newTitle
-    ? `Создать раздел «${newTitle}» и перенести в него ${count} ${rowWord}?`
-    : `Перенести ${count} ${rowWord} в раздел «${target.title}»?`;
-  const confirmed = await askConfirmation(message, {
-    title: "Перенос строк", confirmText: "Перенести",
+    ? `Создать раздел «${newTitle}» и ${verb} в него ${count} ${rowWord}?`
+    : `${copying ? "Скопировать" : "Перенести"} ${count} ${rowWord} в раздел «${target.title}»?`;
+  const confirmed = await askConfirmation(`${message} ${copying ? "Исходные строки останутся на месте." : "Строки будут удалены из исходных разделов."}`, {
+    title: copying ? "Копирование строк" : "Перенос строк", confirmText: copying ? "Копировать" : "Перенести",
   });
   if (!confirmed) { selectionUi.MoveButton.focus(); return; }
   if (draft.draftId !== documentId) { showToast("Отчёт изменился. Выберите строки заново."); return; }
@@ -2303,10 +2325,10 @@ async function moveSelectedRows(targetId, newTitle = "") {
     showToast("Раздел больше не существует. Выберите другой раздел.");
     return;
   }
-  if (!draft.sections.some((section) => section.id !== targetId && section.rows.some((row) => ids.has(row.id)))) return;
-  if (!window.QaReportTable.canMove(draft.sections, ids, targetId)) return;
+  if (!draft.sections.some((section) => (copying || section.id !== targetId) && section.rows.some((row) => ids.has(row.id)))) return;
+  if (!copying && !window.QaReportTable.canMove(draft.sections, ids, targetId)) return;
   let destinationId = targetId;
-  let movedCount = 0;
+  let transferredCount = 0;
   commitSelectionMutation(() => {
     if (newTitle) {
       const source = draft.sections.find((section) => section.rows.some((row) => ids.has(row.id)));
@@ -2314,12 +2336,14 @@ async function moveSelectedRows(targetId, newTitle = "") {
       draft.sections.push(section);
       destinationId = section.id;
     }
-    movedCount = window.QaReportSelection.moveRows(draft.sections, ids, destinationId, () => crypto.randomUUID(), createRow);
-    selectedRowIds.clear();
+    transferredCount = copying
+      ? window.QaReportSelection.copyRows(draft.sections, ids, destinationId, () => crypto.randomUUID())
+      : window.QaReportSelection.moveRows(draft.sections, ids, destinationId, () => crypto.randomUUID(), createRow);
+    if (!copying) selectedRowIds.clear();
   });
   const destination = [...elements.sections.children].find((section) => section.dataset.sectionId === destinationId);
   destination?.scrollIntoView({ behavior: "smooth", block: "start" });
-  showToast(`Перенесено строк: ${movedCount}`);
+  showToast(`${copying ? "Скопировано" : "Перенесено"} строк: ${transferredCount}`);
 }
 
 let selectionCopyBusy = false;
@@ -7883,6 +7907,7 @@ selectionUi.StatusApply.addEventListener("click", () => {
   selectionUi.StatusButton.focus();
 });
 selectionUi.Search.addEventListener("input", renderSelectionDestinations);
+document.querySelectorAll('[name="selectionTransferAction"]').forEach(input => input.addEventListener("change", updateSelectionTransferAction));
 function setSelectionCreateExpanded(expanded) {
   selectionUi.CreateForm.hidden = !expanded;
   selectionUi.NewSection.setAttribute("aria-expanded", String(expanded));
@@ -7902,7 +7927,7 @@ selectionUi.NewSection.addEventListener("click", () => {
 selectionUi.CreateForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const title = selectionUi.NewTitle.value.trim();
-  if (title) moveSelectedRows(null, title);
+  if (title) transferSelectedRows(null, title);
   else selectionUi.NewTitle.focus();
 });
 selectionUi.CopyButton.addEventListener("click", copySelectedRowsToNewChecklist);

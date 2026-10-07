@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=126" />
+    <link rel="stylesheet" href="/styles.css?v=127" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -342,8 +342,14 @@
               </div>
             </div>
             <div class="selection-menu-wrap">
-              <button id="selectionMoveButton" type="button" aria-expanded="false" aria-controls="selectionMoveMenu" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-section-split"></use></svg> Перенести в раздел <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+              <button id="selectionMoveButton" type="button" aria-expanded="false" aria-controls="selectionMoveMenu" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-section-split"></use></svg> Копировать или перенести <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
               <div id="selectionMoveMenu" class="selection-menu selection-move-menu" hidden>
+                <fieldset class="selection-transfer-options" aria-describedby="selectionTransferHint">
+                  <legend>Действие с выбранными строками</legend>
+                  <label><input type="radio" name="selectionTransferAction" value="copy" checked /> Копировать</label>
+                  <label><input type="radio" name="selectionTransferAction" value="move" /> Перенести</label>
+                </fieldset>
+                <small id="selectionTransferHint" class="selection-transfer-hint" aria-live="polite">Исходные строки останутся на месте.</small>
                 <label class="selection-search-label" for="selectionSearch">Найти раздел</label>
                 <input id="selectionSearch" type="search" placeholder="Поиск раздела…" autocomplete="off" />
                 <div id="selectionDestinations" class="selection-destinations"></div>
@@ -352,7 +358,7 @@
                   <label for="selectionNewTitle">Название нового раздела</label>
                   <input id="selectionNewTitle" type="text" placeholder="Название раздела" required maxlength="200" />
                   <small>Новый раздел появится в конце списка разделов после подтверждения.</small>
-                  <button type="submit" class="button button-primary">Перенести в новый раздел</button>
+                  <button id="selectionCreateSubmit" type="submit" class="button button-primary">Копировать в новый раздел</button>
                 </form>
               </div>
             </div>
@@ -1148,10 +1154,10 @@
     </template>
 
     <script src="/jira-markup-import.js?v=11"></script>
-    <script src="/checklist-selection.js?v=5"></script>
+    <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=57"></script>
+    <script src="/release-notes.js?v=58"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1161,7 +1167,7 @@
     <script src="/report-file.js?v=2"></script>
     <script src="/bug-voice-input.js?v=4"></script>
     <script src="/dictation-input.js?v=1"></script>
-    <script src="/app.js?v=133"></script>
+    <script src="/app.js?v=134"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

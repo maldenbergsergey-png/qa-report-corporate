@@ -40,13 +40,17 @@ function element() {
 
 function harness(records = new Map(), preferences = new Map()) {
   const ctx = vm.createContext({
+    HISTORY_PROJECT_COLORS_KEY: "qa-report-project-colors-v1",
     HISTORY_PROJECT_NAMES_KEY: "qa-report-project-names-v1",
     localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) },
-    URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, document: { createElement: element },
+    URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, historySelectionMode: false, historyDeleting: false,
+    historyFilteredReports: [], selectedHistoryReportIds: new Set(), pendingHistoryServerSaves: new Map(), document: { createElement: element },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
-      historyModal: { hidden: true }, clearHistoryButton: element(), saveHistorySnapshotButton: element(),
+      historyModal: { hidden: true }, clearHistoryButton: element(), closeHistoryButton: element(),
+      historySelectionToggle: element(), historySelectionToolbar: element(), historySelectAll: element(),
+      historySelectionCount: element(), historySelectionExit: element(), deleteSelectedHistoryButton: element(),
       introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historyList: element(), historyUsage: element(),
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
@@ -58,7 +62,7 @@ function harness(records = new Map(), preferences = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -170,7 +174,6 @@ test("opening history shows loading before saving and applies search typed durin
   assert.equal(ctx.elements.historyList.children.length, 1);
   assert.equal(ctx.elements.historyList.attributes["aria-busy"], "false");
   assert.equal(ctx.elements.clearHistoryButton.disabled, false);
-  assert.equal(ctx.elements.saveHistorySnapshotButton.disabled, false);
 });
 
 test("a closed history request cannot overwrite a newly opened list", async () => {
@@ -202,7 +205,6 @@ test("empty and failed loads leave loading and restore the history controls", as
   assert.match(ctx.elements.historyList.innerHTML, /Не удалось загрузить историю/);
   assert.match(ctx.elements.historyList.innerHTML, /data-retry-history/);
   assert.equal(ctx.historyLoading, false);
-  assert.equal(ctx.elements.saveHistorySnapshotButton.disabled, false);
 });
 
 
@@ -257,4 +259,73 @@ test("removed projects reset the active filter and malformed saved names fall ba
   assert.equal(historyLabel(ctx), "APP-3");
   preferences.set("qa-report-project-names-v1", JSON.stringify({ APP: 5, SHOP: " ", "<img>": "bad", QA: " Проверки " }));
   assert.equal(JSON.stringify(ctx.loadProjectNames()), '{"QA":"Проверки"}');
+});
+
+
+test("project colors accept short and full HEX codes and reject CSS or markup injection", async () => {
+  const ctx = harness();
+  for (const [input, expected] of [["#F00", "#ff0000"], [" #E5484D ", "#e5484d"], ["235BBB", "#235bbb"], ["", ""]]) {
+    assert.equal(ctx.normalizeProjectColor(input), expected);
+  }
+  for (const input of ["red", "#gggggg", "#ff000080", "#fff;display:none", '\" onmouseover=alert(1)', "rgb(255,0,0)"]) {
+    assert.equal(ctx.normalizeProjectColor(input), "");
+  }
+  const names = new Map([["qa-report-project-names-v1", JSON.stringify({ SHOP: "Магазин" })],
+    ["qa-report-project-colors-v1", JSON.stringify({ SHOP: "#F00", APP: "#fff;display:none" })]]);
+  const colored = harness(new Map([["SHOP-1", historyRecord("SHOP-1")], ["APP-2", historyRecord("APP-2")]]), names);
+  await colored.renderHistoryList();
+  assert.equal(JSON.stringify(colored.loadProjectColors()), '{"SHOP":"#ff0000"}');
+  assert.match(colored.elements.historyList.children[0].children[0].innerHTML, /style="--project-color:#ff0000"/);
+  assert.match(colored.elements.historyProjectFilter.innerHTML, />Магазин<\/option>/);
+  assert.doesNotMatch(colored.elements.historyProjectFilter.innerHTML, /Магазин · SHOP/);
+  assert.doesNotMatch(colored.elements.historyList.children[1].children[0].innerHTML, /--project-color/);
+});
+
+
+test("bulk delete confirms the full selection, including hidden records, and keeps failed entries selected", async () => {
+  const ctx = harness();
+  vm.runInContext(functionSource("app.js", "deleteSelectedHistoryReports"), ctx);
+  ctx.selectedHistoryReportIds.add("SHOP-1");
+  ctx.selectedHistoryReportIds.add("APP-2");
+  ctx.historyFilteredReports = [historyRecord("APP-2")];
+  ctx.getAllHistoryReports = async () => [historyRecord("SHOP-1"), historyRecord("APP-2"), historyRecord("OTHER-3")];
+  let confirmedText = "", deleted = [];
+  ctx.askConfirmation = async text => { confirmedText = text; return true; };
+  ctx.deleteHistoryReport = async report => {
+    if (report.id === "APP-2") throw Error("temporary failure");
+    deleted.push(report.id); ctx.selectedHistoryReportIds.delete(report.id);
+  };
+  ctx.renderHistoryList = async () => {};
+  ctx.showToast = text => { ctx.lastToast = text; };
+  await ctx.deleteSelectedHistoryReports();
+  assert.deepEqual(deleted, ["SHOP-1"]);
+  assert.match(confirmedText, /\(2\)/);
+  assert.match(confirmedText, /скрытых текущим фильтром: 1/);
+  assert.deepEqual([...ctx.selectedHistoryReportIds], ["APP-2"]);
+  assert.match(ctx.lastToast, /Не удалось удалить: 1/);
+  assert.equal(ctx.historyDeleting, false);
+  ctx.askConfirmation = async () => false;
+  deleted = [];
+  await ctx.deleteSelectedHistoryReports();
+  assert.deepEqual(deleted, []);
+  assert.deepEqual([...ctx.selectedHistoryReportIds], ["APP-2"]);
+});
+
+test("deleting a cloud report waits for in-flight saves and also removes its local copy", async () => {
+  const ctx = harness();
+  vm.runInContext(functionSource("app.js", "deleteHistoryReport"), ctx);
+  const saving = deferred();
+  ctx.draftWriteQueue = Promise.resolve();
+  ctx.pendingHistoryServerSaves.set("cloud", new Set([saving.promise]));
+  ctx.selectedHistoryReportIds.add("cloud");
+  const deleted = [];
+  ctx.deleteServerReport = async id => deleted.push(`server:${id}`);
+  ctx.deleteReportRecord = async id => deleted.push(`local:${id}`);
+  const deletion = ctx.deleteHistoryReport({ id: "cloud", source: "server" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(deleted, []);
+  saving.resolve();
+  await deletion;
+  assert.deepEqual(deleted, ["server:cloud", "local:cloud"]);
+  assert.equal(ctx.selectedHistoryReportIds.size, 0);
 });

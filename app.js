@@ -3,6 +3,7 @@ const DRAFT_LOCATION_KEY = "qa-report-draft-location-v1";
 const LOCAL_DRAFT_COPY_LIMIT = 1024 * 1024;
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
 const HISTORY_PROJECT_NAMES_KEY = "qa-report-project-names-v1";
+const HISTORY_PROJECT_COLORS_KEY = "qa-report-project-colors-v1";
 const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
@@ -322,11 +323,16 @@ const elements = {
   closeHistoryButton: document.querySelector("#closeHistoryButton"),
   historySearch: document.querySelector("#historySearch"),
   historyProjectFilter: document.querySelector("#historyProjectFilter"),
+  historySelectionToggle: document.querySelector("#historySelectionToggle"),
+  historySelectionToolbar: document.querySelector("#historySelectionToolbar"),
+  historySelectAll: document.querySelector("#historySelectAll"),
+  historySelectionCount: document.querySelector("#historySelectionCount"),
+  historySelectionExit: document.querySelector("#historySelectionExit"),
+  deleteSelectedHistoryButton: document.querySelector("#deleteSelectedHistoryButton"),
   projectSettingsList: document.querySelector("#projectSettingsList"),
   historyUsage: document.querySelector("#historyUsage"),
   historyList: document.querySelector("#historyList"),
   clearHistoryButton: document.querySelector("#clearHistoryButton"),
-  saveHistorySnapshotButton: document.querySelector("#saveHistorySnapshotButton"),
   mediaViewerModal: document.querySelector("#mediaViewerModal"),
   mediaViewerImage: document.querySelector("#mediaViewerImage"),
   closeMediaViewerButton: document.querySelector("#closeMediaViewerButton"),
@@ -443,6 +449,11 @@ let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
 let historyRenderRequestId = 0;
 let historyLoading = false;
+let historySelectionMode = false;
+let historyDeleting = false;
+let historyFilteredReports = [];
+const selectedHistoryReportIds = new Set();
+const pendingHistoryServerSaves = new Map();
 let projectSettingsRequestId = 0;
 let projectSettingsLoaded = false;
 
@@ -970,6 +981,58 @@ function loadProjectNames() {
   }
 }
 
+function normalizeProjectColor(value) {
+  const hex = String(value || "").trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) return `#${[...hex].map(char => char.repeat(2)).join("").toLowerCase()}`;
+  return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex.toLowerCase()}` : "";
+}
+
+function loadProjectColors() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HISTORY_PROJECT_COLORS_KEY) || "{}");
+    return Object.fromEntries(Object.entries(saved || {}).filter(([key, color]) =>
+      /^[A-Z][A-Z0-9_]*$/.test(key) && typeof color === "string" && normalizeProjectColor(color),
+    ).map(([key, color]) => [key, normalizeProjectColor(color)]));
+  } catch {
+    return {};
+  }
+}
+
+function defaultProjectColor() {
+  return normalizeProjectColor(getComputedStyle(document.documentElement).getPropertyValue("--primary")) || "#579dff";
+}
+
+function bindProjectColorControls() {
+  elements.projectSettingsList.querySelectorAll("[data-project-row]").forEach(row => {
+    const picker = row.querySelector("[data-project-color-picker]");
+    const code = row.querySelector("[data-project-color-key]");
+    picker.addEventListener("input", () => {
+      code.value = picker.value;
+      code.setCustomValidity("");
+      code.removeAttribute("aria-invalid");
+      markSettingsDirty();
+    });
+    code.addEventListener("input", () => {
+      const color = normalizeProjectColor(code.value);
+      const invalid = Boolean(code.value.trim() && !color);
+      code.setCustomValidity(invalid ? "Введите цвет в формате #RRGGBB, например #E5484D." : "");
+      code.setAttribute("aria-invalid", String(invalid));
+      picker.value = color || defaultProjectColor();
+    });
+    code.addEventListener("blur", () => {
+      const color = normalizeProjectColor(code.value);
+      if (color) code.value = color;
+    });
+    row.querySelector("[data-reset-project-color]").addEventListener("click", () => {
+      code.value = "";
+      code.setCustomValidity("");
+      code.removeAttribute("aria-invalid");
+      picker.value = defaultProjectColor();
+      markSettingsDirty();
+    });
+  });
+}
+
 function historyProjectKeys(reports) {
   return [...new Set(reports.map(reportProjectKey).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
@@ -978,7 +1041,7 @@ function renderHistoryProjectFilter(reports, names) {
   const selected = elements.historyProjectFilter.value;
   const keys = historyProjectKeys(reports);
   elements.historyProjectFilter.innerHTML = '<option value="">Все проекты</option>'
-    + keys.map(key => `<option value="${escapeHtml(key)}">${escapeHtml(names[key] ? `${names[key]} · ${key}` : key)}</option>`).join("")
+    + keys.map(key => `<option value="${escapeHtml(key)}">${escapeHtml(names[key] || key)}</option>`).join("")
     + (reports.some(report => !reportProjectKey(report)) ? '<option value="none">Без проекта</option>' : "");
   elements.historyProjectFilter.value = keys.includes(selected) || selected === "none" && reports.some(report => !reportProjectKey(report))
     ? selected : "";
@@ -987,35 +1050,66 @@ function renderHistoryProjectFilter(reports, names) {
 function resetProjectSettingsForm() {
   projectSettingsRequestId++;
   projectSettingsLoaded = false;
+  elements.projectSettingsList.setAttribute("aria-busy", "false");
   elements.projectSettingsList.innerHTML = "";
 }
 
 async function fillProjectSettingsForm() {
   const requestId = ++projectSettingsRequestId;
   projectSettingsLoaded = true;
-  elements.projectSettingsList.innerHTML = '<p class="settings-note" role="status">Загружаем проекты…</p>';
+  elements.projectSettingsList.setAttribute("aria-busy", "true");
+  const skeleton = `<div class="project-settings-row project-settings-skeleton" aria-hidden="true">
+    <div class="history-skeleton-bar project-skeleton-key"></div>
+    <div class="history-skeleton-bar project-skeleton-name"></div>
+    <div class="history-skeleton-bar project-skeleton-color"></div>
+  </div>`;
+  elements.projectSettingsList.innerHTML = `<span class="sr-only" role="status">Загрузка проектов</span>${skeleton.repeat(3)}`;
   let reports;
   try {
     reports = await getAllHistoryReports();
   } catch {
     if (requestId !== projectSettingsRequestId) return;
     projectSettingsLoaded = false;
+    elements.projectSettingsList.setAttribute("aria-busy", "false");
     elements.projectSettingsList.innerHTML = '<p class="settings-note" role="status">Не удалось загрузить проекты.</p><button class="button button-secondary" type="button" data-retry-projects>Повторить</button>';
     elements.projectSettingsList.querySelector("[data-retry-projects]").addEventListener("click", fillProjectSettingsForm);
     return;
   }
   if (requestId !== projectSettingsRequestId) return;
+  elements.projectSettingsList.setAttribute("aria-busy", "false");
   const names = loadProjectNames();
+  const colors = loadProjectColors();
   const keys = historyProjectKeys([...reports, draft]);
   elements.projectSettingsList.innerHTML = keys.length
-    ? keys.map(key => `<label class="project-settings-row"><code>${escapeHtml(key)}</code><input type="text" data-project-key="${escapeHtml(key)}" aria-label="Название проекта ${escapeHtml(key)}" maxlength="120" placeholder="${escapeHtml(key)}" value="${escapeHtml(names[key] || "")}" /></label>`).join("")
+    ? keys.map(key => `<div class="project-settings-row" data-project-row="${escapeHtml(key)}"><code>${escapeHtml(key)}</code>
+      <label class="project-name-field"><span class="sr-only">Название проекта ${escapeHtml(key)}</span><input type="text" data-project-key="${escapeHtml(key)}" maxlength="120" placeholder="Название проекта" value="${escapeHtml(names[key] || "")}" /></label>
+      <div class="project-color-field"><span class="project-color-caption">Цвет метки</span><div class="project-color-controls">
+        <input class="project-color-picker" type="color" data-project-color-picker="${escapeHtml(key)}" aria-label="Выбрать цвет проекта ${escapeHtml(key)}" value="${colors[key] || defaultProjectColor()}" />
+        <input class="project-color-code" type="text" data-project-color-key="${escapeHtml(key)}" aria-label="HEX-код цвета проекта ${escapeHtml(key)}" maxlength="7" spellcheck="false" autocomplete="off" placeholder="Авто" value="${colors[key] || ""}" />
+        <button class="project-color-reset icon-button" type="button" data-reset-project-color aria-label="Сбросить цвет проекта ${escapeHtml(key)}" title="Стандартный цвет">×</button>
+      </div></div></div>`).join("")
     : '<p class="settings-note" role="status">Проектов пока нет. Укажите ключ или ссылку на задачу в чек-листе — проект появится здесь автоматически.</p>';
+  bindProjectColorControls();
 }
 
 function saveProjectSettings() {
   const inputs = elements.projectSettingsList.querySelectorAll("[data-project-key]");
   if (!inputs.length) return;
   const names = loadProjectNames();
+  const colors = loadProjectColors();
+  const colorInputs = elements.projectSettingsList.querySelectorAll("[data-project-color-key]");
+  for (const input of colorInputs) {
+    const color = normalizeProjectColor(input.value);
+    if (input.value.trim() && !color) {
+      setSettingsSection("projects");
+      input.setCustomValidity("Введите цвет в формате #RRGGBB, например #E5484D.");
+      input.setAttribute("aria-invalid", "true");
+      input.reportValidity();
+      throw new Error(`Укажите цвет проекта ${input.dataset.projectColorKey} в формате #RRGGBB.`);
+    }
+    if (color) colors[input.dataset.projectColorKey] = color;
+    else delete colors[input.dataset.projectColorKey];
+  }
   inputs.forEach(input => {
     const key = input.dataset.projectKey;
     const name = input.value.trim().slice(0, 120);
@@ -1024,7 +1118,9 @@ function saveProjectSettings() {
     input.value = name;
   });
   localStorage.setItem(HISTORY_PROJECT_NAMES_KEY, JSON.stringify(names));
-  if (!elements.historyModal.hidden) renderHistoryList().catch(() => {});
+  localStorage.setItem(HISTORY_PROJECT_COLORS_KEY, JSON.stringify(colors));
+  colorInputs.forEach(input => { input.value = normalizeProjectColor(input.value); });
+  if (!elements.historyModal.hidden) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
 }
 
 async function getReportMetadata(id) {
@@ -1103,7 +1199,9 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
 
 function queueServerReportSave(record) {
   if (!cloudHistoryEnabled) return;
-  saveReportToServer(record)
+  const pending = pendingHistoryServerSaves.get(record.id) || new Set();
+  pendingHistoryServerSaves.set(record.id, pending);
+  const saving = saveReportToServer(record)
     .then((result) => {
       if (result.report?.contentHash) {
         setKnownServerHash(record.id, result.report.contentHash);
@@ -1145,7 +1243,11 @@ function queueServerReportSave(record) {
         }
       }
       // Серверная история дополняет локальную. Если сервер недоступен, редактор продолжает работать.
+    }).finally(() => {
+      pending.delete(saving);
+      if (!pending.size) pendingHistoryServerSaves.delete(record.id);
     });
+  pending.add(saving);
 }
 
 async function uploadStoragePayload(reportId, file) {
@@ -5067,6 +5169,108 @@ function setFocusMode(enabled) {
   requestAnimationFrame(scheduleStickySectionUpdate);
 }
 
+function updateHistorySelectionUi() {
+  const busy = historyLoading || historyDeleting;
+  elements.historySelectionToggle.setAttribute("aria-pressed", String(historySelectionMode));
+  elements.historySelectionToggle.disabled = busy;
+  elements.historySelectionToolbar.hidden = !historySelectionMode;
+  elements.deleteSelectedHistoryButton.hidden = !historySelectionMode;
+  elements.deleteSelectedHistoryButton.disabled = busy || !selectedHistoryReportIds.size;
+  elements.deleteSelectedHistoryButton.textContent = historyDeleting ? "Удаляем…" : "Удалить выбранные";
+  const visibleSelected = historyFilteredReports.filter(report => selectedHistoryReportIds.has(report.id)).length;
+  const hiddenSelected = selectedHistoryReportIds.size - visibleSelected;
+  elements.historySelectionCount.textContent = `Выбрано: ${selectedHistoryReportIds.size}${hiddenSelected > 0 ? ` · Скрыто фильтром: ${hiddenSelected}` : ""}`;
+  elements.historySelectAll.checked = historyFilteredReports.length > 0 && visibleSelected === historyFilteredReports.length;
+  elements.historySelectAll.indeterminate = visibleSelected > 0 && visibleSelected < historyFilteredReports.length;
+  elements.historySelectAll.disabled = busy || !historyFilteredReports.length;
+  elements.historySelectionExit.disabled = historyDeleting;
+  elements.historySearch.disabled = historyDeleting;
+  elements.historyProjectFilter.disabled = historyDeleting;
+  elements.clearHistoryButton.disabled = busy;
+  elements.closeHistoryButton.disabled = historyDeleting;
+  elements.historyList.querySelectorAll("[data-history-select]").forEach(checkbox => {
+    checkbox.checked = selectedHistoryReportIds.has(checkbox.dataset.historySelect);
+    checkbox.disabled = busy;
+    checkbox.closest(".history-item").classList.toggle("selected", checkbox.checked);
+  });
+  elements.historyList.querySelectorAll(".history-item-actions button, .history-comment-field").forEach(control => {
+    control.disabled = historyDeleting;
+  });
+}
+
+async function setHistorySelectionMode(enabled) {
+  if (historyDeleting || historyLoading) return;
+  historySelectionMode = enabled;
+  if (!enabled) selectedHistoryReportIds.clear();
+  updateHistorySelectionUi();
+  await flushVisibleHistoryComments();
+  await renderHistoryList();
+}
+
+async function deleteHistoryReport(report) {
+  if (report.id === draft.reportId) clearTimeout(saveTimer);
+  await draftWriteQueue.catch(() => {});
+  await Promise.allSettled([...(pendingHistoryServerSaves.get(report.id) || [])]);
+  if (report.source === "server") await deleteServerReport(report.id);
+  // A cloud entry can also have a local copy; remove both so it cannot reappear.
+  await deleteReportRecord(report.id);
+  selectedHistoryReportIds.delete(report.id);
+  if (report.id !== draft.reportId) return;
+  clearTimeout(saveTimer);
+  clearTimeout(historyTimer);
+  draft = normalizeDraft({ ...clone(DEFAULT_DRAFT), draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId() });
+  historyCurrent = serializeDraft();
+  undoStack = [];
+  redoStack = [];
+  hasUnsavedLocalChanges = false;
+  render();
+  updateChecklistUrl(draft.publicId);
+  updateHistoryButtons();
+  try {
+    localStorage.removeItem(DRAFT_LOCATION_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+  writeLocalDraftCopy(draft);
+}
+
+async function deleteSelectedHistoryReports() {
+  if (historyDeleting || historyLoading || !selectedHistoryReportIds.size) return;
+  historyDeleting = true;
+  updateHistorySelectionUi();
+  try {
+    await flushVisibleHistoryComments();
+    const reports = (await getAllHistoryReports()).filter(report => selectedHistoryReportIds.has(report.id));
+    if (!reports.length) {
+      selectedHistoryReportIds.clear();
+      await renderHistoryList();
+      return;
+    }
+    const visibleIds = new Set(historyFilteredReports.map(report => report.id));
+    const hiddenCount = reports.filter(report => !visibleIds.has(report.id)).length;
+    const confirmed = await askConfirmation(`Удалить выбранные чек-листы (${reports.length})?${hiddenCount ? ` В том числе скрытых текущим фильтром: ${hiddenCount}.` : ""}`, {
+      title: "Удаление чек-листов", confirmText: "Удалить выбранные", danger: true,
+    });
+    if (!confirmed) return;
+    let deleted = 0;
+    for (const report of reports) {
+      try {
+        await deleteHistoryReport(report);
+        deleted++;
+      } catch {
+        // Keep failed entries selected so the user can retry them.
+      }
+    }
+    await renderHistoryList();
+    const failed = reports.length - deleted;
+    showToast(failed ? `Удалено: ${deleted}. Не удалось удалить: ${failed}. Повторите удаление выбранных.` : `Удалено чек-листов: ${deleted}`, failed ? 9000 : 3500);
+  } catch (error) {
+    showToast(`Не удалось удалить выбранные чек-листы: ${error.message}`, 9000);
+  } finally {
+    historyDeleting = false;
+    updateHistorySelectionUi();
+  }
+}
+
 async function openHistory() {
   elements.historyModal.hidden = false;
   syncBodyModalOverflow();
@@ -5097,6 +5301,10 @@ async function flushVisibleHistoryComments() {
 }
 
 function closeHistory() {
+  if (historyDeleting) return;
+  historySelectionMode = false;
+  selectedHistoryReportIds.clear();
+  historyFilteredReports = [];
   flushVisibleHistoryComments().catch(() => setSaveStatus("Ошибка комментария"));
   historyRenderRequestId++;
   setHistoryLoading(false);
@@ -5108,7 +5316,8 @@ function setHistoryLoading(loading) {
   historyLoading = loading;
   elements.historyList.setAttribute("aria-busy", String(loading));
   elements.clearHistoryButton.disabled = loading;
-  elements.saveHistorySnapshotButton.disabled = loading;
+  if (loading) historyFilteredReports = [];
+  updateHistorySelectionUi();
   if (!loading) return;
   elements.historyUsage.textContent = "";
   elements.historyList.scrollTop = 0;
@@ -5152,6 +5361,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
   if (requestId !== historyRenderRequestId) return;
   setHistoryLoading(false);
   const names = loadProjectNames();
+  const colors = loadProjectColors();
   renderHistoryProjectFilter(reports, names);
   const selectedProject = elements.historyProjectFilter.value;
   const query = elements.historySearch.value.trim().toLowerCase();
@@ -5160,10 +5370,14 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const matchesProject = !selectedProject || (selectedProject === "none" ? !projectKey : projectKey === selectedProject);
     return matchesProject && `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""} ${names[projectKey] || projectKey}`.toLowerCase().includes(query);
   });
+  const availableIds = new Set(reports.map(report => report.id));
+  for (const id of selectedHistoryReportIds) if (!availableIds.has(id)) selectedHistoryReportIds.delete(id);
+  historyFilteredReports = filtered;
   const serverCount = reports.filter((report) => report.source === "server").length;
   const localCount = reports.length - serverCount;
   elements.historyUsage.textContent = `${selectedProject || query ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · Облако: ${serverCount} · Локально: ${localCount}`;
   elements.historyList.innerHTML = "";
+  updateHistorySelectionUi();
   if (!filtered.length) {
     const title = reports.length ? "Ничего не найдено" : "Отчётов пока нет";
     elements.historyList.innerHTML = `<div class="history-empty"><p>${title}</p><button class="button button-primary" type="button" data-create-empty-report>Создать</button></div>`;
@@ -5183,7 +5397,23 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const issueLabel = reportIssueLabel(report);
     const projectKey = reportProjectKey(report);
     const projectName = names[projectKey] || projectKey || "Без проекта";
-    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label" title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
+    const projectStyle = colors[projectKey] ? ` style="--project-color:${colors[projectKey]}"` : "";
+    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
+    if (historySelectionMode) {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "history-select-checkbox";
+      checkbox.dataset.historySelect = report.id;
+      checkbox.checked = selectedHistoryReportIds.has(report.id);
+      checkbox.setAttribute("aria-label", `Выбрать чек-лист ${issueLabel}, ${publicId}`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedHistoryReportIds.add(report.id);
+        else selectedHistoryReportIds.delete(report.id);
+        updateHistorySelectionUi();
+      });
+      info.querySelector(".history-item-heading").prepend(checkbox);
+      item.classList.toggle("selected", checkbox.checked);
+    }
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";
     commentField.rows = 2;
@@ -5243,24 +5473,11 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
         danger: true,
       });
       if (!confirmed) return;
-      if (report.source === "server") {
-        await deleteServerReport(report.id);
-      } else {
-        await deleteReportRecord(report.id);
-      }
-      if (report.id === draft.reportId) {
-        draft = normalizeDraft({
-          ...clone(DEFAULT_DRAFT),
-          draftId: crypto.randomUUID(),
-          reportId: crypto.randomUUID(),
-          publicId: createPublicId(),
-        });
-        historyCurrent = serializeDraft();
-        undoStack = [];
-        redoStack = [];
-        render();
-        updateChecklistUrl(draft.publicId);
-        updateHistoryButtons();
+      try {
+        await flushVisibleHistoryComments();
+        await deleteHistoryReport(report);
+      } catch (error) {
+        showToast(`Не удалось удалить чек-лист: ${error.message}`, 9000);
       }
       await renderHistoryList();
     }, true);
@@ -5275,6 +5492,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     item.append(info, commentField, actions);
     elements.historyList.append(item);
   });
+  updateHistorySelectionUi();
 }
 
 function createSmallButton(label, action, danger = false) {
@@ -8934,11 +9152,20 @@ elements.historySearch.addEventListener("input", () => {
 elements.historyProjectFilter.addEventListener("change", () => {
   if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
 });
-elements.saveHistorySnapshotButton.addEventListener("click", async () => {
-  await saveReportSnapshot("manual");
-  await renderHistoryList();
-  showToast("Снимок отчёта сохранён");
+elements.historySelectionToggle.addEventListener("click", () => {
+  setHistorySelectionMode(!historySelectionMode).catch(() => {});
 });
+elements.historySelectionExit.addEventListener("click", () => {
+  setHistorySelectionMode(false).catch(() => {});
+});
+elements.historySelectAll.addEventListener("change", () => {
+  for (const report of historyFilteredReports) {
+    if (elements.historySelectAll.checked) selectedHistoryReportIds.add(report.id);
+    else selectedHistoryReportIds.delete(report.id);
+  }
+  updateHistorySelectionUi();
+});
+elements.deleteSelectedHistoryButton.addEventListener("click", deleteSelectedHistoryReports);
 elements.clearHistoryButton.addEventListener("click", async () => {
   const reports = await getAllHistoryReports();
   if (!reports.length) return;

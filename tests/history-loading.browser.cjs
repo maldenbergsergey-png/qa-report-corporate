@@ -70,7 +70,6 @@ async function main() {
   assert.equal(await page.locator('.history-loading-status').innerText(), 'Загружаем историю…');
   assert.equal(await page.locator('#historyList').getAttribute('aria-busy'), 'true');
   assert.equal(await page.locator('#clearHistoryButton').isDisabled(), true);
-  assert.equal(await page.locator('#saveHistorySnapshotButton').isDisabled(), true);
   assert.equal(await page.locator('#historySearch').isDisabled(), false);
   await page.waitForFunction(() => typeof window.releaseHistorySave === 'function');
   const screenshot = async name => {
@@ -94,7 +93,7 @@ async function main() {
   assert.equal(await page.locator('#historyList').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   const controlsFit = () => page.locator('.history-modal').evaluate(modal => {
     const bounds = modal.getBoundingClientRect();
-    return [...modal.querySelectorAll('input, button, .history-item')].every(node => {
+    return [...modal.querySelectorAll('input, select, button, .history-item')].filter(node => node.getBoundingClientRect().width > 0).every(node => {
       const rect = node.getBoundingClientRect();
       return rect.left >= bounds.left && rect.right <= bounds.right;
     });

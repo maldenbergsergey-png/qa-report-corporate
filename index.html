@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=130" />
+    <link rel="stylesheet" href="/styles.css?v=131" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -751,15 +751,23 @@
           <button class="icon-button" id="closeHistoryButton" type="button" aria-label="Закрыть историю">×</button>
         </header>
         <div class="history-toolbar">
+          <button class="toolbar-icon-button history-selection-toggle" id="historySelectionToggle" type="button" title="Выделить чек-листы" aria-label="Выделить чек-листы" aria-pressed="false" aria-controls="historySelectionToolbar">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 12 3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </button>
           <select class="history-project-filter" id="historyProjectFilter" aria-label="Фильтр по проекту"><option value="">Все проекты</option></select>
           <input id="historySearch" type="search" aria-label="Поиск в истории" placeholder="Поиск по задаче или названию" />
           <span id="historyUsage"></span>
           <button class="button button-ghost danger-text" id="clearHistoryButton" type="button">Очистить историю</button>
+          <div class="history-selection-toolbar" id="historySelectionToolbar" hidden>
+            <label class="history-select-all"><input id="historySelectAll" type="checkbox" title="Выделить чек-листы в текущем списке" /> Выбрать всё</label>
+            <span id="historySelectionCount" role="status" aria-live="polite">Выбрано: 0</span>
+            <button class="icon-button" id="historySelectionExit" type="button" aria-label="Выйти из выделения" title="Выйти из выделения">×</button>
+          </div>
         </div>
         <div class="history-list" id="historyList"></div>
         <footer class="modal-footer">
           <span>Серверная история дополняется локальным кэшем браузера.</span>
-          <button class="button button-secondary" id="saveHistorySnapshotButton" type="button">Сохранить снимок</button>
+          <button class="button button-danger" id="deleteSelectedHistoryButton" type="button" disabled hidden>Удалить выбранные</button>
         </footer>
       </section>
     </div>
@@ -924,10 +932,10 @@
           </nav>
           <div class="settings-body" id="settingsContent">
             <section class="settings-section" data-settings-panel="projects" hidden>
-              <header class="settings-page-header"><h3>Проекты</h3><p>Задайте понятные названия для фильтра и меток в истории.</p></header>
+              <header class="settings-page-header"><h3>Проекты</h3><p>Задайте названия проектов и цвета их меток в истории.</p></header>
               <p class="settings-note">Проект определяется по ключу задачи: например, SHOP-123 относится к SHOP. Каждый ключ проекта показан один раз, включая проект текущего чек-листа.</p>
               <div class="project-settings-list" id="projectSettingsList" aria-live="polite"></div>
-              <p class="settings-note">Названия сохраняются кнопкой «Сохранить» в этом браузере. Оставьте поле пустым, чтобы использовать ключ проекта.</p>
+              <p class="settings-note">Название и цвет сохраняются кнопкой «Сохранить» в этом браузере. Пустое название возвращает ключ проекта; цвет можно выбрать из палитры или ввести кодом, например #E5484D.</p>
             </section>
             <section class="settings-section" data-settings-panel="appearance" hidden><header class="settings-page-header"><h3>Внешний вид</h3><p>Выберите тему приложения.</p></header>          <div class="theme-selector">
             <button class="header-icon-button theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="Выберите тему" aria-label="Выберите тему">
@@ -1178,7 +1186,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=61"></script>
+    <script src="/release-notes.js?v=62"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1188,7 +1196,7 @@
     <script src="/report-file.js?v=2"></script>
     <script src="/bug-voice-input.js?v=4"></script>
     <script src="/dictation-input.js?v=2"></script>
-    <script src="/app.js?v=137"></script>
+    <script src="/app.js?v=138"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

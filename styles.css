@@ -6246,3 +6246,71 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   .report-publication { width: 100%; align-items: flex-start; }
   .publication-info { justify-content: flex-start; }
 }
+
+/* Align metadata labels and controls even when validation hints are visible. */
+.metadata-grid .field > label,
+.metadata-grid .field > span { display: block; font-size: 12px; line-height: 1.4; }
+.metadata-grid .field input,
+.metadata-grid .field select { display: block; }
+
+/* History actions use the same compact icons and corners as the toolbar. */
+.history-item { grid-template-columns: minmax(200px, 1fr) minmax(170px, .85fr) auto; }
+.history-item-actions { flex-wrap: nowrap; }
+.history-item-actions .history-action {
+  display: grid; grid-template: 22px 33px / 1fr; justify-items: center; align-content: center; gap: 6px;
+  width: 70px; min-height: 73px; padding: 6px 4px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--ink); font-size: 12px; font-weight: 500; line-height: 1.35;
+}
+.history-item-actions .history-action:nth-child(2) { width: 90px; }
+.history-item-actions .history-action .ui-icon { width: 22px; height: 22px; }
+.history-more { border-left: 1px solid var(--line); padding-left: 8px; }
+.history-more-button {
+  display: grid; place-items: center; width: 40px; min-height: 73px; padding: 6px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer;
+}
+.history-more-button .ui-icon { width: 24px; height: 24px; }
+.history-item-actions .history-action:hover:not(:disabled),
+.history-more-button:hover:not(:disabled),
+.history-menu-item:hover:not(:disabled) { background: var(--line-soft); }
+.history-action:focus-visible, .history-more-button:focus-visible,
+.history-menu-item:focus-visible, .history-publication-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.history-action-menu {
+  position: fixed; inset: auto; margin: 0; min-width: 160px; max-width: calc(100vw - 16px);
+  padding: 6px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
+}
+.history-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--red);
+  font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.history-menu-item .ui-icon { width: 18px; height: 18px; }
+.history-item.published > .history-item-actions { grid-column: 3; grid-row: 1 / 3; }
+.history-item .history-publication-info {
+  grid-column: 1 / 3; justify-content: flex-start; align-items: center; gap: 8px 16px;
+  padding-top: 10px; margin-top: 0; border-top: 1px solid var(--line); font-size: 11px;
+}
+.history-publication-links { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.publication-info .history-publication-link {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink);
+  font-size: 12px; line-height: 1.35; text-decoration: none;
+}
+.history-publication-link .ui-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.publication-info .history-publication-link:hover { background: var(--line-soft); }
+.history-publication-dates { display: grid; gap: 3px; min-width: 0; line-height: 1.4; }
+@media (max-width: 1100px) {
+  .history-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .history-item > .history-item-actions,
+  .history-item.published > .history-item-actions { grid-column: 1 / -1; grid-row: auto; justify-content: flex-end; }
+  .history-item.published > .history-item-actions { grid-row: 3; }
+  .history-item .history-publication-info { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (max-width: 600px) {
+  .history-item { grid-template-columns: minmax(0, 1fr); }
+  .history-item.published > .history-item-actions { grid-row: 4; }
+  .history-item .history-publication-info { grid-row: 3; }
+  .history-item-actions .history-action,
+  .history-item-actions .history-action:nth-child(2) { flex: 1; min-width: 0; width: auto; }
+  .history-more { flex: 0 0 auto; }
+}

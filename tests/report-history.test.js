@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const QaReportHistory = require("../history-content");
+const JiraPublication = require("../jira-publication");
 
 function functionSource(file, name) {
   const source = fs.readFileSync(require.resolve(`../${file}`), "utf8");
@@ -46,7 +47,8 @@ function harness(records = new Map(), preferences = new Map()) {
     HISTORY_PROJECT_NAMES_KEY: "qa-report-project-names-v1",
     localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) },
     URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, historySelectionMode: false, historyDeleting: false,
-    historyFilteredReports: [], selectedHistoryReportIds: new Set(), pendingHistoryServerSaves: new Map(), document: { createElement: element },
+    historyFilteredReports: [], selectedHistoryReportIds: new Set(), pendingHistoryServerSaves: new Map(), document: { createElement: element, querySelectorAll: () => [] },
+    window: { QaReportJiraPublication: JiraPublication },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
@@ -64,7 +66,7 @@ function harness(records = new Map(), preferences = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "historyTimestamp", "sortHistoryReports", "historyDatesMarkup", "updateLocalReportComment", "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+    "historyTimestamp", "sortHistoryReports", "historyDatesMarkup", "updateLocalReportComment", "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "createHistoryMoreMenu", "closeHistoryActionMenus", "historyPublication", "publicationInfoMarkup", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -425,4 +427,44 @@ test("pending local edits retain their modification date while cloud metadata is
   assert.equal(reports[0].source, "server");
   assert.equal(reports[0].createdAt, "2026-08-01T10:00:00Z");
   assert.equal(reports[0].updatedAt, local.updatedAt);
+});
+
+function published(reportId = "report") {
+  return { reportId, issueUrl: "https://jira.example/browse/QA-1", format: "wiki",
+    firstPublishedAt: "2026-10-08T08:00:00.000Z", lastPublishedAt: "2026-10-08T09:00:00.000Z",
+    parts: [{ commentId: "10001", bodyHash: "a".repeat(64), publishedAt: "2026-10-08T09:00:00.000Z" }] };
+}
+
+test("history uses confirmed current publication before cloud metadata catches up", async () => {
+  const ctx = harness();
+  ctx.draft.jiraPublication = published();
+  ctx.getServerReports = async () => [{ id: "report", publicId: "abc12345", jiraPublication: null }];
+  await ctx.renderHistoryList();
+  const info = ctx.elements.historyList.children[0].children.at(-1);
+  assert.equal(info.className, "publication-info history-publication-info");
+  assert.match(info.innerHTML, /Комментарий в Jira/);
+  assert.match(info.innerHTML, /focusedCommentId=10001#comment-10001/);
+  assert.match(info.innerHTML, /Опубликован <time datetime="2026-10-08T08:00:00.000Z"/);
+  assert.match(info.innerHTML, /Обновлён <time datetime="2026-10-08T09:00:00.000Z"/);
+});
+
+test("history does not restore removed links from stale nested or cloud metadata", () => {
+  const ctx = harness();
+  ctx.draft.jiraPublication = null;
+  assert.equal(ctx.historyPublication({ id: "report", jiraPublication: published(), document: { jiraPublication: published() } }), null);
+  assert.equal(ctx.historyPublication({ id: "other", jiraPublication: null, document: { jiraPublication: published("other") } }), null);
+  const old = ctx.historyPublication({ id: "other", document: { jiraPublication: published("other") } });
+  assert.equal(old.parts[0].commentId, "10001");
+  assert.equal(ctx.historyPublication({ id: "other", jiraPublication: published("different") }), null);
+});
+
+test("history exposes every confirmed part and marks a partial publication", () => {
+  const ctx = harness();
+  const link = published(); link.parts.push(null, { ...link.parts[0], commentId: "10002" });
+  link.split = true;
+  const markup = ctx.publicationInfoMarkup(link, "report", true);
+  assert.match(markup, /Jira: часть 1/); assert.match(markup, /Jira: часть 3/);
+  assert.doesNotMatch(markup, /Jira: часть 2/);
+  assert.match(markup, /focusedCommentId=10002#comment-10002/);
+  assert.match(markup, /Опубликован частично/);
 });

@@ -48,6 +48,19 @@
     return link && issue && link.issueUrl === issue.issueUrl ? link : null;
   }
 
+  function sameComments(value, expected) {
+    const current = normalize(value, expected?.reportId), previous = normalize(expected, expected?.reportId);
+    return Boolean(current && previous && current.issueUrl === previous.issueUrl
+      && current.format === previous.format && current.parts.length === previous.parts.length
+      && previous.parts.every((part, index) => !part || part.commentId === current.parts[index]?.commentId));
+  }
+
+  function missingComment(error) {
+    // Existing Connect releases send this dedicated message without an error code.
+    // A generic HTTP 404 can also mean a missing route, task or connection.
+    return error?.status === 404 && error.message === "Связанный комментарий удалён или недоступен. Можно опубликовать отчёт заново.";
+  }
+
   function canonical(value) {
     if (typeof value === "string") return value;
     if (Array.isArray(value)) return value.map(canonical);
@@ -100,5 +113,5 @@
       commentUrl: commentUrl(String(issue.issueUrl), id) };
   }
 
-  return { target, commentUrl, normalize, matching, fingerprint, updateComment };
+  return { target, commentUrl, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
 });

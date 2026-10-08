@@ -4685,6 +4685,7 @@ function wait(ms, signal) {
 }
 
 function friendlyJiraError(error) {
+  if (error?.publicationLinkCleared) return error.message;
   if (error?.name === "AbortError") return "Публикация отменена";
   if (error?.code === "ATTACHMENT_LIMIT") return error.message;
   const message = String(error?.message || "");
@@ -5123,9 +5124,15 @@ async function rememberJiraPublication(context, parts, split) {
   const link = api.normalize({ ...context, parts, split,
     firstPublishedAt: context.firstPublishedAt || now, lastPublishedAt: now }, context.reportId);
   if (!link) return;
+  await writeJiraPublication(context, link);
+}
+
+async function writeJiraPublication(context, link, expected = null) {
+  const api = window.QaReportJiraPublication;
   if (draft.reportId === context.reportId) {
+    if (expected && !api.sameComments(draft.jiraPublication, expected)) return false;
     draft.jiraPublication = link;
-    // Undo changes report content; it must not forget an external publication.
+    // Undo changes report content; it must not restore a deleted external comment.
     const preserve = text => { const value = JSON.parse(text); value.jiraPublication = api.normalize(link, value.reportId); return JSON.stringify(value); };
     historyCurrent = preserve(historyCurrent);
     undoStack = undoStack.map(preserve); redoStack = redoStack.map(preserve);
@@ -5133,15 +5140,34 @@ async function rememberJiraPublication(context, parts, split) {
     clearTimeout(saveTimer);
     forceLocalDraftSave = true;
     renderPublicationState();
-    if (!await saveDraft({ collect: false })) throw new Error("Отчёт отправлен в Jira, но связь не удалось сохранить. Ссылка доступна под кнопкой публикации — сохраните её перед закрытием страницы.");
+    if (!await saveDraft({ collect: false })) throw new Error(link ? "Отчёт отправлен в Jira, но связь не удалось сохранить. Ссылка доступна под кнопкой публикации — сохраните её перед закрытием страницы." : "Связь сброшена, но изменение не удалось сохранить. Сохраните отчёт перед закрытием страницы.");
     renderPublicationState();
   } else {
     // A response may arrive after switching reports. Patch only the original's metadata.
     const record = await getReportRecord(context.reportId);
-    if (!record) throw new Error("Отчёт отправлен в Jira, но исходный отчёт уже недоступен в истории.");
+    if (draft.reportId === context.reportId) return writeJiraPublication(context, link, expected);
+    if (!record) throw new Error(link ? "Отчёт отправлен в Jira, но исходный отчёт уже недоступен в истории." : "Исходный отчёт уже недоступен в истории.");
+    if (expected && !api.sameComments(record.document.jiraPublication, expected)) return false;
     record.document.jiraPublication = link;
+    record.document.revision = (Number(record.document.revision) || 0) + 1;
+    record.document.updatedAt = record.updatedAt = new Date().toISOString();
+    record.document.lastSavedBy = tabId; record.document.lastSavedClientId = reportClientId;
+    record.historyContentFingerprint = QaReportHistory.contentFingerprint(record.document);
     await dbTransaction("readwrite", store => store.put(record));
     queueServerReportSave(record);
+  }
+  return true;
+}
+
+async function updatePublishedComment(link, request) {
+  try { return await request(); }
+  catch (error) {
+    if (window.QaReportJiraPublication.missingComment(error)
+      && await writeJiraPublication(link, null, link)) {
+      error.publicationLinkCleared = true;
+      error.message = "Связанный комментарий не найден. Связь и даты публикации удалены. Нажмите «Опубликовать отчёт», чтобы создать новый комментарий.";
+    }
+    throw error;
   }
 }
 
@@ -5154,15 +5180,15 @@ async function updateLinkedJiraComments(settings, issue, comment, link, signal, 
   for (let index = 0; index < comments.length; index++) {
     const part = parts[index];
     if (!part) continue;
-    await publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
+    await updatePublishedComment(link, () => publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
       token: typeof jiraSecret === "undefined" ? "" : jiraSecret, comment: comments[index],
-      commentId: part.commentId, expectedBodyHash: part.bodyHash, checkOnly: true }, { signal });
+      commentId: part.commentId, expectedBodyHash: part.bodyHash, checkOnly: true }, { signal }));
   }
   for (let index = 0; index < comments.length; index++) {
     const part = parts[index];
-    const result = part ? await publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
+    const result = part ? await updatePublishedComment(link, () => publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
       token: typeof jiraSecret === "undefined" ? "" : jiraSecret, comment: comments[index],
-      commentId: part.commentId, expectedBodyHash: part.bodyHash }, { signal })
+      commentId: part.commentId, expectedBodyHash: part.bodyHash }, { signal }))
       : await postJiraComment(settings, issue, comments[index], signal);
     if (!result.verified || !result.commentId) throw new Error("Jira не подтвердила обновление отчёта");
     results.push(result);

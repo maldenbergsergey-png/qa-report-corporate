@@ -62,3 +62,22 @@ test("ADF key order is ignored but text spaces remain significant", () => {
   assert.equal(api.fingerprint({ version: 1, type: "doc" }), api.fingerprint({ type: "doc", version: 1 }));
   assert.notEqual(api.fingerprint({ text: "word " }), api.fingerprint({ text: "word" }));
 });
+
+
+test("only a dedicated missing-comment response clears a binding; other failures preserve it", () => {
+  const message = "Связанный комментарий удалён или недоступен. Можно опубликовать отчёт заново.";
+  assert.equal(api.missingComment({ status: 404, message }), true);
+  for (const status of [0, 401, 403, 409, 429, 502, 504]) assert.equal(api.missingComment({ status, message }), false);
+  assert.equal(api.missingComment({ status: 404, message: "Task or route not found" }), false);
+  assert.equal(api.missingComment(null), false);
+});
+
+test("a stale missing-comment response cannot clear a new publication or a different report", () => {
+  const link = { reportId: "report", issueUrl: "https://jira.example/browse/QA-1", format: "wiki", parts: [{ commentId: "123", bodyHash: api.fingerprint("body") }, null], split: true };
+  assert.equal(api.sameComments(link, link), true);
+  assert.equal(api.sameComments({ ...link, lastPublishedAt: new Date().toISOString(), parts: [{ ...link.parts[0], bodyHash: api.fingerprint("updated") }, { commentId: "124" }] }, link), true);
+  assert.equal(api.sameComments({ ...link, parts: [{ commentId: "456" }, null] }, link), false);
+  assert.equal(api.sameComments({ ...link, reportId: "another" }, link), false);
+  assert.equal(api.sameComments({ ...link, issueUrl: "https://jira.example/browse/QA-2" }, link), false);
+  assert.equal(api.sameComments(null, link), false);
+});

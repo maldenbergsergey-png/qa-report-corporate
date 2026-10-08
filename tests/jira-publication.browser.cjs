@@ -37,7 +37,7 @@ let child, browser;
     const { createSessionToken } = require(path.join(root, 'auth'));
     await context.addCookies([{ name: 'query-port-session', value: createSessionToken('qa@example.com', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
   }
-  let creates = 0, updates = 0, preflights = 0;
+  let creates = 0, updates = 0, preflights = 0, failureStatus = 0;
   const comments = new Map();
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -47,6 +47,7 @@ let child, browser;
       let id, publishedAt;
       if (url.pathname.endsWith('/update-comment')) {
         id = String(body.commentId);
+        if (failureStatus || !comments.has(id)) return route.fulfill({ status: failureStatus || 404, json: { error: failureStatus ? 'Synthetic Jira failure' : 'Связанный комментарий удалён или недоступен. Можно опубликовать отчёт заново.' } });
         assert.equal(api.fingerprint(comments.get(id)), body.expectedBodyHash);
         if (body.checkOnly) { preflights++; return route.fulfill({ json: { ok: true, verified: true, commentId: id } }); }
         updates++; publishedAt = '2026-10-08T10:00:00.000Z';
@@ -186,12 +187,72 @@ let child, browser;
   assert.equal(scrolled.topbarReceivesPointer, true, 'Publication action must stay behind the sticky header');
   if (screenshots) await page.screenshot({ animations: 'disabled', path: path.join(screenshots, `${corporate ? 'corporate' : 'public'}-scrolled-header.png`) });
   await page.evaluate(() => { document.querySelector('#publicationScrollFixture').remove(); window.scrollTo(0, 0); });
+  // The current binding survives access and temporary failures.
+  const beforeMissing = await page.evaluate(async () => {
+    cloudHistoryEnabled = true;
+    await saveDraft({ collect: false });
+    await Promise.all([...(pendingHistoryServerSaves.get(draft.reportId) || [])]);
+    return { link: structuredClone(draft.jiraPublication), record: await getReportRecord(draft.reportId) };
+  });
+  for (const status of [403, 502]) {
+    failureStatus = status;
+    await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+    await page.waitForFunction(() => !publishInProgress);
+    assert.deepEqual(await page.evaluate(() => draft.jiraPublication), beforeMissing.link);
+    assert.equal(await page.locator('#publishButton').innerText(), 'Обновить отчёт');
+    await page.click('#publishCancelButton');
+    await page.evaluate(() => closeJiraSettings());
+  }
+  failureStatus = 0;
+  await page.locator('.cell-editor').first().fill('Правка перед удалением комментария');
+  await page.waitForFunction(() => undoStack.length > 0 && historyCurrent === serializeDraft());
+  const oldCreates = creates, oldUpdates = updates;
+  comments.delete(beforeMissing.link.parts[0].commentId);
+  const detectedAfter = Date.now();
+  await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  await page.waitForFunction(() => !publishInProgress);
+  assert.equal(await page.evaluate(() => draft.jiraPublication), null);
+  assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать отчёт');
+  assert.equal(await page.locator('#publishExportButton').innerText(), 'Опубликовать отчёт');
+  assert.equal(await page.locator('#publicationInfo').isVisible(), false);
+  assert.match(await page.locator('#publishErrorText').innerText(), /Связь и даты публикации удалены/);
+  assert.equal(creates, oldCreates); assert.equal(updates, oldUpdates);
+  await page.click('#publishCancelButton');
+  const missingRecord = await page.evaluate(() => getReportRecord(draft.reportId));
+  assert.equal(missingRecord.document.jiraPublication, null);
+  assert.equal(missingRecord.createdAt, beforeMissing.record.createdAt);
+  assert.ok(Date.parse(missingRecord.updatedAt) >= detectedAfter);
+  await page.waitForFunction(async () => (await reportApi('/api/reports/' + draft.reportId)).report.document.jiraPublication === null);
+  const serverMissing = await page.evaluate(async () => (await reportApi('/api/reports')).reports.find(r => r.id === draft.reportId));
+  assert.equal(serverMissing.jiraPublication, null);
+  await page.evaluate(() => openHistory());
+  assert.equal(await page.locator('.history-publication-info').count(), 0);
+  await page.evaluate(() => closeHistory());
+  await page.evaluate(() => undo());
+  assert.equal(await page.evaluate(() => draft.jiraPublication), null);
+  await page.evaluate(() => redo());
+  assert.equal(await page.evaluate(() => draft.jiraPublication), null);
+  await page.reload(); await page.waitForSelector('.cell-editor'); await prepare();
+  assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать отчёт');
+  assert.equal(await page.locator('#publicationInfo').isVisible(), false);
+  // Publishing again is an explicit click and starts fresh publication dates.
+  await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  await page.waitForFunction(() => !publishInProgress);
+  const replacement = await page.evaluate(() => structuredClone(draft.jiraPublication));
+  assert.equal(creates, oldCreates + 1);
+  assert.notEqual(replacement.parts[0].commentId, beforeMissing.link.parts[0].commentId);
+  assert.equal(replacement.firstPublishedAt, replacement.lastPublishedAt);
+  assert.notEqual(replacement.firstPublishedAt, beforeMissing.link.firstPublishedAt);
+  assert.doesNotMatch(await page.locator('#publicationInfo').innerText(), /Обновлён/);
+  assert.equal(await page.evaluate(previous => writeJiraPublication(previous, null, previous), beforeMissing.link), false);
+  assert.equal(await page.evaluate(() => draft.jiraPublication.parts[0].commentId), replacement.parts[0].commentId);
+  await page.click('#publishCancelButton');
   await page.evaluate(() => openHistory());
   await page.getByRole('button', { name: 'Копия', exact: true }).first().click();
   await page.waitForFunction(() => draft.jiraPublication === null);
   assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать отчёт');
   assert.deepEqual(errors, []);
-  console.log(`${corporate ? 'Corporate' : 'Public'} publication UI: create, update, new comment, persistence, history, copy and responsive layout OK`);
+  console.log(`${corporate ? 'Corporate' : 'Public'} publication UI: create, update, new comment, persistence, history, copy, responsive layout, missing-comment reset and explicit replacement OK`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   await browser?.close(); child?.kill();
   if (child) await new Promise(resolve => child.once('exit', resolve));

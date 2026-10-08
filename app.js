@@ -2,6 +2,7 @@ const STORAGE_KEY = "qa-report-editor-draft-v2";
 const DRAFT_LOCATION_KEY = "qa-report-draft-location-v1";
 const LOCAL_DRAFT_COPY_LIMIT = 1024 * 1024;
 const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
+const HISTORY_PROJECT_NAMES_KEY = "qa-report-project-names-v1";
 const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
@@ -320,6 +321,8 @@ const elements = {
   historyModal: document.querySelector("#historyModal"),
   closeHistoryButton: document.querySelector("#closeHistoryButton"),
   historySearch: document.querySelector("#historySearch"),
+  historyProjectFilter: document.querySelector("#historyProjectFilter"),
+  projectSettingsList: document.querySelector("#projectSettingsList"),
   historyUsage: document.querySelector("#historyUsage"),
   historyList: document.querySelector("#historyList"),
   clearHistoryButton: document.querySelector("#clearHistoryButton"),
@@ -440,6 +443,8 @@ let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
 let historyRenderRequestId = 0;
 let historyLoading = false;
+let projectSettingsRequestId = 0;
+let projectSettingsLoaded = false;
 
 function syncBodyModalOverflow() {
   document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open]")
@@ -947,6 +952,79 @@ function issueKeyFromUrl(value) {
 function reportIssueLabel(report) {
   const issueUrl = report.document?.issueUrl ?? (report.issueUrl || report.issueKey || "");
   return issueKeyFromUrl(issueUrl) || String(issueUrl).trim() || "Без задачи";
+}
+
+function reportProjectKey(report) {
+  const issueKey = issueKeyFromUrl(reportIssueLabel(report));
+  return issueKey ? issueKey.replace(/-\d+$/, "") : "";
+}
+
+function loadProjectNames() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HISTORY_PROJECT_NAMES_KEY) || "{}");
+    return Object.fromEntries(Object.entries(saved || {}).filter(([key, name]) =>
+      /^[A-Z][A-Z0-9_]*$/.test(key) && typeof name === "string" && name.trim(),
+    ).map(([key, name]) => [key, name.trim().slice(0, 120)]));
+  } catch {
+    return {};
+  }
+}
+
+function historyProjectKeys(reports) {
+  return [...new Set(reports.map(reportProjectKey).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function renderHistoryProjectFilter(reports, names) {
+  const selected = elements.historyProjectFilter.value;
+  const keys = historyProjectKeys(reports);
+  elements.historyProjectFilter.innerHTML = '<option value="">Все проекты</option>'
+    + keys.map(key => `<option value="${escapeHtml(key)}">${escapeHtml(names[key] ? `${names[key]} · ${key}` : key)}</option>`).join("")
+    + (reports.some(report => !reportProjectKey(report)) ? '<option value="none">Без проекта</option>' : "");
+  elements.historyProjectFilter.value = keys.includes(selected) || selected === "none" && reports.some(report => !reportProjectKey(report))
+    ? selected : "";
+}
+
+function resetProjectSettingsForm() {
+  projectSettingsRequestId++;
+  projectSettingsLoaded = false;
+  elements.projectSettingsList.innerHTML = "";
+}
+
+async function fillProjectSettingsForm() {
+  const requestId = ++projectSettingsRequestId;
+  projectSettingsLoaded = true;
+  elements.projectSettingsList.innerHTML = '<p class="settings-note" role="status">Загружаем проекты…</p>';
+  let reports;
+  try {
+    reports = await getAllHistoryReports();
+  } catch {
+    if (requestId !== projectSettingsRequestId) return;
+    projectSettingsLoaded = false;
+    elements.projectSettingsList.innerHTML = '<p class="settings-note" role="status">Не удалось загрузить проекты.</p><button class="button button-secondary" type="button" data-retry-projects>Повторить</button>';
+    elements.projectSettingsList.querySelector("[data-retry-projects]").addEventListener("click", fillProjectSettingsForm);
+    return;
+  }
+  if (requestId !== projectSettingsRequestId) return;
+  const names = loadProjectNames();
+  const keys = historyProjectKeys([...reports, draft]);
+  elements.projectSettingsList.innerHTML = keys.length
+    ? keys.map(key => `<label class="project-settings-row"><code>${escapeHtml(key)}</code><input type="text" data-project-key="${escapeHtml(key)}" aria-label="Название проекта ${escapeHtml(key)}" maxlength="120" placeholder="${escapeHtml(key)}" value="${escapeHtml(names[key] || "")}" /></label>`).join("")
+    : '<p class="settings-note" role="status">Проектов пока нет. Укажите ключ или ссылку на задачу в чек-листе — проект появится здесь автоматически.</p>';
+}
+
+function saveProjectSettings() {
+  const inputs = elements.projectSettingsList.querySelectorAll("[data-project-key]");
+  if (!inputs.length) return;
+  const names = loadProjectNames();
+  inputs.forEach(input => {
+    const key = input.dataset.projectKey;
+    const name = input.value.trim().slice(0, 120);
+    if (name) names[key] = name;
+    else delete names[key];
+    input.value = name;
+  });
+  localStorage.setItem(HISTORY_PROJECT_NAMES_KEY, JSON.stringify(names));
+  if (!elements.historyModal.hidden) renderHistoryList().catch(() => {});
 }
 
 async function getReportMetadata(id) {
@@ -4169,7 +4247,8 @@ function saveReportIdentitySettings() {
 }
 
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "environments", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  const selected = ["checklist", "columns", "projects", "environments", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  if (selected === "projects" && !projectSettingsLoaded) fillProjectSettingsForm();
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
     button.classList.toggle("active", active);
@@ -4336,6 +4415,7 @@ function openJiraSettings() {
   fillChecklistSettingsForm();
   fillEnvironmentSettingsForm();
   fillPinnedColumnsForm();
+  resetProjectSettingsForm();
   setSettingsSection("checklist");
   setSettingsSavedState(false);
   setReportIdentityState(
@@ -4351,12 +4431,14 @@ function openJiraSettings() {
 }
 
 function closeJiraSettings() {
+  projectSettingsRequestId++;
   elements.jiraSettingsModal.hidden = true;
   syncBodyModalOverflow();
 }
 
 function saveJiraSettings() {
   try {
+    saveProjectSettings();
     saveEnvironmentSettings();
     saveReportIdentitySettings();
     if (environmentSettingsWorkspace !== reportWorkspaceKey) fillEnvironmentSettingsForm();
@@ -5069,13 +5151,18 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
   }
   if (requestId !== historyRenderRequestId) return;
   setHistoryLoading(false);
+  const names = loadProjectNames();
+  renderHistoryProjectFilter(reports, names);
+  const selectedProject = elements.historyProjectFilter.value;
   const query = elements.historySearch.value.trim().toLowerCase();
-  const filtered = reports.filter((report) =>
-    `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""}`.toLowerCase().includes(query),
-  );
+  const filtered = reports.filter((report) => {
+    const projectKey = reportProjectKey(report);
+    const matchesProject = !selectedProject || (selectedProject === "none" ? !projectKey : projectKey === selectedProject);
+    return matchesProject && `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""} ${names[projectKey] || projectKey}`.toLowerCase().includes(query);
+  });
   const serverCount = reports.filter((report) => report.source === "server").length;
   const localCount = reports.length - serverCount;
-  elements.historyUsage.textContent = `Всего: ${reports.length} · Облако: ${serverCount} · Локально: ${localCount}`;
+  elements.historyUsage.textContent = `${selectedProject || query ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · Облако: ${serverCount} · Локально: ${localCount}`;
   elements.historyList.innerHTML = "";
   if (!filtered.length) {
     const title = reports.length ? "Ничего не найдено" : "Отчётов пока нет";
@@ -5094,7 +5181,9 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     info.className = "history-item-info";
     const publicId = reportPublicId(report);
     const issueLabel = reportIssueLabel(report);
-    info.innerHTML = `<h3>${escapeHtml(issueLabel)}</h3><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
+    const projectKey = reportProjectKey(report);
+    const projectName = names[projectKey] || projectKey || "Без проекта";
+    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label" title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";
     commentField.rows = 2;
@@ -8841,6 +8930,9 @@ elements.historyButton.addEventListener("click", openHistory);
 elements.closeHistoryButton.addEventListener("click", closeHistory);
 elements.historySearch.addEventListener("input", () => {
   if (!historyLoading) renderHistoryList().catch(() => {});
+});
+elements.historyProjectFilter.addEventListener("change", () => {
+  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
 });
 elements.saveHistorySnapshotButton.addEventListener("click", async () => {
   await saveReportSnapshot("manual");

@@ -38,14 +38,16 @@ function element() {
   };
 }
 
-function harness(records = new Map()) {
+function harness(records = new Map(), preferences = new Map()) {
   const ctx = vm.createContext({
+    HISTORY_PROJECT_NAMES_KEY: "qa-report-project-names-v1",
+    localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) },
     URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, document: { createElement: element },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
       historyModal: { hidden: true }, clearHistoryButton: element(), saveHistorySnapshotButton: element(),
-      introEditor: element(), sections: element(), historySearch: element(), historyList: element(), historyUsage: element(),
+      introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historyList: element(), historyUsage: element(),
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
     clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
@@ -56,7 +58,7 @@ function harness(records = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -201,4 +203,58 @@ test("empty and failed loads leave loading and restore the history controls", as
   assert.match(ctx.elements.historyList.innerHTML, /data-retry-history/);
   assert.equal(ctx.historyLoading, false);
   assert.equal(ctx.elements.saveHistorySnapshotButton.disabled, false);
+});
+
+
+test("projects deduplicate legacy, local and cloud keys while cleared document tasks stay unassigned", async () => {
+  const ctx = harness();
+  const records = [
+    { issueKey: "SHOP-1" },
+    { document: { issueUrl: "https://tasks.example.test/project/Task/shop-2" } },
+    { issueUrl: "https://jira.example.test/browse/APP_2-35" },
+    { issueKey: "SHOP-9", document: { issueUrl: "" } },
+    { issueUrl: "https://tasks.example.test/task/123" },
+  ];
+  assert.equal(JSON.stringify(ctx.historyProjectKeys(records)), '["APP_2","SHOP"]');
+  assert.equal(ctx.reportProjectKey(records[3]), "");
+  assert.equal(ctx.reportProjectKey(records[4]), "");
+});
+
+test("project and text filters combine, custom names are searchable and displayed safely", async () => {
+  const records = [historyRecord("SHOP-1"), historyRecord("SHOP-2"), historyRecord("APP-3"), historyRecord("")];
+  const names = { SHOP: 'Магазин <img src=x onerror=alert(1)>', APP: "Application" };
+  const ctx = harness(new Map(records.map(record => [record.id, record])),
+    new Map([["qa-report-project-names-v1", JSON.stringify(names)]]));
+  ctx.elements.historyProjectFilter.value = "SHOP";
+  ctx.elements.historySearch.value = "магазин";
+  await ctx.renderHistoryList();
+  assert.equal(ctx.elements.historyList.children.length, 2);
+  assert.match(ctx.elements.historyUsage.textContent, /Показано: 2 из 4/);
+  assert.match(ctx.elements.historyList.children[0].children[0].innerHTML, /Магазин &lt;img/);
+  assert.doesNotMatch(ctx.elements.historyProjectFilter.innerHTML, /<img/);
+  ctx.elements.historySearch.value = "shop-2";
+  await ctx.renderHistoryList();
+  assert.equal(historyLabel(ctx), "SHOP-2");
+  ctx.elements.historyProjectFilter.value = "APP";
+  await ctx.renderHistoryList();
+  assert.match(ctx.elements.historyList.innerHTML, /Ничего не найдено/);
+  ctx.elements.historyProjectFilter.value = "none";
+  ctx.elements.historySearch.value = "";
+  await ctx.renderHistoryList();
+  assert.equal(ctx.elements.historyList.children.length, 1);
+  assert.equal(historyLabel(ctx), "Без задачи");
+  ctx.elements.historyProjectFilter.value = "";
+  await ctx.renderHistoryList();
+  assert.equal(ctx.elements.historyList.children.length, 4);
+});
+
+test("removed projects reset the active filter and malformed saved names fall back to keys", async () => {
+  const preferences = new Map([["qa-report-project-names-v1", "invalid-json"]]);
+  const ctx = harness(new Map([["APP-3", historyRecord("APP-3")]]), preferences);
+  ctx.elements.historyProjectFilter.value = "SHOP";
+  await ctx.renderHistoryList();
+  assert.equal(ctx.elements.historyProjectFilter.value, "");
+  assert.equal(historyLabel(ctx), "APP-3");
+  preferences.set("qa-report-project-names-v1", JSON.stringify({ APP: 5, SHOP: " ", "<img>": "bad", QA: " Проверки " }));
+  assert.equal(JSON.stringify(ctx.loadProjectNames()), '{"QA":"Проверки"}');
 });

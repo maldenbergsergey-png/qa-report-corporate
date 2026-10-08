@@ -79,9 +79,12 @@ async function main() {
   await page.press('#environment', 'Enter');
   assert.equal(await page.locator('#environment').inputValue(), 'Custom free text');
   assert.equal(await environmentMenu.isVisible(), false);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('qa-report-editor-draft-v2') || '{}').environment === 'Custom free text');
   await page.reload(); await page.waitForSelector('.cell-editor');
+  await page.evaluate(() => openReportFromRoute());
   assert.equal(await page.locator('#environment').inputValue(), 'Custom free text', 'manual text survives reload');
   await page.click('#environmentToggle'); await environmentMenu.locator('[data-value="STAGE"]').click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('qa-report-editor-draft-v2') || '{}').environment === 'STAGE');
   await page.reload(); await page.waitForSelector('.cell-editor');
   assert.equal(await page.locator('#environment').inputValue(), 'STAGE', 'menu choice survives reload');
   if (process.env.QA_REPORT_SCREENSHOTS) {
@@ -127,7 +130,7 @@ async function main() {
   assert.equal(await touchPage.locator('#environment').inputValue(), 'QA-29');
   await touchContext.close();
   await page.click('#settingsButton');
-  const panels = corporate ? ['checklist', 'columns', 'environments', 'history', 'connect', 'jira', 'appearance'] : ['checklist', 'columns', 'environments', 'history', 'files', 'bugs', 'connect', 'jira', 'eva', 'appearance'];
+  const panels = corporate ? ['checklist', 'columns', 'environments', 'projects', 'history', 'connect', 'jira', 'appearance'] : ['checklist', 'columns', 'environments', 'projects', 'history', 'files', 'bugs', 'connect', 'jira', 'eva', 'appearance'];
   assert.deepEqual(await page.locator('.settings-sidebar [data-settings-section]').evaluateAll(nodes => nodes.map(n => n.dataset.settingsSection)), panels);
   assert.equal(await page.locator('[data-settings-section="pinning"]').count(), 0);
   assert.equal(await page.locator('[data-settings-panel="pinning"]').count(), 0);

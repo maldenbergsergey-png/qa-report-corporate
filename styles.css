@@ -6212,3 +6212,23 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .metadata-grid .field-error { margin: 0; color: var(--red); font-size: 12px; line-height: 1.4; }
 .metadata-grid #environment[aria-invalid="true"],
 .metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+
+/* Publication belongs to the current report, above its metadata. */
+.report-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.report-publication { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 100%; }
+.report-publication-buttons { display: flex; position: relative; }
+.report-publication-buttons > #publishButton { border-radius: 8px 0 0 8px; box-shadow: none; }
+:root .report-publication-buttons .publication-menu-trigger { background: var(--primary); color: #fff; border-radius: 0 8px 8px 0; border-left: 1px solid rgba(255,255,255,.3); min-width: 38px; padding: 10px; }
+:root .report-publication-buttons .publication-menu-trigger:hover,
+:root .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: var(--primary-hover); }
+.report-publication-buttons .header-dropdown-menu { position: absolute; top: calc(100% + 6px); right: 0; left: auto; }
+.publication-info { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; color: var(--muted); font-size: 11px; max-width: 100%; }
+.publication-info[hidden] { display: none; }
+.publication-info a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.publication-info time { white-space: nowrap; }
+.history-publication-info { justify-content: flex-start; margin-top: 6px; }
+.publication-incomplete { color: var(--warning, var(--muted)); }
+@media (max-width: 600px) {
+  .report-publication { width: 100%; align-items: flex-start; }
+  .publication-info { justify-content: flex-start; }
+}

@@ -25,6 +25,7 @@ const {
 } = require("./auth");
 
 const AttachmentLimits = require("./attachment-limits");
+const JiraPublication = require("./jira-publication");
 
 const ROOT = __dirname;
 
@@ -72,7 +73,7 @@ const MAX_ATTACHMENT_FILE = readSizeMb("QA_REPORT_MAX_ATTACHMENT_MB", 50);
 const ATTACHMENT_LIMITS = { ...AttachmentLimits.defaults, appMaxFileBytes: MAX_ATTACHMENT_FILE, requestMaxBytes: MAX_BODY };
 const localImportService = createLocalImportService({ maxFileBytes: MAX_ATTACHMENT_FILE });
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
-const API_REVISION = 8;
+const API_REVISION = 9;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
@@ -513,6 +514,7 @@ function ensurePublicId(owner, preferred = "", currentId = "") {
 
 function normalizedReportContent(document) {
   const copy = JSON.parse(JSON.stringify(document || {}));
+  copy.jiraPublication = JiraPublication.normalize(copy.jiraPublication, copy.reportId);
   delete copy.revision;
   delete copy.updatedAt;
   delete copy.lastSavedBy;
@@ -550,6 +552,7 @@ function stripDangerousReportHtml(value) {
 
 function sanitizeReportDocumentForServer(document) {
   const copy = JSON.parse(JSON.stringify(document || {}));
+  copy.jiraPublication = JiraPublication.normalize(copy.jiraPublication, copy.reportId);
   if (typeof copy.intro === "string") {
     copy.intro = stripDangerousReportHtml(copy.intro);
     if (!STORE_REPORT_ATTACHMENTS) copy.intro = stripReportAttachmentsFromHtml(copy.intro);
@@ -632,6 +635,7 @@ function reportRecordFromRow(row, includeDocument = false) {
     reason: row.reason,
     source: "server",
   };
+  record.jiraPublication = JiraPublication.normalize(JSON.parse(row.document_json || "{}").jiraPublication, row.id);
   if (includeDocument) {
     record.document = sanitizeReportDocumentForServer(JSON.parse(row.document_json));
     if (record.publicId) record.document.publicId = record.publicId;
@@ -1198,9 +1202,21 @@ async function handleJiraComment(request, response) {
     verified: true,
     verificationSource,
     commentId,
+    bodyHash: JiraPublication.fingerprint(verifiedComment.body ?? body.comment.body),
+    publishedAt: new Date().toISOString(),
     issueUrl: issueUrl.toString(),
     commentUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}?focusedCommentId=${encodeURIComponent(commentId)}#comment-${encodeURIComponent(commentId)}`,
   });
+}
+
+async function handleJiraCommentUpdate(request, response) {
+  const body = await readJson(request);
+  const connection = jiraConnection(request, body);
+  const issue = parseIssueReference(connection, body.issueUrl);
+  const format = connection.type === "cloud" ? "adf" : "wiki";
+  if (body.comment?.format !== format || !body.comment?.body) throw new Error(`Для выбранного подключения требуется формат комментария ${format}`);
+  const result = await JiraPublication.updateComment(connection, issue, body, jiraFetch);
+  sendJson(response, 200, { ...result, apiRevision: API_REVISION });
 }
 
 async function handleJiraImportComment(request, response) {
@@ -1841,6 +1857,11 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && requestPath === "/api/jira/comment") {
       audit(request, response, "jira_comment_create");
       await handleJiraComment(request, response);
+      return;
+    }
+    if (request.method === "POST" && requestPath === "/api/jira/update-comment") {
+      audit(request, response, "jira_comment_update");
+      await handleJiraCommentUpdate(request, response);
       return;
     }
     if (request.method === "POST" && requestPath === "/api/jira/import-comment") {

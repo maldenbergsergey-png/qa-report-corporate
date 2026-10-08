@@ -56,7 +56,7 @@ function harness(records = new Map(), preferences = new Map()) {
       introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historySort: element(), historyList: element(), historyUsage: element(),
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
-    clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
+    publicationInfoMarkup: () => "", clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
     getReportRecord: async id => structuredClone(records.get(id)),
     dbTransaction: async (mode, action) => action({ put: record => records.set(record.id, structuredClone(record)) }),
     trimReportHistory: async () => {}, queueServerReportSave() {},

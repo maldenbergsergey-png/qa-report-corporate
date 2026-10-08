@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=133" />
+    <link rel="stylesheet" href="/styles.css?v=134" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -164,10 +164,7 @@
             <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" aria-label="Экспорт" hidden>
               <div class="header-menu-title">Экспорт</div>
               <div class="header-menu-label">Jira</div>
-              <button class="header-dropdown-item" id="publishButton" type="button" role="menuitem">
-                <svg class="ui-icon jira-logo primary-action-icon" aria-hidden="true"><use href="#icon-jira"></use></svg>
-                <span class="primary-action-label">Отправить в Jira</span>
-              </button>
+              <button class="header-dropdown-item" id="publishExportButton" type="button" role="menuitem"><svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg><span class="primary-action-label">Опубликовать отчёт</span></button>
               <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
                 <span>Копировать для Jira</span>
@@ -226,8 +223,17 @@
       <main class="workspace">
         <section class="report-card">
           <div class="report-heading">
-            <div class="eyebrow">Отчёт о тестировании</div>
-            <h1>Чек-лист</h1>
+            <div><div class="eyebrow">Отчёт о тестировании</div><h1>Чек-лист</h1></div>
+            <div class="report-publication">
+              <div class="report-publication-buttons header-dropdown">
+                <button class="button button-primary" id="publishButton" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg><span class="primary-action-label">Опубликовать отчёт</span></button>
+                <button class="button button-primary header-dropdown-trigger publication-menu-trigger" id="publicationMenuButton" type="button" aria-label="Другие действия публикации" aria-haspopup="menu" aria-expanded="false" aria-controls="publicationMenu"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+                <div class="header-dropdown-menu header-dropdown-menu-right" id="publicationMenu" role="menu" aria-label="Публикация отчёта" hidden>
+                  <button class="header-dropdown-item" id="publishAgainButton" type="button" role="menuitem">Опубликовать заново</button>
+                </div>
+              </div>
+              <div class="publication-info" id="publicationInfo" hidden></div>
+            </div>
           </div>
 
           <div class="metadata-grid">
@@ -1194,7 +1200,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=64"></script>
+    <script src="/release-notes.js?v=65"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1205,7 +1211,8 @@
     <script src="/bug-voice-input.js?v=4"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
-    <script src="/app.js?v=140"></script>
+    <script src="/jira-publication.js?v=1"></script>
+    <script src="/app.js?v=141"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

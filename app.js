@@ -14,7 +14,7 @@ const DB_NAME = "qa-report-editor";
 const DB_VERSION = 1;
 const REPORT_STORE = "reports";
 const HISTORY_LIMIT = 50;
-const REQUIRED_API_REVISION = 8;
+const REQUIRED_API_REVISION = 9;
 const ATTACHMENT_UPLOAD_BATCH_SIZE = 1;
 const { parseJiraMarkup, normalizeStatus, stripSectionNumber } = window.QaReportJiraImport;
 const nativeFetch = window.fetch.bind(window);
@@ -570,6 +570,7 @@ function normalizeDraft(value) {
     reportId: parsed.reportId || crypto.randomUUID(),
     publicId,
     schemaVersion: 3,
+    jiraPublication: window.QaReportJiraPublication.normalize(parsed.jiraPublication, parsed.reportId),
     revision: Number(parsed.revision) || 0,
     updatedAt: parsed.updatedAt || new Date(0).toISOString(),
     lastSavedBy: parsed.lastSavedBy || "",
@@ -1533,7 +1534,7 @@ async function getAllHistoryReports() {
       const local = localById.get(report.id);
       // A local edit may still be uploading when the history list is requested.
       return local && historyTimestamp(local, "updatedAt") > historyTimestamp(report, "updatedAt")
-        ? { ...report, updatedAt: local.updatedAt } : report;
+        ? { ...report, updatedAt: local.updatedAt, jiraPublication: local.document?.jiraPublication } : report;
     }),
     ...localReports
       .filter((report) => !seen.has(report.id))
@@ -2087,6 +2088,7 @@ function createConflictCopy(sourceDraft, label, historyComment) {
   const copy = normalizeDraft(clone(sourceDraft));
   copy.draftId = crypto.randomUUID();
   copy.reportId = crypto.randomUUID();
+  copy.jiraPublication = null;
   copy.publicId = createPublicId();
   copy.revision = 0;
   copy.updatedAt = new Date(0).toISOString();
@@ -2428,6 +2430,7 @@ function render() {
   draft.intro = cleanEditorHtml(elements.introEditor);
   renderSections();
   renderSummary();
+  renderPublicationState();
 }
 
 function createSelectionCheckbox(label) {
@@ -4784,7 +4787,7 @@ async function jiraRequest(path, body, options = {}) {
 }
 
 async function publishJiraRequest(path, body, options = {}) {
-  const retries = path.includes("/attachments") ? 2 : 1;
+  const retries = path.includes("/attachments") ? 2 : path.endsWith("/comment") ? 0 : 1;
   return jiraRequest(path, body, { ...options, retries });
 }
 
@@ -4952,9 +4955,11 @@ async function postJiraComment(settings, issue, comment, signal) {
   return result;
 }
 
-async function publishCommentWithFallback(settings, issue, comment, signal) {
+async function publishCommentWithFallback(settings, issue, comment, signal, onPublished = async () => {}) {
   try {
-    return [await postJiraComment(settings, issue, comment, signal)];
+    const result = await postJiraComment(settings, issue, comment, signal);
+    await onPublished(result, 1);
+    return [result];
   } catch (error) {
     if (!(error instanceof JiraRequestError) || error.status !== 413) throw error;
     const parts = splitJiraComment(comment);
@@ -4966,7 +4971,9 @@ async function publishCommentWithFallback(settings, issue, comment, signal) {
         percent: 72 + Math.round(((index + 1) / parts.length) * 16),
         status: `Публикация комментария: часть ${index + 1} из ${parts.length}`,
       });
-      results.push(await postJiraComment(settings, issue, parts[index], signal));
+      const result = await postJiraComment(settings, issue, parts[index], signal);
+      results.push(result);
+      await onPublished(result, parts.length);
     }
     return results;
   }
@@ -4989,7 +4996,7 @@ function updatePublishScopeState() {
   elements.acceptPublishScopeButton.disabled = rowCount === 0;
 }
 
-function askPublishScope() {
+function askPublishScope(link = null) {
   if (publishScopeResolver) return Promise.resolve(null);
   elements.publishScopeList.replaceChildren();
   const statusList = document.getElementById("publishStatusList");
@@ -4999,7 +5006,7 @@ function askPublishScope() {
     label.className = "publish-scope-option";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = true;
+    checkbox.checked = !link || link.statuses.includes(status);
     checkbox.value = status;
     checkbox.addEventListener("change", updatePublishScopeState);
     const text = document.createElement("span");
@@ -5012,7 +5019,7 @@ function askPublishScope() {
     label.className = "publish-scope-option";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = true;
+    checkbox.checked = !link || link.sectionIds.includes(section.id);
     checkbox.value = section.id;
     checkbox.dataset.sectionId = section.id;
     checkbox.addEventListener("change", updatePublishScopeState);
@@ -5078,29 +5085,123 @@ async function isJiraReadyToPublish() {
   return true;
 }
 
-async function publishToJira() {
-  const publishButtonHtml = elements.publishButton.innerHTML;
+function currentJiraPublication() {
+  return window.QaReportJiraPublication.matching(draft.jiraPublication, draft.reportId, draft.issueUrl);
+}
+
+function publicationInfoMarkup(value, reportId) {
+  const api = window.QaReportJiraPublication, link = api.normalize(value, reportId);
+  if (!link) return "";
+  const links = link.parts.flatMap((part, index) => part ? [`<a href="${escapeHtml(api.commentUrl(link.issueUrl, part.commentId))}" target="_blank" rel="noopener noreferrer">${link.parts.length > 1 ? `Jira: часть ${index + 1}` : "Открыть в Jira"}</a>`] : []).join(" · ");
+  const time = (value, label) => value ? `<span>${label} <time datetime="${escapeHtml(value)}">${escapeHtml(new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</time></span>` : "";
+  return links + time(link.firstPublishedAt, "Опубликован")
+    + (link.lastPublishedAt !== link.firstPublishedAt ? time(link.lastPublishedAt, "Обновлён") : "")
+    + (link.parts.some(part => !part) ? '<span class="publication-incomplete">Опубликован частично</span>' : link.updateIncomplete ? '<span class="publication-incomplete">Обновлён частично</span>' : "");
+}
+
+function renderPublicationState() {
+  const link = currentJiraPublication();
+  const isEva = typeof window.QaReportTrackerLinks !== "undefined" && window.QaReportTrackerLinks.parse(draft.issueUrl, "eva");
+  elements.publishButton.querySelector(".primary-action-label").textContent = publishInProgress ? "Отправляем…" : link ? "Обновить отчёт" : "Опубликовать отчёт";
+  elements.publishButton.disabled = publishInProgress;
+  const exportButton = document.getElementById("publishExportButton");
+  if (exportButton) {
+    exportButton.querySelector(".primary-action-label").textContent = elements.publishButton.querySelector(".primary-action-label").textContent;
+    exportButton.disabled = publishInProgress;
+  }
+  document.getElementById("publicationMenuButton").disabled = publishInProgress;
+  document.getElementById("publishAgainButton").disabled = !link || publishInProgress;
+  const info = document.getElementById("publicationInfo");
+  info.innerHTML = publicationInfoMarkup(draft.jiraPublication, draft.reportId);
+  info.hidden = !info.innerHTML;
+}
+
+async function rememberJiraPublication(context, parts, split) {
+  const api = window.QaReportJiraPublication;
+  const now = context.lastPublishedAt || parts.filter(Boolean).at(-1)?.publishedAt || new Date().toISOString();
+  context.firstPublishedAt ||= now;
+  const link = api.normalize({ ...context, parts, split,
+    firstPublishedAt: context.firstPublishedAt || now, lastPublishedAt: now }, context.reportId);
+  if (!link) return;
+  if (draft.reportId === context.reportId) {
+    draft.jiraPublication = link;
+    // Undo changes report content; it must not forget an external publication.
+    const preserve = text => { const value = JSON.parse(text); value.jiraPublication = api.normalize(link, value.reportId); return JSON.stringify(value); };
+    historyCurrent = preserve(historyCurrent);
+    undoStack = undoStack.map(preserve); redoStack = redoStack.map(preserve);
+    hasUnsavedLocalChanges = true;
+    clearTimeout(saveTimer);
+    forceLocalDraftSave = true;
+    renderPublicationState();
+    if (!await saveDraft({ collect: false })) throw new Error("Отчёт отправлен в Jira, но связь не удалось сохранить. Ссылка доступна под кнопкой публикации — сохраните её перед закрытием страницы.");
+    renderPublicationState();
+  } else {
+    // A response may arrive after switching reports. Patch only the original's metadata.
+    const record = await getReportRecord(context.reportId);
+    if (!record) throw new Error("Отчёт отправлен в Jira, но исходный отчёт уже недоступен в истории.");
+    record.document.jiraPublication = link;
+    await dbTransaction("readwrite", store => store.put(record));
+    queueServerReportSave(record);
+  }
+}
+
+async function updateLinkedJiraComments(settings, issue, comment, link, signal, context) {
+  if (link.format !== comment.format) throw new Error("Формат подключения Jira изменился. Опубликуйте отчёт заново.");
+  const comments = link.split ? splitJiraComment(comment) : [comment];
+  if (comments.length !== link.parts.length) throw new Error("Изменилось количество частей отчёта. Опубликуйте отчёт заново, чтобы сохранить прежние комментарии.");
+  const parts = link.parts.map(part => part && { ...part }), results = [];
+  // Check every existing part before changing any of them.
+  for (let index = 0; index < comments.length; index++) {
+    const part = parts[index];
+    if (!part) continue;
+    await publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
+      token: typeof jiraSecret === "undefined" ? "" : jiraSecret, comment: comments[index],
+      commentId: part.commentId, expectedBodyHash: part.bodyHash, checkOnly: true }, { signal });
+  }
+  for (let index = 0; index < comments.length; index++) {
+    const part = parts[index];
+    const result = part ? await publishJiraRequest("/api/jira/update-comment", { ...settings, ...issue,
+      token: typeof jiraSecret === "undefined" ? "" : jiraSecret, comment: comments[index],
+      commentId: part.commentId, expectedBodyHash: part.bodyHash }, { signal })
+      : await postJiraComment(settings, issue, comments[index], signal);
+    if (!result.verified || !result.commentId) throw new Error("Jira не подтвердила обновление отчёта");
+    results.push(result);
+    context.lastPublishedAt = result.publishedAt || new Date().toISOString();
+    context.updateIncomplete = index < comments.length - 1;
+    parts[index] = { commentId: result.commentId, bodyHash: result.bodyHash || "", publishedAt: result.publishedAt || new Date().toISOString() };
+    await rememberJiraPublication(context, parts, link.split);
+  }
+  return results;
+}
+
+async function publishToJira(mode = "auto") {
   if (publishInProgress) return;
   publishInProgress = true;
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
     if (!validateReportMetadata()) return;
+    const linked = mode === "new" ? null : currentJiraPublication();
+    const actionLabel = linked ? "Обновить" : "Опубликовать";
+    if (mode === "new" && currentJiraPublication() && !await askConfirmation("В Jira появится новый комментарий. Прежний останется в задаче, а этот отчёт будет связан с новым.", { title: "Опубликовать заново?", confirmText: "Опубликовать заново" })) return;
     if (!await isJiraReadyToPublish()) return;
-    const scope = await askPublishScope();
+    document.getElementById("publishScopeTitle").textContent = linked ? "Что обновить в Jira" : "Что опубликовать";
+    elements.acceptPublishScopeButton.textContent = actionLabel;
+    document.getElementById("publishProgressTitle").textContent = linked ? "Обновление отчёта в Jira" : "Публикация отчёта";
+    const scope = await askPublishScope(linked);
     if (!scope) return;
     collectDocumentFields();
     if (!validateReportMetadata()) return;
     const { sectionIds, statuses } = scope;
     const issue = parseIssueUrl(draft.issueUrl);
+    if (linked && !window.QaReportJiraPublication.matching(linked, draft.reportId, issue.issueUrl)) throw new Error("Задача изменилась. Повторите публикацию для выбранной задачи.");
+    const publicationReportId = draft.reportId;
     const settings = {};
     await checkBackendCompatibility();
     publishAbortController = new AbortController();
     openPublishProgress();
     setPublishProgress({ step: "prepare", percent: 8, status: "Подготовка отчёта" });
-    elements.publishButton.disabled = true;
-    elements.publishButton.innerHTML =
-      '<span class="primary-action-icon">…</span><span class="primary-action-label">Отправляем…</span>';
+    renderPublicationState();
     await uploadPendingImages(settings, issue, {
       signal: publishAbortController.signal,
       sectionIds,
@@ -5114,21 +5215,33 @@ async function publishToJira() {
         });
       },
     });
+    if (draft.reportId !== publicationReportId) throw new Error("Открыт другой отчёт. Повторите публикацию из нужного отчёта.");
     const comment = { format: "wiki", body: generateMarkup({ sectionIds, statuses }) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
-    const results = await publishCommentWithFallback(settings, issue, comment, publishAbortController.signal);
+    const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
+      sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],
+      statuses: [...(statuses || Object.keys(STATUS_META))], firstPublishedAt: linked?.firstPublishedAt || "" };
+    const successfulParts = [];
+    const results = linked ? await updateLinkedJiraComments(settings, issue, comment, linked, publishAbortController.signal, context)
+      : await publishCommentWithFallback(settings, issue, comment, publishAbortController.signal, async (result, count) => {
+        context.lastPublishedAt = result.publishedAt || new Date().toISOString();
+        successfulParts.push({ commentId: result.commentId, bodyHash: result.bodyHash || "", publishedAt: result.publishedAt || new Date().toISOString() });
+        const parts = [...successfulParts, ...Array.from({ length: count - successfulParts.length }, () => null)];
+        await rememberJiraPublication(context, parts, count > 1);
+      });
+    if (!linked && !successfulParts.length) await rememberJiraPublication(context, results.map(result => ({ commentId: result.commentId, bodyHash: result.bodyHash || "", publishedAt: result.publishedAt || new Date().toISOString() })), results.length > 1);
     setPublishProgress({ step: "verify", percent: 96, status: "Проверка созданного комментария" });
     const result = results.at(-1);
     finishPublishProgress(
       results.length > 1
         ? `Опубликовано комментариев: ${results.length}`
-        : "Комментарий опубликован",
+        : linked ? "Отчёт обновлён в Jira" : "Отчёт опубликован",
     );
-    showToast(`Опубликовано в ${issue.issueKey}`);
+    showToast(`${linked ? "Обновлено" : "Опубликовано"} в ${issue.issueKey}`);
     if (result?.commentUrl) window.open(result.commentUrl, "_blank", "noopener");
   } catch (error) {
     console.error("Ошибка публикации Jira:", error);
-    const message = friendlyJiraError(error);
+    const message = error.status === 413 && mode !== "new" && currentJiraPublication() ? "Обновлённый отчёт слишком большой для связанного комментария. Выберите «Опубликовать заново»." : friendlyJiraError(error);
     setPublishProgress({
       step:
         error instanceof JiraRequestError && error.path.includes("/attachments")
@@ -5145,8 +5258,7 @@ async function publishToJira() {
   } finally {
     publishInProgress = false;
     publishAbortController = null;
-    elements.publishButton.disabled = false;
-    elements.publishButton.innerHTML = publishButtonHtml;
+    renderPublicationState();
   }
 }
 
@@ -5503,6 +5615,13 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       info.querySelector(".history-item-heading").prepend(checkbox);
       item.classList.toggle("selected", checkbox.checked);
     }
+    const publication = publicationInfoMarkup(report.jiraPublication || report.document?.jiraPublication, report.id);
+    if (publication) {
+      const publicationInfo = document.createElement("div");
+      publicationInfo.className = "publication-info history-publication-info";
+      publicationInfo.innerHTML = publication;
+      info.append(publicationInfo);
+    }
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";
     commentField.rows = 2;
@@ -5546,6 +5665,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       draft = normalizeDraft(clone(fullReport.document));
       draft.draftId = crypto.randomUUID();
       draft.reportId = crypto.randomUUID();
+      draft.jiraPublication = null;
       draft.publicId = createPublicId();
       historyCurrent = serializeDraft();
       undoStack = [];
@@ -8085,7 +8205,7 @@ async function openReportFile(file, onProgress) {
   if (!file) return;
   const imported = await window.QaReportFile.unpack(file, { onProgress });
   const next = normalizeDraft({ ...imported.document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
-    publicId: createPublicId(), revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
+    publicId: createPublicId(), jiraPublication: null, revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
   const db = await openDatabase();
   clearTimeout(saveTimer); clearTimeout(historyTimer); flushDraftFromDom();
   const before = clone(draft), beforeContent = serializeDraft();
@@ -8211,6 +8331,7 @@ function closeHeaderDropdowns(exceptMenu = null) {
   [
     [elements.reportMenuButton, elements.reportMenu],
     [elements.copyMenuButton, elements.copyMenu],
+    [document.getElementById("publicationMenuButton"), document.getElementById("publicationMenu")],
   ].forEach(([button, menu]) => {
     if (!button || !menu || menu === exceptMenu) return;
     menu.hidden = true;
@@ -8267,6 +8388,7 @@ async function resetDraft() {
   draft = normalizeDraft(clone(DEFAULT_DRAFT));
   draft.draftId = crypto.randomUUID();
   draft.reportId = crypto.randomUUID();
+  draft.jiraPublication = null;
   draft.publicId = createPublicId();
   draft.sections = [createSection("Основные проверки", loadDefaultColumns(), 2)];
   historyCurrent = serializeDraft();
@@ -8573,6 +8695,7 @@ renderEnvironmentOptions();
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
     control.addEventListener(eventName, () => {
       draft.issueUrl = elements.issueUrl.value;
+      renderPublicationState();
       draft.environment = elements.environment.value.trim();
       draft.overallStatus = elements.overallStatus.value;
       if (control === elements.overallStatus) setStatusClass(control, draft.overallStatus);
@@ -9280,7 +9403,12 @@ elements.jiraConnections.addEventListener("click", async (event) => {
 });
 elements.closeJiraSettingsButton.addEventListener("click", closeJiraSettings);
 elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
-elements.publishButton.addEventListener("click", publishToJira);
+elements.publishButton.addEventListener("click", () => publishToJira());
+document.getElementById("publishExportButton").addEventListener("click", () => publishToJira());
+    document.getElementById("publishAgainButton").addEventListener("click", () => publishToJira("new"));
+    document.getElementById("publicationMenuButton").addEventListener("click", event => {
+      event.stopPropagation(); toggleHeaderDropdown(event.currentTarget, document.getElementById("publicationMenu"));
+    });
 elements.publishCancelButton.addEventListener("click", cancelPublishProgress);
 document.getElementById("publishStatusSelectAll").addEventListener("change", (event) => {
   document.querySelectorAll('#publishStatusList input').forEach((input) => { input.checked = event.target.checked; });
@@ -9676,7 +9804,7 @@ for (const input of [elements.importMarkup, elements.commentImportUrl]) {
 }
 
 // Header menus share keyboard navigation and close when focus leaves the menu.
-document.querySelectorAll('.topbar .header-dropdown').forEach(dropdown => {
+document.querySelectorAll('.header-dropdown').forEach(dropdown => {
   const trigger = dropdown.querySelector('.header-dropdown-trigger');
   const menu = dropdown.querySelector('[role="menu"]');
   dropdown.addEventListener('keydown', event => {

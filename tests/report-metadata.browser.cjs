@@ -94,7 +94,7 @@ async function main() {
     if (typeof validateJiraSettings === 'function') validateJiraSettings = () => {};
   });
   await page.click('#copyMenuButton');
-  await page.click('#publishButton');
+  await page.click('#publishExportButton');
   await page.waitForFunction(() => document.querySelector('#environment').getAttribute('aria-invalid') === 'true');
   assert.equal(await page.locator('#overallStatus').getAttribute('aria-invalid'), 'true');
   assert.equal(await page.locator('#environmentError').innerText(), 'Укажите окружение');

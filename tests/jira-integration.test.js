@@ -21,6 +21,7 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
   const received = [];
   let attachmentMeta = { enabled: true, uploadLimit: 1204756 };
   let rejectUpload = false;
+  let commentBody = "Проверено";
   const jira = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -50,7 +51,7 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       res.end(JSON.stringify([{ id: "901", filename: "clip.mp4" }])); return;
     }
     if (req.url === "/jira7/rest/api/2/myself") {
-      res.end(JSON.stringify({ name: "user-a", emailAddress: "user-a@example.com", displayName: "User A", active: true }));
+      res.end(JSON.stringify({ key: "user-a", name: "user-a", emailAddress: "user-a@example.com", displayName: "User A", active: true }));
       return;
     }
     if (req.url === "/jira7/rest/api/2/issue/QA-1/comment?maxResults=100") {
@@ -63,7 +64,8 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       return;
     }
     if (req.url === "/jira7/rest/api/2/issue/QA-1/comment/10001") {
-      res.end(JSON.stringify({ id: "10001", body: "Проверено" }));
+      if (req.method === "PUT") commentBody = JSON.parse(Buffer.concat(chunks).toString()).body;
+      res.end(JSON.stringify({ id: "10001", body: commentBody, author: { key: "user-a" }, visibility: { type: "role", value: "Developers" } }));
       return;
     }
     res.statusCode = 404;
@@ -139,13 +141,29 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     });
     assert.equal(comment.status, 201, JSON.stringify(await comment.clone().json()));
     const commentPayload = await comment.json();
-    assert.equal(commentPayload.apiRevision, 8);
+    assert.equal(commentPayload.apiRevision, 9);
     assert.equal(commentPayload.verified, true);
     assert.match(commentPayload.commentId, /^\d+$/);
     const jiraCalls = received.filter((item) => item.url.startsWith("/jira7/rest/api/2/"));
     assert.equal(jiraCalls.every((item) => item.authorization?.startsWith("OAuth ")), true);
     assert.equal(jiraCalls.some((item) => item.authorization?.includes("access-user-a")), true);
     assert.equal(jiraCalls.some((item) => item.body.includes("browser-token")), false);
+
+    const updateOptions = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      issueUrl: `${jiraOrigin}/jira7/browse/QA-1`, commentId: "10001", expectedBodyHash: commentPayload.bodyHash,
+      comment: { format: "wiki", body: "Обновлено" },
+    }) };
+    const updateResponse = await request(`${appOrigin}/api/jira/update-comment`, updateOptions);
+    assert.equal(updateResponse.status, 200);
+    const updated = await updateResponse.json();
+    assert.equal(updated.commentId, "10001"); assert.match(updated.bodyHash, /^[a-f0-9]{64}$/);
+    const put = received.find(item => item.method === "PUT");
+    assert.equal(JSON.parse(put.body).body, "Обновлено");
+    assert.deepEqual(JSON.parse(put.body).visibility, { type: "role", value: "Developers" });
+    assert.match(put.authorization, /^OAuth /);
+    assert.equal((await request(`${appOrigin}/api/jira/update-comment`, updateOptions, "user-b@example.com")).status, 409);
+    assert.equal((await fetch(`${appOrigin}/api/jira/update-comment`, updateOptions)).status, 401);
+    assert.equal((await request(`${appOrigin}/api/jira/update-comment`, { ...updateOptions, headers: { ...updateOptions.headers, Origin: "https://other.example" } })).status, 403);
 
     const inventoryOptions = {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({issueUrl:`${jiraOrigin}/jira7/browse/QA-1`})};
     const inventory = await request(`${appOrigin}/api/jira/attachment-manifest`,inventoryOptions);

@@ -73,7 +73,7 @@
     const id = val => typeof val === "string" && /^[\w-]{1,100}$/.test(val) && !["__proto__", "constructor", "prototype"].includes(val) ? val : bad();
     const unique = list => { if (new Set(list).size !== list.length) bad(); };
     if (!value || value.schemaVersion !== 3 || !Array.isArray(value.sections) || !value.sections.length || value.sections.length > 1000) bad();
-    if (!statuses.has(value.overallStatus) || !["section", "continuous", "hierarchical", "manual"].includes(value.numberingMode)) bad();
+    if ((value.overallStatus !== "" && !statuses.has(value.overallStatus)) || !["section", "continuous", "hierarchical", "manual"].includes(value.numberingMode)) bad();
     if (value.sectionNumberingMode !== undefined && !["automatic", "manual"].includes(value.sectionNumberingMode)) bad();
     let rows = 0;
     const result = { schemaVersion: 3, issueUrl: string(value.issueUrl), environment: string(value.environment), overallStatus: value.overallStatus,

@@ -340,8 +340,8 @@
       reportId: randomUUID(),
       schemaVersion: 3,
       issueUrl: "",
-      environment: "STAGE",
-      overallStatus: "OK",
+      environment: "",
+      overallStatus: "",
       intro: "",
       sections: [],
     };

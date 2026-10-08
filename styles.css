@@ -6202,3 +6202,13 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .environment-option:hover, .environment-option.is-active { background: var(--line-soft); }
 .environment-option .ui-icon { flex: 0 0 16px; width: 16px; height: 16px; }
 .environment-options-empty { padding: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* Required report metadata is checked when the user attempts publication. */
+.metadata-grid { align-items: start; }
+.overall-status-input { position: relative; min-width: 0; }
+.overall-status-input #overallStatus { appearance: none; -webkit-appearance: none; padding-right: 40px; }
+.overall-status-input #overallStatus:not([class*="status-"]) { color: var(--muted); font-weight: 400; border-color: var(--line); background: var(--surface); }
+.overall-status-chevron { position: absolute; top: 50%; right: 12px; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.metadata-grid .field-error { margin: 0; color: var(--red); font-size: 12px; line-height: 1.4; }
+.metadata-grid #environment[aria-invalid="true"],
+.metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }

@@ -37,3 +37,15 @@ test('invalid, duplicate and prototype-related IDs and unknown schemas are rejec
     const value = fixture(); mutate(value); assert.throws(() => report.documentFields(value), /структура/);
   }
 });
+
+
+test('unfinished reports preserve empty metadata; invalid outcomes and empty row statuses remain rejected', () => {
+  const value = fixture(); value.environment = ''; value.overallStatus = '';
+  const actual = report.documentFields(value);
+  assert.equal(actual.environment, ''); assert.equal(actual.overallStatus, '');
+  for (const invalid of [undefined, null, 'UNKNOWN', '<img onerror=alert(1)>']) {
+    assert.throws(() => report.documentFields({ ...value, overallStatus: invalid }), /структура/);
+  }
+  value.sections[0].rows[0].status = '';
+  assert.throws(() => report.documentFields(value), /структура/);
+});

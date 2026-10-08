@@ -257,3 +257,15 @@ test("escaped not-equal operators stay literal in section and column titles", ()
   assert.equal(section.columns[0].title, 'Ожидание != факт');
   assert.equal(row.cells[section.columns[0].id], 'x != y, y != z');
 });
+
+
+test("imports without report metadata keep environment and outcome empty", () => {
+  const table = "||Проверка||Статус||\n|Проверка входа|НЕ ОК|";
+  const blank = parseJiraMarkup(table);
+  assert.equal(blank.environment, "");
+  assert.equal(blank.overallStatus, "");
+  assert.equal(blank.sections[0].rows[0].status, "НЕ ОК");
+  const filled = parseJiraMarkup("Окружение: PROD\nТЕСТ — НЕ ПРОВЕРЕНО\n" + table);
+  assert.equal(filled.environment, "PROD");
+  assert.equal(filled.overallStatus, "НЕ ПРОВЕРЕНО");
+});

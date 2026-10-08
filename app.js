@@ -218,8 +218,8 @@ const DEFAULT_DRAFT = {
   lastSavedBy: "",
   lastSavedClientId: "",
   issueUrl: "",
-  environment: "STAGE",
-  overallStatus: "OK",
+  environment: "",
+  overallStatus: "",
   intro: "",
   numberingMode: "section",
   sectionNumberingMode: "automatic",
@@ -575,6 +575,8 @@ function normalizeDraft(value) {
     lastSavedBy: parsed.lastSavedBy || "",
     lastSavedClientId: parsed.lastSavedClientId || "",
     issueUrl: parsed.issueUrl || "",
+    environment: String(parsed.environment || "").trim().replace(/^Не указано$/i, ""),
+    overallStatus: parsed.overallStatus || "",
     numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
     sectionNumberingMode: ChecklistNumbering.normalizeSectionMode(parsed.sectionNumberingMode),
     sections,
@@ -2335,10 +2337,40 @@ function redo() {
   restoreSerializedDraft(next);
 }
 
+function setReportMetadataError(control, message = "") {
+  const error = document.getElementById(`${control.id}Error`);
+  if (message) control.setAttribute("aria-invalid", "true");
+  else control.removeAttribute("aria-invalid");
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function reportMetadataError(control) {
+  if (control === elements.environment) {
+    return control.value.trim().replace(/^Не указано$/i, "") ? "" : "Укажите окружение";
+  }
+  return Object.hasOwn(STATUS_META, control.value) ? "" : "Выберите итог проверки";
+}
+
+function validateReportMetadata() {
+  let firstInvalid = null;
+  for (const control of [elements.environment, elements.overallStatus]) {
+    const message = reportMetadataError(control);
+    setReportMetadataError(control, message);
+    if (message && !firstInvalid) firstInvalid = control;
+  }
+  if (!firstInvalid) return true;
+  environmentPicker.close();
+  firstInvalid.scrollIntoView({ block: "center", behavior: "smooth" });
+  firstInvalid.focus({ preventScroll: true });
+  showToast("Заполните окружение и итог перед публикацией");
+  return false;
+}
+
 function collectDocumentFields() {
   localEditGeneration++;
   draft.issueUrl = elements.issueUrl.value;
-  draft.environment = elements.environment.value.trim() || "Не указано";
+  draft.environment = elements.environment.value.trim();
   draft.overallStatus = elements.overallStatus.value;
   draft.intro = cleanEditorHtml(elements.introEditor);
   collectSectionsFromDom();
@@ -2386,6 +2418,8 @@ function render() {
   renderEnvironmentOptions();
   elements.overallStatus.value = draft.overallStatus;
   setStatusClass(elements.overallStatus, draft.overallStatus);
+  setReportMetadataError(elements.environment);
+  setReportMetadataError(elements.overallStatus);
   elements.introEditor.innerHTML = draft.intro;
   elements.introEditor.querySelectorAll("figcaption").forEach((caption) => caption.remove());
   highlightCodeBlocks(elements.introEditor);
@@ -3748,6 +3782,7 @@ function closeFloatingMenu() {
 
 function setStatusClass(select, status) {
   Object.values(STATUS_META).forEach((meta) => select.classList.remove(meta.className));
+  if (!status) return;
   const meta = STATUS_META[status] || STATUS_META["НЕ ПРОВЕРЕНО"];
   select.classList.add(meta.className);
 }
@@ -4099,12 +4134,12 @@ function generateMarkup(options = {}) {
   const rowNumbers = ChecklistNumbering.rowNumbers(draft);
   const blocks = [];
   const heading = [];
-  const overallColor = STATUS_META[draft.overallStatus].jiraColor;
-  heading.push(
-    `*Проверено на ${escapeWikiNotEquals(draft.environment)}*`,
-    `{color:${overallColor}}*ТЕСТ — ${draft.overallStatus}*{color}`,
-  );
-  blocks.push(heading.join("\n"));
+  if (draft.environment) heading.push(`*Проверено на ${escapeWikiNotEquals(draft.environment)}*`);
+  if (draft.overallStatus) {
+    const overallColor = STATUS_META[draft.overallStatus]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor;
+    heading.push(`{color:${overallColor}}*ТЕСТ — ${draft.overallStatus}*{color}`);
+  }
+  if (heading.length) blocks.push(heading.join("\n"));
   const intro = htmlToWiki(draft.intro);
   if (intro) blocks.push(intro);
 
@@ -4137,7 +4172,10 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null, options
   const oppositeSections = byId(oppositeDraft?.sections || []);
   const wrapper = document.createElement("div");
   const overallColor = STATUS_META[previewDraft.overallStatus]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor;
-  wrapper.innerHTML = `<h1>Отчёт о тестировании</h1><p><strong>Проверено на ${escapeHtml(previewDraft.environment)}</strong><br><strong style="color:${overallColor}">ТЕСТ — ${escapeHtml(previewDraft.overallStatus)}</strong></p>`;
+  const heading = [];
+  if (previewDraft.environment) heading.push(`<strong>Проверено на ${escapeHtml(previewDraft.environment)}</strong>`);
+  if (previewDraft.overallStatus) heading.push(`<strong style="color:${overallColor}">ТЕСТ — ${escapeHtml(previewDraft.overallStatus)}</strong>`);
+  wrapper.innerHTML = `<h1>Отчёт о тестировании</h1>${heading.length ? `<p>${heading.join("<br>")}</p>` : ""}`;
   if (htmlToText(previewDraft.intro) || /<img|<pre/i.test(previewDraft.intro)) {
     const intro = document.createElement("div");
     intro.className =
@@ -5047,9 +5085,12 @@ async function publishToJira() {
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
+    if (!validateReportMetadata()) return;
     if (!await isJiraReadyToPublish()) return;
     const scope = await askPublishScope();
     if (!scope) return;
+    collectDocumentFields();
+    if (!validateReportMetadata()) return;
     const { sectionIds, statuses } = scope;
     const issue = parseIssueUrl(draft.issueUrl);
     const settings = {};
@@ -7716,7 +7757,7 @@ function buildXlsxWorksheet() {
         xlsxCell(`B${rowIndex}`, draft.issueUrl || "Не указана", 13, sharedStrings),
         xlsxCell(`D${rowIndex}`, "Окружение", 12, sharedStrings),
         xlsxCell(`E${rowIndex}`, draft.environment || "Не указано", 13, sharedStrings),
-        xlsxCell(`F${rowIndex}`, draft.overallStatus || "НЕ ПРОВЕРЕНО", getXlsxStatusStyle(draft.overallStatus), sharedStrings),
+        xlsxCell(`F${rowIndex}`, draft.overallStatus || "Не указан", draft.overallStatus ? getXlsxStatusStyle(draft.overallStatus) : 13, sharedStrings),
       ],
       { height: 22 },
     ),
@@ -8532,9 +8573,10 @@ renderEnvironmentOptions();
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
     control.addEventListener(eventName, () => {
       draft.issueUrl = elements.issueUrl.value;
-      draft.environment = elements.environment.value.trim() || "Не указано";
+      draft.environment = elements.environment.value.trim();
       draft.overallStatus = elements.overallStatus.value;
       if (control === elements.overallStatus) setStatusClass(control, draft.overallStatus);
+      if (control.hasAttribute("aria-invalid")) setReportMetadataError(control, reportMetadataError(control));
       scheduleSave({ collect: false });
     });
   });

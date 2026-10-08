@@ -124,7 +124,7 @@ let child, browser;
   assert.equal(JSON.stringify(persisted).includes('should-not-persist'), false);
   const screenshots = process.env.QA_REPORT_SCREENSHOTS;
   if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
-  for (const width of [1440, 390]) for (const theme of ['light', 'dark']) {
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark', 'graphite']) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
     const bounds = await page.locator('.report-heading').evaluate(node => [...node.querySelectorAll('button, a, time')].map(child => ({ left: child.getBoundingClientRect().left, right: child.getBoundingClientRect().right })));

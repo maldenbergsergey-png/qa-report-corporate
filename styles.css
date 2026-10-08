@@ -6216,11 +6216,25 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 /* Publication belongs to the current report, above its metadata. */
 .report-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .report-publication { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 100%; }
-.report-publication-buttons { display: flex; position: relative; }
-.report-publication-buttons > #publishButton { border-radius: 8px 0 0 8px; box-shadow: none; }
-:root .report-publication-buttons .publication-menu-trigger { background: var(--primary); color: #fff; border-radius: 0 8px 8px 0; border-left: 1px solid rgba(255,255,255,.3); min-width: 38px; padding: 10px; }
-:root .report-publication-buttons .publication-menu-trigger:hover,
-:root .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: var(--primary-hover); }
+.report-publication-buttons {
+  display: flex; position: relative; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(28, 33, 42, .76);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.report-publication-buttons > #publishButton {
+  min-height: 40px; border-radius: 999px 0 0 999px;
+  background: transparent; color: #f4f6f9; box-shadow: none;
+}
+:root .report-publication-buttons .publication-menu-trigger {
+  min-height: 40px; min-width: 38px; padding: 10px;
+  background: transparent; color: #f4f6f9; border-radius: 0 999px 999px 0;
+  border-left: 1px solid rgba(255, 255, 255, .12); box-shadow: none;
+}
+.report-publication-buttons > #publishButton:hover:not(:disabled),
+:root .report-publication-buttons .publication-menu-trigger:hover:not(:disabled),
+:root .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: rgba(255, 255, 255, .09); }
+.report-publication-buttons > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .report-publication-buttons .header-dropdown-menu { position: absolute; top: calc(100% + 6px); right: 0; left: auto; }
 .publication-info { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; color: var(--muted); font-size: 11px; max-width: 100%; }
 .publication-info[hidden] { display: none; }

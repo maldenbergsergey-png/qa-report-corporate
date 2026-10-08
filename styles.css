@@ -6213,22 +6213,22 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .metadata-grid #environment[aria-invalid="true"],
 .metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 
-/* Publication belongs to the current report, above its metadata. */
-.report-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+/* Keep publication menus above metadata, inside the report and below sticky toolbars. */
+.report-heading { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .report-publication { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 100%; }
 .report-publication-buttons {
-  display: flex; position: relative; border-radius: 999px;
+  display: flex; position: relative; border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, .16);
   background: rgba(28, 33, 42, .76);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 .report-publication-buttons > #publishButton {
-  min-height: 40px; border-radius: 999px 0 0 999px;
+  min-height: 40px; border-radius: 7px 0 0 7px;
   background: transparent; color: #f4f6f9; box-shadow: none;
 }
 :root .report-publication-buttons .publication-menu-trigger {
   min-height: 40px; min-width: 38px; padding: 10px;
-  background: transparent; color: #f4f6f9; border-radius: 0 999px 999px 0;
+  background: transparent; color: #f4f6f9; border-radius: 0 7px 7px 0;
   border-left: 1px solid rgba(255, 255, 255, .12); box-shadow: none;
 }
 .report-publication-buttons > #publishButton:hover:not(:disabled),

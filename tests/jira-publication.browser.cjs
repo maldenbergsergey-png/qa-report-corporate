@@ -135,15 +135,57 @@ let child, browser;
     const placement = await page.locator('.report-publication-buttons').evaluate(node => {
       const trigger = node.querySelector('#publicationMenuButton').getBoundingClientRect(), menu = node.querySelector('#publicationMenu').getBoundingClientRect();
       const main = getComputedStyle(node.querySelector('#publishButton')), arrow = getComputedStyle(node.querySelector('#publicationMenuButton'));
-      return { triggerBottom: trigger.bottom, menuTop: menu.top, menuLeft: menu.left, menuRight: menu.right, mainColor: main.color, arrowColor: arrow.color };
+      return { triggerBottom: trigger.bottom, menuTop: menu.top, menuLeft: menu.left, menuRight: menu.right, mainColor: main.color, arrowColor: arrow.color,
+        menuReceivesPointer: !!document.elementFromPoint(menu.left + menu.width / 2, menu.top + menu.height / 2)?.closest('#publicationMenu') };
     });
     assert.ok(placement.menuTop >= placement.triggerBottom && placement.menuLeft >= 0 && placement.menuRight <= width);
     assert.equal(placement.mainColor, placement.arrowColor);
+    assert.equal(placement.menuReceivesPointer, true, `${theme}/${width}: publication menu is covered`);
 
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#publicationMenu').isVisible(), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'publicationMenuButton');
   }
+  // Simulate an available PWA update without activating a service worker.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'graphite';
+    const spacer = document.createElement('div');
+    spacer.id = 'publicationScrollFixture'; spacer.style.height = '1000px';
+    spacer.setAttribute('aria-hidden', 'true'); document.body.append(spacer);
+    document.querySelector('#updateAppContainer').hidden = false;
+    window.scrollTo(0, 0);
+  });
+  const popoverHit = await page.evaluate(() => {
+    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const hint = document.querySelector('#updateAppHint');
+    // Align the real popover over the action to cover overlap at any layout width.
+    // No stacking styles are changed by the fixture.
+    Object.assign(hint.style, { position: 'fixed', left: `${button.left}px`, right: 'auto', top: `${button.top - 24}px` });
+    document.querySelector('#updateAppButton').focus({ preventScroll: true });
+    return !!document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2)?.closest('#updateAppHint');
+  });
+  assert.equal(popoverHit, true, 'Publication action must stay behind the update popover');
+  if (screenshots) await page.screenshot({ animations: 'disabled', path: path.join(screenshots, `${corporate ? 'corporate' : 'public'}-update-popover.png`) });
+  await page.evaluate(() => {
+    document.activeElement.blur();
+    document.querySelector('#updateAppHint').removeAttribute('style');
+    document.querySelector('#updateAppContainer').hidden = true;
+    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const topbar = document.querySelector('.topbar').getBoundingClientRect();
+    window.scrollTo(0, window.scrollY + button.top + button.height / 2 - topbar.height / 2);
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const scrolled = await page.evaluate(() => {
+    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const topbar = document.querySelector('.topbar').getBoundingClientRect();
+    const hit = document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2);
+    return { overlaps: button.top < topbar.bottom && button.bottom > topbar.top, topbarReceivesPointer: !!hit?.closest('.topbar') };
+  });
+  assert.equal(scrolled.overlaps, true, 'Scroll fixture must overlap publication action and sticky header');
+  assert.equal(scrolled.topbarReceivesPointer, true, 'Publication action must stay behind the sticky header');
+  if (screenshots) await page.screenshot({ animations: 'disabled', path: path.join(screenshots, `${corporate ? 'corporate' : 'public'}-scrolled-header.png`) });
+  await page.evaluate(() => { document.querySelector('#publicationScrollFixture').remove(); window.scrollTo(0, 0); });
   await page.evaluate(() => openHistory());
   await page.getByRole('button', { name: 'Копия', exact: true }).first().click();
   await page.waitForFunction(() => draft.jiraPublication === null);

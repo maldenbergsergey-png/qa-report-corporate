@@ -323,6 +323,7 @@ const elements = {
   closeHistoryButton: document.querySelector("#closeHistoryButton"),
   historySearch: document.querySelector("#historySearch"),
   historyProjectFilter: document.querySelector("#historyProjectFilter"),
+  historySort: document.querySelector("#historySort"),
   historySelectionToggle: document.querySelector("#historySelectionToggle"),
   historySelectionToolbar: document.querySelector("#historySelectionToolbar"),
   historySelectAll: document.querySelector("#historySelectAll"),
@@ -332,7 +333,6 @@ const elements = {
   projectSettingsList: document.querySelector("#projectSettingsList"),
   historyUsage: document.querySelector("#historyUsage"),
   historyList: document.querySelector("#historyList"),
-  clearHistoryButton: document.querySelector("#clearHistoryButton"),
   mediaViewerModal: document.querySelector("#mediaViewerModal"),
   mediaViewerImage: document.querySelector("#mediaViewerImage"),
   closeMediaViewerButton: document.querySelector("#closeMediaViewerButton"),
@@ -1128,7 +1128,7 @@ async function getReportMetadata(id) {
   await openDatabase(); // The existing main-thread code owns schema initialization.
   try {
     if (!reportMetadataWorker) {
-      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=1");
+      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=2");
       reportMetadataWorker.addEventListener("message", ({ data }) => {
         const pending = reportMetadataRequests.get(data.requestId);
         if (!pending) return;
@@ -1170,6 +1170,10 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
   const now = new Date().toISOString();
   const existing = await getReportMetadata(snapshot.reportId);
   const issueKey = issueKeyFromUrl(snapshot.issueUrl);
+  const historyContentFingerprint = QaReportHistory.contentFingerprint(snapshot);
+  const previousFingerprint = existing?.historyContentFingerprint
+    || (existing?.document ? QaReportHistory.contentFingerprint(existing.document) : "");
+  const unchanged = previousFingerprint === historyContentFingerprint;
   const record = {
     id: snapshot.reportId,
     publicId: snapshot.publicId,
@@ -1178,8 +1182,9 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
     issueKey,
     environment: snapshot.environment,
     overallStatus: snapshot.overallStatus,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
+    createdAt: existing?.createdAt || existing?.updatedAt || now,
+    updatedAt: unchanged ? existing.updatedAt || existing.createdAt || now : now,
+    historyContentFingerprint,
     lastOpenedAt: now,
     reason,
     historyComment: existing?.historyComment || "",
@@ -1441,6 +1446,13 @@ async function getServerReport(id, { rememberHash = true } = {}) {
   return result.report || null;
 }
 
+async function cacheOpenedServerReport(report) {
+  const record = { ...report,
+    historyContentFingerprint: QaReportHistory.contentFingerprint(report.document),
+  };
+  await dbTransaction("readwrite", store => store.put(record));
+}
+
 function routeChecklistPublicId() {
   const pathMatch = window.location.pathname.match(/^\/report\/([a-f0-9]{7,8})$/i);
   const hashMatch = window.location.hash.match(/^#\/checklists\/([a-f0-9]{7,8})$/i);
@@ -1477,10 +1489,34 @@ async function openReportFromRoute() {
       ? await getReportRecord(location.reportId) : await findLocalReportByPublicId(publicId);
     const fullReport = localReport || (cloudHistoryEnabled ? await getServerReport(publicId) : null);
     if (!fullReport?.document) throw new Error("not-found");
+    if (!localReport) await cacheOpenedServerReport(fullReport).catch(() => {});
     applyDraftLocally(fullReport.document, { status: "Сохранено" });
   } catch {
     showToast("Чек-лист по ссылке не найден. Можно создать новый.");
   }
+}
+
+function historyTimestamp(report, field) {
+  const timestamp = Date.parse(report[field] || report[field === "createdAt" ? "updatedAt" : "createdAt"] || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortHistoryReports(reports, mode = "updated") {
+  const field = mode === "created" ? "createdAt" : "updatedAt";
+  const secondary = field === "createdAt" ? "updatedAt" : "createdAt";
+  return reports.sort((a, b) => historyTimestamp(b, field) - historyTimestamp(a, field)
+    || historyTimestamp(b, secondary) - historyTimestamp(a, secondary)
+    || String(a.id).localeCompare(String(b.id)));
+}
+
+function historyDatesMarkup(report) {
+  return [["createdAt", "Создан"], ["updatedAt", "Изменён"]].map(([field, label]) => {
+    const timestamp = historyTimestamp(report, field);
+    if (!timestamp) return `<span>${label} —</span>`;
+    const date = new Date(timestamp);
+    const compact = date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return `<span>${label} <time datetime="${date.toISOString()}" title="${date.toLocaleString("ru-RU")}">${compact}</time></span>`;
+  }).join("");
 }
 
 async function getAllHistoryReports() {
@@ -1489,8 +1525,14 @@ async function getAllHistoryReports() {
     getAllReports().catch(() => []),
   ]);
   const seen = new Set(serverReports.map((report) => report.id));
+  const localById = new Map(localReports.map(report => [report.id, report]));
   return [
-    ...serverReports,
+    ...serverReports.map(report => {
+      const local = localById.get(report.id);
+      // A local edit may still be uploading when the history list is requested.
+      return local && historyTimestamp(local, "updatedAt") > historyTimestamp(report, "updatedAt")
+        ? { ...report, updatedAt: local.updatedAt } : report;
+    }),
     ...localReports
       .filter((report) => !seen.has(report.id))
       .map((report) => ({ ...report, source: "local" })),
@@ -1527,13 +1569,17 @@ async function deleteServerReport(id) {
 async function updateLocalReportComment(id, historyComment) {
   const record = await getReportRecord(id);
   if (!record) return;
-  record.historyComment = String(historyComment || "").slice(0, 1000);
+  const value = String(historyComment || "").slice(0, 1000);
+  if (value === (record.historyComment || "")) return record;
+  record.historyComment = value;
+  record.updatedAt = new Date().toISOString();
   await dbTransaction("readwrite", (store) => store.put(record));
+  return record;
 }
 
 async function updateServerReportComment(id, historyComment) {
   if (!cloudHistoryEnabled) return;
-  await reportApi(`/api/reports/${encodeURIComponent(id)}/comment`, {
+  return reportApi(`/api/reports/${encodeURIComponent(id)}/comment`, {
     method: "PATCH",
     body: JSON.stringify({ historyComment }),
   });
@@ -5186,7 +5232,7 @@ function updateHistorySelectionUi() {
   elements.historySelectionExit.disabled = historyDeleting;
   elements.historySearch.disabled = historyDeleting;
   elements.historyProjectFilter.disabled = historyDeleting;
-  elements.clearHistoryButton.disabled = busy;
+  elements.historySort.disabled = historyDeleting;
   elements.closeHistoryButton.disabled = historyDeleting;
   elements.historyList.querySelectorAll("[data-history-select]").forEach(checkbox => {
     checkbox.checked = selectedHistoryReportIds.has(checkbox.dataset.historySelect);
@@ -5287,11 +5333,14 @@ async function saveHistoryCommentNow(report, commentField) {
     report.source === "server"
       ? updateServerReportComment(report.id, value)
       : updateLocalReportComment(report.id, value);
-  await action;
+  const saved = await action;
   if (report.source === "server") {
     await updateLocalReportComment(report.id, value).catch(() => {});
   }
   report.historyComment = value;
+  if (saved?.updatedAt) report.updatedAt = saved.updatedAt;
+  const dates = commentField.closest(".history-item")?.querySelector(".history-dates");
+  if (dates) dates.innerHTML = historyDatesMarkup(report);
   if (report.id === draft.reportId) setSaveStatus("Комментарий сохранён");
 }
 
@@ -5315,7 +5364,6 @@ function closeHistory() {
 function setHistoryLoading(loading) {
   historyLoading = loading;
   elements.historyList.setAttribute("aria-busy", String(loading));
-  elements.clearHistoryButton.disabled = loading;
   if (loading) historyFilteredReports = [];
   updateHistorySelectionUi();
   if (!loading) return;
@@ -5365,11 +5413,11 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
   renderHistoryProjectFilter(reports, names);
   const selectedProject = elements.historyProjectFilter.value;
   const query = elements.historySearch.value.trim().toLowerCase();
-  const filtered = reports.filter((report) => {
+  const filtered = sortHistoryReports(reports.filter((report) => {
     const projectKey = reportProjectKey(report);
     const matchesProject = !selectedProject || (selectedProject === "none" ? !projectKey : projectKey === selectedProject);
     return matchesProject && `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""} ${names[projectKey] || projectKey}`.toLowerCase().includes(query);
-  });
+  }), elements.historySort.value);
   const availableIds = new Set(reports.map(report => report.id));
   for (const id of selectedHistoryReportIds) if (!availableIds.has(id)) selectedHistoryReportIds.delete(id);
   historyFilteredReports = filtered;
@@ -5398,7 +5446,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const projectKey = reportProjectKey(report);
     const projectName = names[projectKey] || projectKey || "Без проекта";
     const projectStyle = colors[projectKey] ? ` style="--project-color:${colors[projectKey]}"` : "";
-    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p><code>${escapeHtml(publicId)}</code> · ${new Date(report.updatedAt).toLocaleString("ru-RU")}</p>`;
+    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p class="history-item-meta"><code>${escapeHtml(publicId)}</code><span class="history-dates">${historyDatesMarkup(report)}</span></p>`;
     if (historySelectionMode) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -5438,6 +5486,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const openButton = createSmallButton("Открыть", async () => {
       await saveReportSnapshot("before-open-history");
       const fullReport = report.source === "server" ? await getServerReport(report.id) : report;
+      if (report.source === "server") await cacheOpenedServerReport(fullReport).catch(() => {});
       suppressHistory = true;
       draft = normalizeDraft(clone(fullReport.document));
       historyCurrent = serializeDraft();
@@ -9152,6 +9201,9 @@ elements.historySearch.addEventListener("input", () => {
 elements.historyProjectFilter.addEventListener("change", () => {
   if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
 });
+elements.historySort.addEventListener("change", () => {
+  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
+});
 elements.historySelectionToggle.addEventListener("click", () => {
   setHistorySelectionMode(!historySelectionMode).catch(() => {});
 });
@@ -9166,36 +9218,6 @@ elements.historySelectAll.addEventListener("change", () => {
   updateHistorySelectionUi();
 });
 elements.deleteSelectedHistoryButton.addEventListener("click", deleteSelectedHistoryReports);
-elements.clearHistoryButton.addEventListener("click", async () => {
-  const reports = await getAllHistoryReports();
-  if (!reports.length) return;
-  const confirmed = await askConfirmation(`Удалить всю историю для текущей привязки (${reports.length} отчётов)?`, {
-    title: "Очистка истории",
-    confirmText: "Очистить",
-    danger: true,
-  });
-  if (!confirmed) return;
-  await clearReportHistory();
-  await clearServerReports().catch(() => {});
-  serverReportHashes = {};
-  dismissedCloudHashes = {};
-  saveServerReportHashes();
-  saveDismissedCloudHashes();
-  draft = normalizeDraft({ ...clone(DEFAULT_DRAFT), draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId() });
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Если localStorage недоступен, достаточно очистки IndexedDB и серверной истории.
-  }
-  historyCurrent = serializeDraft();
-  undoStack = [];
-  redoStack = [];
-  hasUnsavedLocalChanges = false;
-  render();
-  updateChecklistUrl(draft.publicId);
-  updateHistoryButtons();
-  await renderHistoryList();
-});
 elements.focusModeButton.addEventListener("click", () => {
   const enabled = !document.querySelector(".app-shell").classList.contains("focus-mode");
   setFocusMode(enabled);

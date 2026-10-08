@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
+const QaReportHistory = require("../history-content");
 
 function functionSource(file, name) {
   const source = fs.readFileSync(require.resolve(`../${file}`), "utf8");
@@ -40,6 +41,7 @@ function element() {
 
 function harness(records = new Map(), preferences = new Map()) {
   const ctx = vm.createContext({
+    QaReportHistory,
     HISTORY_PROJECT_COLORS_KEY: "qa-report-project-colors-v1",
     HISTORY_PROJECT_NAMES_KEY: "qa-report-project-names-v1",
     localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) },
@@ -48,10 +50,10 @@ function harness(records = new Map(), preferences = new Map()) {
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },
-      historyModal: { hidden: true }, clearHistoryButton: element(), closeHistoryButton: element(),
+      historyModal: { hidden: true }, closeHistoryButton: element(),
       historySelectionToggle: element(), historySelectionToolbar: element(), historySelectAll: element(),
       historySelectionCount: element(), historySelectionExit: element(), deleteSelectedHistoryButton: element(),
-      introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historyList: element(), historyUsage: element(),
+      introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historySort: element(), historyList: element(), historyUsage: element(),
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
     clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
@@ -62,7 +64,7 @@ function harness(records = new Map(), preferences = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
+    "historyTimestamp", "sortHistoryReports", "historyDatesMarkup", "updateLocalReportComment", "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -160,7 +162,7 @@ test("opening history shows loading before saving and applies search typed durin
   assert.match(ctx.elements.historyList.innerHTML, /Загружаем историю…/);
   assert.equal((ctx.elements.historyList.innerHTML.match(/class="history-item history-skeleton"/g) || []).length, 3);
   assert.equal(ctx.elements.historyList.attributes["aria-busy"], "true");
-  assert.equal(ctx.elements.clearHistoryButton.disabled, true);
+  assert.equal(ctx.elements.historySelectionToggle.disabled, true);
   await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
   assert.equal(saveCalls, 1);
   assert.equal(loadCalls, 0);
@@ -173,7 +175,7 @@ test("opening history shows loading before saving and applies search typed durin
   assert.equal(historyLabel(ctx), "QA-2");
   assert.equal(ctx.elements.historyList.children.length, 1);
   assert.equal(ctx.elements.historyList.attributes["aria-busy"], "false");
-  assert.equal(ctx.elements.clearHistoryButton.disabled, false);
+  assert.equal(ctx.elements.historySelectionToggle.disabled, false);
 });
 
 test("a closed history request cannot overwrite a newly opened list", async () => {
@@ -275,10 +277,10 @@ test("project colors accept short and full HEX codes and reject CSS or markup in
   const colored = harness(new Map([["SHOP-1", historyRecord("SHOP-1")], ["APP-2", historyRecord("APP-2")]]), names);
   await colored.renderHistoryList();
   assert.equal(JSON.stringify(colored.loadProjectColors()), '{"SHOP":"#ff0000"}');
-  assert.match(colored.elements.historyList.children[0].children[0].innerHTML, /style="--project-color:#ff0000"/);
+  assert.match(colored.elements.historyList.children.find(item => item.children[0].innerHTML.includes("<h3>SHOP-1</h3>")).children[0].innerHTML, /style="--project-color:#ff0000"/);
   assert.match(colored.elements.historyProjectFilter.innerHTML, />Магазин<\/option>/);
   assert.doesNotMatch(colored.elements.historyProjectFilter.innerHTML, /Магазин · SHOP/);
-  assert.doesNotMatch(colored.elements.historyList.children[1].children[0].innerHTML, /--project-color/);
+  assert.doesNotMatch(colored.elements.historyList.children.find(item => item.children[0].innerHTML.includes("<h3>APP-2</h3>")).children[0].innerHTML, /--project-color/);
 });
 
 
@@ -328,4 +330,99 @@ test("deleting a cloud report waits for in-flight saves and also removes its loc
   await deletion;
   assert.deepEqual(deleted, ["server:cloud", "local:cloud"]);
   assert.equal(ctx.selectedHistoryReportIds.size, 0);
+});
+
+
+test("viewing and saving unchanged or legacy content preserves history dates; actual edits advance them", async () => {
+  const createdAt = "2026-09-01T10:00:00.000Z", updatedAt = "2026-09-20T10:00:00.000Z";
+  const document = { reportId: "report", publicId: "abc12345", issueUrl: "QA-1", environment: "STAGE",
+    revision: 1, updatedAt, sections: [{ id: "section", title: "Checks", columns: [{ id: "text", title: "Text" }], rows: [{ id: "row", status: "OK", cells: { text: "Check" } }] }] };
+  const records = new Map([["report", { id: "report", createdAt, updatedAt, historyComment: "Note", document }]]);
+  const ctx = harness(records);
+  const viewed = structuredClone(document);
+  viewed.revision = 99;
+  viewed.updatedAt = new Date().toISOString();
+  viewed.lastSavedBy = "other-tab";
+  viewed.sections[0].columns[0].width = 240;
+  const saved = await ctx.saveReportSnapshot("open-history", viewed);
+  assert.equal(saved.createdAt, createdAt);
+  assert.equal(saved.updatedAt, updatedAt);
+  assert.equal(saved.document.revision, 99, "sync metadata still persists");
+  assert.equal(saved.historyComment, "Note");
+  assert.equal((await ctx.saveReportSnapshot("autosave", viewed)).updatedAt, updatedAt);
+  for (const edit of [value => { value.sections[0].rows[0].cells.text = "Edited"; },
+    value => { value.sections[0].rows[0].status = "НЕ ОК"; },
+    value => { value.sections[0].rows.push({ id: "new", status: "OK", cells: { text: "New" } }); }]) {
+    const changed = structuredClone(viewed);
+    edit(changed);
+    records.get("report").updatedAt = updatedAt;
+    const result = await ctx.saveReportSnapshot("autosave", changed);
+    assert.ok(result.updatedAt > updatedAt);
+    assert.equal(result.createdAt, createdAt);
+    assert.equal((await ctx.saveReportSnapshot("open-history", changed)).updatedAt, result.updatedAt);
+  }
+  const prior = records.get("report").updatedAt;
+  assert.equal((await ctx.updateLocalReportComment("report", "Note")).updatedAt, prior);
+  records.get("report").updatedAt = updatedAt;
+  const commented = await ctx.updateLocalReportComment("report", "Changed note");
+  assert.ok(commented.updatedAt > updatedAt);
+  assert.equal(commented.createdAt, createdAt);
+  assert.equal((await ctx.saveReportSnapshot("open-history", commented.document)).updatedAt, commented.updatedAt);
+});
+
+test("history orders newest changes by default and creation on request, preserving selection and filters", async () => {
+  const old = { ...historyRecord("SHOP-1"), createdAt: "2026-09-01T10:00:00Z", updatedAt: "2026-10-08T10:00:00Z" };
+  const newer = { ...historyRecord("SHOP-2"), createdAt: "2026-10-07T10:00:00Z", updatedAt: "2026-10-07T10:00:00Z" };
+  const other = { ...historyRecord("APP-3"), createdAt: "2026-10-08T10:00:00Z", updatedAt: "2026-10-08T11:00:00Z" };
+  const ctx = harness(new Map([old, newer, other].map(report => [report.id, report])));
+  const labels = () => ctx.elements.historyList.children.map(item => item.children[0].innerHTML.match(/<h3>(.*?)<\/h3>/)[1]);
+  await ctx.renderHistoryList();
+  assert.deepEqual(labels(), ["APP-3", "SHOP-1", "SHOP-2"]);
+  const markup = ctx.elements.historyList.children[1].children[0].innerHTML;
+  assert.match(markup, /Создан <time datetime="2026-09-01T10:00:00.000Z"/);
+  assert.match(markup, /Изменён <time datetime="2026-10-08T10:00:00.000Z"/);
+  ctx.selectedHistoryReportIds.add("SHOP-1");
+  ctx.elements.historyProjectFilter.value = "SHOP";
+  ctx.elements.historySort.value = "created";
+  await ctx.renderHistoryList();
+  assert.deepEqual(labels(), ["SHOP-2", "SHOP-1"]);
+  assert.equal(ctx.selectedHistoryReportIds.has("SHOP-1"), true);
+  assert.match(ctx.historyDatesMarkup({ createdAt: "invalid" }), /Создан —.*Изменён —/);
+});
+
+test("metadata worker detects legacy content off the UI thread without returning attachments", async () => {
+  const document = { reportId: "legacy", revision: 5, issueUrl: "QA-1", sections: [{ cells: { file: "data:" + "AAAA".repeat(1000) } }] };
+  const record = { id: "legacy", createdAt: "2026-09-01T10:00:00Z", updatedAt: "2026-09-20T10:00:00Z", document };
+  let handler;
+  const metadata = await new Promise((resolve, reject) => {
+    const ctx = vm.createContext({
+      QaReportHistory, importScripts() {},
+      self: { addEventListener: (_name, action) => { handler = action; }, postMessage: result => result.error ? reject(Error(result.error)) : resolve(result.metadata) },
+      indexedDB: { open() {
+        const request = {};
+        queueMicrotask(() => { request.result = { close() {}, transaction() { return { objectStore() { return { get() {
+          const read = {}; queueMicrotask(() => { read.result = record; read.onsuccess(); }); return read;
+        } }; } }; } }; request.onsuccess(); });
+        return request;
+      } },
+    });
+    vm.runInContext(fs.readFileSync(require.resolve("../draft-storage-worker.js"), "utf8"), ctx);
+    handler({ data: { requestId: 1, reportId: "legacy", databaseName: "test", databaseVersion: 1, storeName: "reports" } });
+  });
+  assert.equal(metadata.updatedAt, record.updatedAt);
+  assert.equal(metadata.historyContentFingerprint, QaReportHistory.contentFingerprint(document));
+  assert.equal(metadata.document.revision, 5);
+  assert.equal(metadata.document.sections, undefined);
+  assert.doesNotMatch(JSON.stringify(metadata), /data:/);
+});
+
+test("pending local edits retain their modification date while cloud metadata is still older", async () => {
+  const local = { ...historyRecord("SHOP-1"), createdAt: "2026-09-01T10:00:00Z", updatedAt: "2026-10-08T10:00:00Z" };
+  const ctx = harness(new Map([[local.id, local]]));
+  ctx.getServerReports = async () => [{ ...local, createdAt: "2026-08-01T10:00:00Z", updatedAt: "2026-10-07T10:00:00Z", source: "server" }];
+  const reports = await ctx.getAllHistoryReports();
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].source, "server");
+  assert.equal(reports[0].createdAt, "2026-08-01T10:00:00Z");
+  assert.equal(reports[0].updatedAt, local.updatedAt);
 });

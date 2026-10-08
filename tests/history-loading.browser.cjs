@@ -69,7 +69,7 @@ async function main() {
   assert.equal(await page.locator('.history-skeleton').count(), 3);
   assert.equal(await page.locator('.history-loading-status').innerText(), 'Загружаем историю…');
   assert.equal(await page.locator('#historyList').getAttribute('aria-busy'), 'true');
-  assert.equal(await page.locator('#clearHistoryButton').isDisabled(), true);
+  assert.equal(await page.locator('#historySelectionToggle').isDisabled(), true);
   assert.equal(await page.locator('#historySearch').isDisabled(), false);
   await page.waitForFunction(() => typeof window.releaseHistorySave === 'function');
   const screenshot = async name => {
@@ -110,7 +110,7 @@ async function main() {
   await page.waitForFunction(() => document.getElementById('historyList').getAttribute('aria-busy') === 'false');
   assert.equal(await page.locator('.history-skeleton').count(), 0);
   assert.equal(await page.locator('.history-empty p').innerText(), 'Ничего не найдено');
-  assert.equal(await page.locator('#clearHistoryButton').isDisabled(), false);
+  assert.equal(await page.locator('#historySelectionToggle').isDisabled(), false);
   await page.evaluate(() => { saveReportSnapshot = window.originalSaveHistorySnapshot; getAllHistoryReports = window.originalHistoryRead; });
   await page.fill('#historySearch', '');
   await page.waitForSelector('.history-comment-field');

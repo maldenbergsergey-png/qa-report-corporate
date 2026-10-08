@@ -1,3 +1,4 @@
+const { contentFingerprint: historyContentFingerprint } = require("./history-content");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -1374,16 +1375,19 @@ async function handleReportSave(request, response) {
     .slice(0, 500);
   const schemaVersion = Number(body.schemaVersion || document.schemaVersion || 3) || 3;
   const reason = String(body.reason || "").trim().slice(0, 120);
-  const historyComment = String(body.historyComment ?? existing?.history_comment ?? "").trim().slice(0, 1000);
+  const historyComment = String(body.historyComment ?? existing?.history_comment ?? "").slice(0, 1000);
   const publicId = ensurePublicId(owner, body.publicId || document.publicId || existing?.public_id || "", id);
   document.publicId = publicId;
   const documentJson = JSON.stringify(document);
   const contentHash = reportContentHash(document);
   const baseContentHash = String(body.baseContentHash || "").trim();
   let existingNormalizedHash = "";
+  let existingHistoryFingerprint = "";
   if (existing?.document_json) {
     try {
-      existingNormalizedHash = reportContentHash(sanitizeReportDocumentForServer(JSON.parse(existing.document_json)));
+      const previousDocument = sanitizeReportDocumentForServer(JSON.parse(existing.document_json));
+      existingNormalizedHash = reportContentHash(previousDocument);
+      existingHistoryFingerprint = historyContentFingerprint(previousDocument);
     } catch {
       existingNormalizedHash = existing.content_hash || "";
     }
@@ -1409,6 +1413,10 @@ async function handleReportSave(request, response) {
     });
   }
   const createdAt = existing?.created_at || body.createdAt || now;
+  // Derived summary fields can be refreshed when an older report is opened.
+  const unchanged = existingHistoryFingerprint === historyContentFingerprint(document)
+    && (existing?.history_comment || "") === historyComment;
+  const updatedAt = unchanged ? existing.updated_at || createdAt : now;
   getReportsDb()
     .prepare(`
       INSERT INTO reports (
@@ -1454,7 +1462,7 @@ async function handleReportSave(request, response) {
       historyComment,
       documentJson,
       createdAt,
-      now,
+      updatedAt,
       now,
       reason,
     );
@@ -1475,7 +1483,7 @@ async function handleReportSave(request, response) {
       contentHash,
       historyComment,
       createdAt,
-      updatedAt: now,
+      updatedAt,
       lastOpenedAt: now,
       reason,
       source: "server",
@@ -1548,15 +1556,17 @@ async function handleReportCommentUpdate(request, response, reportId) {
   const now = new Date().toISOString();
   const result = getReportsDb()
     .prepare(
-      "UPDATE reports SET history_comment = ?, updated_at = ? WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''",
+      "UPDATE reports SET updated_at = CASE WHEN history_comment = ? THEN updated_at ELSE ? END, history_comment = ? WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''",
     )
-    .run(historyComment, now, reportId, owner.source, owner.id);
+    .run(historyComment, now, historyComment, reportId, owner.source, owner.id);
   if (!result.changes) {
     const error = new Error("Отчёт не найден в серверной истории");
     error.status = 404;
     throw error;
   }
-  sendJson(response, 200, { ok: true, reportId, historyComment, updatedAt: now });
+  const saved = getReportsDb().prepare("SELECT updated_at FROM reports WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''")
+    .get(reportId, owner.source, owner.id);
+  sendJson(response, 200, { ok: true, reportId, historyComment, updatedAt: saved.updated_at });
 }
 
 async function handleReportDelete(request, response, reportId) {

@@ -1,3 +1,5 @@
+importScripts("/history-content.js?v=1");
+
 // Read metadata from the existing database off the UI thread. Its records and
 // attachments stay in the original format; this worker never writes or migrates.
 self.addEventListener("message", async ({ data }) => {
@@ -19,7 +21,8 @@ self.addEventListener("message", async ({ data }) => {
     let metadata;
     if (record) {
       const { reportId, publicId, draftId, revision, updatedAt, lastSavedBy, lastSavedClientId } = record.document || {};
-      metadata = { id: record.id, createdAt: record.createdAt, historyComment: record.historyComment,
+      metadata = { id: record.id, createdAt: record.createdAt, updatedAt: record.updatedAt, historyComment: record.historyComment,
+        historyContentFingerprint: record.historyContentFingerprint || QaReportHistory.contentFingerprint(record.document || {}),
         document: { reportId, publicId, draftId, revision, updatedAt, lastSavedBy, lastSavedClientId } };
     }
     self.postMessage({ requestId, metadata });

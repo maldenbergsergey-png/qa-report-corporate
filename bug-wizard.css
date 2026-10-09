@@ -4,10 +4,10 @@
 #bugReportModal .bug-wizard-header { padding: 18px 24px; margin: 0; border-bottom: 1px solid var(--line); background: transparent; }
 #bugReportModal .bug-wizard-header h2 { margin: 0; font-size: 20px; font-weight: 700; }
 #closeBugReport { font-size: 24px; font-weight: 300; }
-#bugReportModal .bug-steps { flex: 0 0 auto; display: flex; justify-content: center; gap: 0; padding: 20px 24px; margin: 0; font-size: 12px; }
+#bugReportModal .bug-steps { flex: 0 0 auto; display: flex; justify-content: center; gap: 0; padding: 22px 24px; margin: 0; font-size: 13px; }
 #bugReportModal .bug-steps li { flex: 1; max-width: 270px; gap: 9px; white-space: nowrap; }
 .bug-steps li:not(:last-child)::after { content: ''; flex: 1; height: 1px; margin: 0 14px; background: var(--line); }
-#bugReportModal .bug-steps li > span { flex: 0 0 30px; width: 30px; height: 30px; font-size: 13px; background: var(--surface-strong); }
+#bugReportModal .bug-steps li > span { flex: 0 0 34px; width: 34px; height: 34px; font-size: 14px; background: var(--surface-strong); }
 #bugReportModal .bug-steps [aria-current="step"] > span { background: var(--primary); color: #fff; }
 #bugReportModal .bug-steps .complete > span { background: transparent; border-color: var(--green); color: var(--green); }
 #bugReportModal .bug-report-body { flex: 1 1 auto; min-height: 0; padding: 0 24px 16px; overflow: auto; }
@@ -247,3 +247,10 @@
 @media (max-width: 720px) { .bug-draft-columns { grid-template-columns: minmax(0, 1fr); } #bugDraftResize { display: none; } }
 
 #bugReportModal [data-bug-text-section="steps"] .bug-rich-visual, #bugReportModal [data-bug-virtual="steps"] .bug-rich-visual { height: 160px; }
+
+#bugReportModal .bug-rich-visual pre { margin: 4px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--ink) 5%, var(--surface)); font: 13px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+#bugReportModal .bug-rich-visual strong, #bugReportModal .bug-rich-visual b { font-weight: 700; }
+#bugReportModal .bug-rich-visual em, #bugReportModal .bug-rich-visual i { font-style: italic; }
+#bugReportModal .bug-rich-visual u { text-decoration: underline; }
+#bugReportModal .bug-rich-toolbar [data-format="codeblock"] { font-family: ui-monospace, monospace; font-weight: 600; }
+@media (max-width: 720px) { #bugReportModal .bug-steps li > span { flex-basis: 30px; width: 30px; height: 30px; font-size: 13px; } }

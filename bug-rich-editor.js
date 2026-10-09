@@ -19,45 +19,39 @@
     if (asset && imageData(asset.dataUrl)) { const image = document.createElement("img"); image.src = asset.dataUrl; image.alt = asset.name; image.draggable = false; card.append(image); }
     const caption = document.createElement("span"); caption.textContent = asset?.name || token.slice(11, -1); card.append(icon("paperclip"), caption); return card;
   }
-  function inline(value, resolve, depth = 0) {
-    const fragment = document.createDocumentFragment();
-    if (depth > 12) { fragment.append(document.createTextNode(value)); return fragment; }
-    const pattern = /\[Вложение: [^\]\r\n]{1,220}\]|\{\{([^{}\n]+)\}\}|\[([^\]\n|]+)\|(https?:\/\/[^\]\s]+)\]|\*([^*\n]+)\*|_([^_\n]+)_|\+([^+\n]+)\+/g;
-    let offset = 0, match;
-    while ((match = pattern.exec(value))) {
-      fragment.append(document.createTextNode(value.slice(offset, match.index)));
-      if (match[0].startsWith("[Вложение: ")) fragment.append(attachment(match[0], resolve(match[0])));
-      else {
-        const tag = match[1] ? "code" : match[2] ? "a" : match[4] ? "strong" : match[5] ? "em" : "u", el = document.createElement(tag);
-        const text = match[1] || match[2] || match[4] || match[5] || match[6];
-        if (tag === "a") { el.href = safeUrl(match[3]); el.rel = "noopener noreferrer"; }
-        el.append(tag === "code" ? document.createTextNode(text) : inline(text, resolve, depth + 1)); fragment.append(el);
-      }
-      offset = pattern.lastIndex;
-    }
-    fragment.append(document.createTextNode(value.slice(offset))); return fragment;
-  }
   function wikiFragment(value, resolve) {
-    const fragment = document.createDocumentFragment(); let list;
-    for (const line of String(value || "").split(/\r?\n/)) {
-      const item = line.match(/^([*#])\s+(.+)$/);
-      if (item) {
-        const tag = item[1] === "*" ? "UL" : "OL";
-        if (!list || list.tagName !== tag) { list = document.createElement(tag); fragment.append(list); }
-        const li = document.createElement("li"); li.append(inline(item[2], resolve)); list.append(li);
-      } else { list = null; const p = document.createElement("div"); p.append(line ? inline(line, resolve) : document.createElement("br")); fragment.append(p); }
+    function render(node) {
+      if (node.type === "text") {
+        const fragment = document.createDocumentFragment(), pattern = /\[Вложение: [^\]\r\n]{1,220}\]/g;
+        let offset = 0;
+        for (const match of node.text.matchAll(pattern)) { fragment.append(document.createTextNode(node.text.slice(offset, match.index)), attachment(match[0], resolve(match[0]))); offset = match.index + match[0].length; }
+        fragment.append(document.createTextNode(node.text.slice(offset))); let result = fragment;
+        for (const mark of [...(node.marks || [])].reverse()) {
+          const tag = { strong: "strong", em: "em", underline: "u", code: "code", link: "a" }[mark.type];
+          if (!tag) continue;
+          const el = document.createElement(tag); if (tag === "a") { el.href = safeUrl(mark.attrs.href); el.rel = "noopener noreferrer"; } el.append(result); result = el;
+        }
+        return result;
+      }
+      const tag = { paragraph: "div", bulletList: "ul", orderedList: "ol", listItem: "li", codeBlock: "pre", blockquote: "blockquote" }[node.type] || (node.type === "heading" ? `h${node.attrs.level}` : "");
+      const el = tag ? document.createElement(tag) : document.createDocumentFragment();
+      if (node.type === "codeBlock") { el.textContent = (node.content || []).map(item => item.text || "").join(""); if (node.attrs?.language) el.dataset.language = node.attrs.language; }
+      else { el.append(...(node.content || []).map(render)); if (tag === "div" && !el.childNodes.length) el.append(document.createElement("br")); }
+      return el;
     }
-    return fragment;
+    return render(window.QaReportBugs.textDocument(value));
   }
   function wiki(node) {
-    if (node.nodeType === Node.TEXT_NODE) return node.data.replace(/\u00a0/g, " ");
+    if (node.nodeType === Node.TEXT_NODE) return node.data.replace(/\u00a0/g, " ").replace(/[\\*_+\[\]{}#]/g, "\\$&");
     if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return "";
     if (node.dataset?.attachmentPlaceholder) return node.dataset.attachmentPlaceholder;
     if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "SVG", "IMG"].includes(node.tagName)) return "";
+    if (node.tagName === "PRE") return `{code${node.dataset.language ? ":" + node.dataset.language : ""}}\n${node.innerText || node.textContent || ""}\n{code}\n`;
+    if (node.tagName === "CODE") return `{{${node.textContent}}}`;
     const contents = () => {
       let result = "";
       for (const child of node.childNodes) {
-        if (["DIV", "P", "UL", "OL"].includes(child.nodeName) && result && !result.endsWith("\n")) result += "\n";
+        if (["DIV", "P", "UL", "OL", "PRE", "BLOCKQUOTE"].includes(child.nodeName) && result && !result.endsWith("\n")) result += "\n";
         result += wiki(child);
       }
       return result;
@@ -69,10 +63,16 @@
       return text ? `${mark}${text}${node.tagName === "CODE" ? "}}" : mark}` : "";
     }
     // Chromium can express underline as a span after execCommand.
-    if (node.tagName === "SPAN" && node.style.textDecorationLine.includes("underline")) return `+${contents()}+`;
+    if (node.tagName === "SPAN") {
+      let value = contents();
+      if (node.style.textDecorationLine.includes("underline")) value = `+${value}+`;
+      if (node.style.fontStyle === "italic") value = `_${value}_`;
+      if (node.style.fontWeight === "bold" || Number(node.style.fontWeight) >= 600) value = `*${value}*`;
+      return value;
+    }
     if (["UL", "OL"].includes(node.tagName)) return [...node.children].map(li => `${node.tagName === "UL" ? "*" : "#"} ${wiki(li).replace(/\n+$/, "")}`).join("\n") + "\n";
     if (["DIV", "P", "LI", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE"].includes(node.tagName)) {
-      const text = contents().replace(/\n$/, ""); return text + "\n";
+      const text = contents().replace(/\n$/, ""); return (/^H[1-6]$/.test(node.tagName) ? `h${node.tagName[1]}. ${text}` : node.tagName === "BLOCKQUOTE" ? `bq. ${text}` : text) + "\n";
     }
     return contents();
   }
@@ -123,16 +123,16 @@
     };
     linkRow.append(url, button("Добавить ссылку", "Добавить", applyLink), button("Отменить ссылку", icon("close"), () => { linkRow.hidden = true; focus(); }));
     url.addEventListener("input", () => url.setCustomValidity("")); url.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); applyLink(); } if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); linkRow.hidden = true; focus(); } });
-    for (const [name, command, title, symbol] of [["bold", "bold", "Полужирный", "B"], ["italic", "italic", "Курсив", "I"], ["underline", "underline", "Подчёркнутый", "U"], ["bullet", "insertUnorderedList", "Маркированный список", "list"], ["ordered", "insertOrderedList", "Нумерованный список", "list-ordered"], ["link", "createLink", "Ссылка", "link"], ["code", "code", "Код", "code"]]) {
-      const el = button(title, symbol.length === 1 ? symbol : icon(symbol), () => {
+    for (const [name, command, title, symbol] of [["bold", "bold", "Полужирный", "B"], ["italic", "italic", "Курсив", "I"], ["underline", "underline", "Подчёркнутый", "U"], ["bullet", "insertUnorderedList", "Маркированный список", "list"], ["ordered", "insertOrderedList", "Нумерованный список", "list-ordered"], ["link", "createLink", "Ссылка", "link"], ["code", "code", "Код в строке", "code"], ["codeblock", "codeblock", "Блок кода", "{}"]]) {
+      const el = button(title, symbol.length === 1 || symbol === "{}" ? symbol : icon(symbol), () => {
         if (shell.dataset.mode === "source") {
           const start = control.selectionStart, end = control.selectionEnd, text = control.value.slice(start, end) || "текст", marks = { bold: "*", italic: "_", underline: "+", code: "{{" };
-          const value = ["bullet", "ordered"].includes(name) ? text.split("\n").map(line => `${name === "bullet" ? "*" : "#"} ${line}`).join("\n") : name === "link" ? `[${text}|https://]` : `${marks[name]}${text}${name === "code" ? "}}" : marks[name]}`;
-          control.focus(); control.setSelectionRange(start, end); if (!document.execCommand("insertText", false, value)) control.setRangeText(value, start, end, "select"); control.dispatchEvent(new Event("input", { bubbles: true })); return;
+          const value = (name === "codeblock" || name === "code" && text.includes("\n")) ? `${start && control.value[start - 1] !== "\n" ? "\n" : ""}{code}\n${text}\n{code}${end < control.value.length && control.value[end] !== "\n" ? "\n" : ""}` : ["bullet", "ordered"].includes(name) ? text.split("\n").map(line => `${name === "bullet" ? "*" : "#"} ${line}`).join("\n") : name === "link" ? `[${text}|https://]` : `${marks[name]}${text}${name === "code" ? "}}" : marks[name]}`;
+          control.focus(); control.setRangeText(value, start, end, "select"); control.dispatchEvent(new Event("input", { bubbles: true })); return;
         }
         focus();
         if (name === "link") { remember(); linkRow.hidden = false; url.value = ""; url.focus(); return; }
-        if (name === "code") { const code = document.createElement("code"); code.textContent = window.getSelection().toString() || "код"; const fragment = document.createDocumentFragment(); fragment.append(code); insert(fragment); }
+        if (name === "code" || name === "codeblock") { const value = window.getSelection().toString() || "код", code = document.createElement(name === "codeblock" || value.includes("\n") ? "pre" : "code"); code.textContent = value; const fragment = document.createDocumentFragment(); fragment.append(code); insert(fragment); }
         else {
           const selection = window.getSelection(), original = selection.getRangeAt(0).cloneRange(), fragment = original.cloneContents(), before = document.queryCommandState(command);
           windowCommand(command);
@@ -148,19 +148,22 @@
     }
     const picker = document.createElement("div"); picker.className = "bug-rich-attachment-picker"; picker.hidden = true; picker.setAttribute("role", "group"); picker.setAttribute("aria-label", "Вложения для описания");
     const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.multiple = true; fileInput.hidden = true; fileInput.setAttribute("aria-label", "Загрузить вложение в описание");
-    let attachButton;
+    let attachButton, insertion;
+    const captureInsertion = () => shell.dataset.mode === "source" ? { start: control.selectionStart, end: control.selectionEnd } : instance.captureRange();
     if (options.attachments) {
       const closePicker = () => { picker.hidden = true; attachButton.setAttribute("aria-expanded", "false"); };
       attachButton = button("Вставить вложение в описание", icon("paperclip"), () => {
         if (!picker.hidden) { closePicker(); return; }
-        remember(); picker.replaceChildren();
-        for (const asset of options.attachments()) {
-          const choice = button(`Вставить ${asset.name}`, asset.name, () => { closePicker(); options.insertAsset(asset); }); choice.className = "bug-rich-attachment-choice"; picker.append(choice);
+        insertion = captureInsertion(); const assets = options.attachments();
+        if (!assets.length) { fileInput.click(); return; }
+        picker.replaceChildren();
+        for (const asset of assets) {
+          const choice = button(`Вставить ${asset.name}`, asset.name, () => { closePicker(); options.insertAsset(asset, insertion); }); choice.className = "bug-rich-attachment-choice"; picker.append(choice);
         }
         picker.append(button("Загрузить новый файл", "Загрузить новый файл…", () => { closePicker(); fileInput.click(); })); picker.hidden = false; attachButton.setAttribute("aria-expanded", "true");
       });
       attachButton.dataset.attachments = "true"; attachButton.setAttribute("aria-expanded", "false"); toolbar.append(attachButton);
-      fileInput.addEventListener("change", async () => { const files = [...fileInput.files]; fileInput.value = ""; if (files.length && !locked()) await options.insertFiles(files); });
+      fileInput.addEventListener("change", async () => { const files = [...fileInput.files]; fileInput.value = ""; if (files.length && !locked()) await options.insertFiles(files, insertion); });
       shell.addEventListener("keydown", event => { if (event.key === "Escape" && !picker.hidden) { event.preventDefault(); event.stopPropagation(); closePicker(); attachButton.focus(); } });
     }
     const modes = document.createElement("div"); modes.className = "bug-rich-modes"; modes.setAttribute("role", "group"); modes.setAttribute("aria-label", "Режим редактирования");

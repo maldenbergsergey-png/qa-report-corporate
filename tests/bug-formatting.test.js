@@ -14,3 +14,22 @@ test("visual combinations retain nested marks in Jira Cloud", () => {
   assert.deepEqual(doc.content[0].content[2].marks.map(mark => mark.type), ["link", "strong"]);
   assert.equal(doc.content[0].content.at(-1).text, "_буквальный код_");
 });
+
+
+test("code blocks and literal punctuation round-trip to Jira Cloud and safe HTML", () => {
+  const value = "*Title*\n{code:javascript}\nconst value = { name: '<script>', tags: '*_+' };\nconsole.log(value);\n{code}\nLiteral \\*stars\\* and file\\_name\\_x\n# First\n# Second";
+  const doc = Bugs.textDocument(value);
+  const block = doc.content.find(node => node.type === "codeBlock");
+  assert.equal(block.attrs.language, "javascript"); assert(!block.content[0].text.endsWith("\n")); assert.match(block.content[0].text, /\{ name: '<script>'/);
+  assert.equal(doc.content[2].content.map(node => node.text).join(""), "Literal *stars* and file_name_x");
+  const html = Bugs.textHtml(value);
+  assert.match(html, /<strong>Title<\/strong>/); assert.match(html, /<pre><code>const value =/);
+  assert.match(html, /&lt;script&gt;/); assert(!html.includes("<script>")); assert.match(html, /<ol><li>/);
+  assert.equal(Bugs.toJiraValue({ kind: "textarea" }, value, false), value);
+  assert.deepEqual(Bugs.toJiraValue({ kind: "textarea" }, value, true), doc);
+});
+
+test("HTML conversion preserves nested formatting and rejects executable links", () => {
+  assert.equal(Bugs.textHtml("*+_Nested_+* {{<code>}} [Link|https://example.test]"), '<p><strong><u><em>Nested</em></u></strong> <code>&lt;code&gt;</code> <a href="https://example.test/">Link</a></p>');
+  assert(!Bugs.textHtml("[x|javascript:alert(1)] <img src=x onerror=alert(1)>").includes("<img"));
+});

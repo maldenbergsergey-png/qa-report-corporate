@@ -22,6 +22,8 @@
   function insertAssets(assets, offset = descriptionControl()?.selectionStart) {
     const control = descriptionControl();
     if (!control || !state || !state.inlineReady || state.busy || state.pending || state.created) return;
+    const added = assets.filter(asset => !state.assets.some(current => assetKey(current) === assetKey(asset)));
+    if (added.length) { state.assets.push(...added); $("bugAiAttachments").checked = true; refreshAssets(); }
     const tokens = assets.map(asset => {
       const key = assetKey(asset);
       if (!state.inlineAssets[key]) {
@@ -37,8 +39,9 @@
     if (!tokens.length) return;
     const rich = window.QaReportBugRich.get(control);
     if (control.hidden && rich) { rich.insertTokens(tokens, offset instanceof Range ? offset : undefined); return; }
-    const start = Math.max(0, Math.min(control.value.length, offset ?? control.value.length)), text = tokens.join("\n");
-    control.setRangeText(text, start, start, "end"); control.dataset.touched = "true";
+    const start = Math.max(0, Math.min(control.value.length, (typeof offset === "object" ? offset.start : offset) ?? control.value.length)), text = tokens.join("\n");
+    const end = typeof offset === "object" ? Math.max(start, Math.min(control.value.length, offset.end ?? start)) : start;
+    control.setRangeText(text, start, end, "end"); control.dataset.touched = "true";
     control.dispatchEvent(new Event("input", { bubbles: true })); control.focus();
   }
   function dropOffset(control, event) {
@@ -119,7 +122,7 @@
     $("cancelBugReport").textContent = state.step === 4 ? "Закрыть" : "Отмена";
     $("cancelBugReport").hidden = true;
     $("bugReportTitle").textContent = state.step === 4 ? "Баг-репорт создан" : "Завести баг-репорт";
-    $("bugReportEyebrow").textContent = target().provider === "eva" ? "EVA" : "Jira";
+    $("bugReportEyebrow").textContent = "Создание задачи";
     $("bugReportModal").querySelector(".bug-report-body").scrollTop = 0; scheduleContextDock();
   }
   function targetControls() {
@@ -420,9 +423,9 @@
       inlineReady: () => Boolean(state?.inlineReady),
       asset: token => state?.assets.find(asset => state.inlineAssets[assetKey(asset)] === token),
       ...(description ? {
-        attachments: () => state.assets,
-        insertAsset: asset => insertAssets([asset]),
-        insertFiles: async files => { const current = state, control = descriptionControl(), rich = window.QaReportBugRich.get(control), at = control.hidden ? rich.captureRange() : control.selectionStart, assets = await addContextFiles(files); if (state === current) insertAssets(assets || [], at); }
+        attachments: () => [...new Map([...state.assets, ...state.availableAssets].map(asset => [assetKey(asset), asset])).values()],
+        insertAsset: (asset, at) => insertAssets([asset], at),
+        insertFiles: async (files, at) => { const current = state, assets = await addContextFiles(files); if (state === current) insertAssets(assets || [], at); }
       } : {})
     });
   }
@@ -608,7 +611,7 @@
       span.textContent = `${asset.name}${check.disabled ? " — формат пока не поддерживается" : ""}`;
       label.append(check, span); list.append(label);
     });
-    if (reset) $("bugAiAttachments").checked = false;
+    if (reset || !state.assets.some(asset => window.QaReportAttachmentAnalysis.format(asset))) $("bugAiAttachments").checked = state.assets.some(asset => window.QaReportAttachmentAnalysis.format(asset));
     $("bugAiAttachmentsOption").hidden = !state.assets.length;
     $("bugAiAttachmentSelection").hidden = !$("bugAiAttachments").checked;
     if (reset) $("bugAiAttachmentSelection").open = false;
@@ -699,7 +702,7 @@
         if (state !== current) return;
         assets.push({ attachmentId: crypto.randomUUID(), name: file.name, type: file.type || "application/octet-stream", dataUrl, source: { issueUrl: "", id: "", name: file.name, hash: "", kind: file.type.startsWith("image/") ? "image" : "file" } });
       }
-      state.extraAssets.push(...assets); state.assets.push(...assets); refreshAssets(); return assets;
+      state.extraAssets.push(...assets); state.assets.push(...assets); if (assets.some(asset => window.QaReportAttachmentAnalysis.format(asset))) $("bugAiAttachments").checked = true; refreshAssets(); return assets;
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current) { state.filesLoading = false; contextControls(); } }
   }
@@ -774,6 +777,7 @@
     const current = state; busy(true, "ИИ готовит заголовок, шаги и результаты…", "generating");
     // Preserve edits made while the model is responding.
     const before = Object.fromEntries([...$("bugEditor").querySelectorAll("[data-bug-value]")].map(el => [el.dataset.bugValue, controlState(el)]));
+    const inlineBefore = Object.values(current.inlineAssets).flatMap(token => Array.from({ length: (descriptionControl()?.value || "").split(token).length - 1 }, () => token));
     const virtualBefore = Object.fromEntries([...$("bugEditor").querySelectorAll("[data-bug-section]")].map(el => [el.dataset.bugSection, el.value]));
     try {
       const systemPrompt = prompt(), additionalContext = $("bugContextText").value.trim(), jiraFields = generationFields(systemPrompt + "\n" + additionalContext);
@@ -802,7 +806,7 @@
       if ($("bugEditor").querySelector("[data-bug-section]")) values.description = !state.mapping.preconditions && result.draft.preconditions ? `Предусловия\n${result.draft.preconditions}` : ""; let preserved = false;
       for (const [id, value] of Object.entries(values)) {
         const control = $("bugEditor").querySelector(`[data-bug-value="${id}"]`);
-        if (control && controlState(control) === before[id]) control.value = value; else if (control) preserved = true;
+        if (control && controlState(control) === before[id]) control.value = id === "description" ? [value, ...inlineBefore.filter(token => !value.includes(token))].filter(Boolean).join("\n") : value; else if (control) preserved = true;
       }
       for (const control of $("bugEditor").querySelectorAll("[data-bug-section]")) {
         if (control.value === virtualBefore[control.dataset.bugSection]) control.value = control.dataset.bugSection === "steps" ? result.draft.steps.map((text, i) => `${i + 1}. ${text}`).join("\n") : result.draft[control.dataset.bugSection] || "";
@@ -1019,7 +1023,7 @@
     if (!sourceRow && !standalone) return;
     const htmlText = html => { const div = document.createElement("div"); div.innerHTML = html || ""; div.querySelectorAll("[data-editor-ui], .cell-file, img").forEach(n => n.remove()); return div.innerText || div.textContent || ""; };
     const assets = sourceRow ? window.QaReportJiraReuse.collect({ sections: [{ rows: [sourceRow] }] }) : [];
-    state = { sectionId, rowId, anchor, standalone, profiles: [], assets, fields: null, meta: null, pending: sourceRow?.pendingBug || null, selectedAssets: [], ready: false,
+    state = { sectionId, rowId, anchor, standalone, profiles: [], assets, availableAssets: window.QaReportJiraReuse.collect(report), fields: null, meta: null, pending: sourceRow?.pendingBug || null, selectedAssets: [], ready: false,
       extraAssets: [], inlineAssets: {}, inlineReady: false, speech: { mode: "browser", available: true, label: "Диктовка браузера" }, voicePhase: "idle", voiceAttempt: 0, speechReady: false,
       source: standalone ? { attachments: [] } : { report: { issueUrl: report.issueUrl, environment: report.environment, context: htmlText(report.intro).slice(0, 16000) }, section: section.title, status: sourceRow.status,
         cells: section.columns.map(c => ({ id: c.id, name: c.title, text: htmlText(sourceRow.cells[c.id]).slice(0, 12000) })), attachments: assets.map(a => ({ name: a.name, type: a.type })) } };
@@ -1102,7 +1106,7 @@
         state.speech = result.speech || state.speech; state.speechReady = true; state.profiles = result.profiles; contextControls();
         selectOptions($("bugAiProfile"), result.profiles.map(p => ({ value: p.id, label: `${p.label} · ${p.model}` })), result.profiles.find(p => p.isDefault)?.id || result.profiles[0]?.id || "", "ИИ не подключён");
         if (result.profiles.length) $("bugAiProfile").options[0].remove();
-        $("bugAiHint").textContent = result.profiles.length ? "ИИ подготовит черновик по предоставленным материалам и вашему системному промпту. Проверьте его перед созданием; используются лимиты выбранного подключения." : "Подключите ИИ в Connect или заполните баг вручную.";
+        $("bugAiHint").textContent = result.profiles.length ? "Проверьте черновик перед созданием задачи." : "Подключите ИИ в Connect или заполните баг вручную.";
         contextControls();
       }).catch(() => { if (state === current) { selectOptions($("bugAiProfile"), [], "", "ИИ недоступен"); $("bugAiHint").textContent = "Можно заполнить баг вручную. Проверьте подключение ИИ в Connect."; } });
       loadProjects().catch(() => {});

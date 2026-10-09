@@ -115,29 +115,58 @@
     const inline = (value, marks = [], depth = 0) => {
       const text = value => ({ type: "text", text: value, ...(marks.length ? { marks } : {}) });
       if (depth > 12) return [text(value)];
-      const nodes = [], pattern = /\[Вложение: [^\]\r\n]{1,220}\]|\{\{([^{}\n]+)\}\}|\[([^\]\n|]+)\|(https?:\/\/[^\]\s]+)\]|\*([^*\n]+)\*|_([^_\n]+)_|\+([^+\n]+)\+/g;
+      const nodes = [], pattern = /\\([\\*_+\[\]{}#-])|\[Вложение: [^\]\r\n]{1,220}\]|\{\{([^{}\n]+)\}\}|\[([^\]\n|]+)\|(https?:\/\/[^\]\s]+)\]|\*((?:\\.|[^*\\\n])+)\*|_((?:\\.|[^_\\\n])+)_|\+((?:\\.|[^+\\\n])+)\+/g;
       let offset = 0, match;
       while ((match = pattern.exec(value))) {
         if (match.index > offset) nodes.push(text(value.slice(offset, match.index)));
-        if (match[0].startsWith("[Вложение: ")) { nodes.push(text(match[0])); offset = pattern.lastIndex; continue; }
-        const content = match[1] || match[2] || match[4] || match[5] || match[6];
-        const mark = match[1] ? { type: "code" } : match[2] ? { type: "link", attrs: { href: match[3] } } : { type: match[4] ? "strong" : match[5] ? "em" : "underline" };
-        nodes.push(...(match[1] ? [{ type: "text", text: content, marks: [...marks, mark] }] : inline(content, [...marks, mark], depth + 1))); offset = pattern.lastIndex;
+        if (match[1] || match[0].startsWith("[Вложение: ")) { nodes.push(text(match[1] || match[0])); offset = pattern.lastIndex; continue; }
+        const content = match[2] || match[3] || match[5] || match[6] || match[7];
+        const mark = match[2] ? { type: "code" } : match[3] ? { type: "link", attrs: { href: match[4] } } : { type: match[5] ? "strong" : match[6] ? "em" : "underline" };
+        nodes.push(...(match[2] ? [{ type: "text", text: content, marks: [...marks, mark] }] : inline(content, [...marks, mark], depth + 1))); offset = pattern.lastIndex;
       }
       if (offset < value.length) nodes.push(text(value.slice(offset)));
       return nodes;
     };
     const paragraph = line => ({ type: "paragraph", ...(line ? { content: inline(line) } : {}) });
-    const content = []; let list = null;
-    for (const line of String(text || "").split(/\r?\n/)) {
+    const content = [], lines = String(text || "").split(/\r?\n/); let list = null;
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index], code = line.match(/^\{code(?::([^}]*))?\}(.*)$/);
+      if (code) {
+        list = null; const body = []; let tail = code[2], end, opening = true;
+        while ((end = tail.indexOf("{code}")) < 0 && index < lines.length - 1) { if (tail || !opening) body.push(tail); opening = false; tail = lines[++index]; }
+        if (end !== 0 || !body.length) body.push(end >= 0 ? tail.slice(0, end) : tail);
+        const language = code[1]?.match(/(?:^|\|)(?:language=)?([a-z0-9+-]{1,40})(?:\||$)/i)?.[1];
+        const value = body.join("\n"); content.push({ type: "codeBlock", ...(language ? { attrs: { language } } : {}), ...(value ? { content: [{ type: "text", text: value }] } : {}) });
+        if (end >= 0 && tail.slice(end + 6)) content.push(paragraph(tail.slice(end + 6)));
+        continue;
+      }
       const item = line.match(/^([*#])\s+(.+)$/);
       if (item) {
         const type = item[1] === "*" ? "bulletList" : "orderedList";
         if (list?.type !== type) { list = { type, content: [], ...(type === "orderedList" ? { attrs: { order: 1 } } : {}) }; content.push(list); }
         list.content.push({ type: "listItem", content: [paragraph(item[2])] });
-      } else { list = null; content.push(paragraph(line)); }
+      } else { list = null; const heading = line.match(/^h([1-6])\.\s+(.*)$/), quote = line.match(/^bq\.\s+(.*)$/);
+        content.push(heading ? { type: "heading", attrs: { level: Number(heading[1]) }, content: inline(heading[2]) } : quote ? { type: "blockquote", content: [paragraph(quote[1])] } : paragraph(line)); }
     }
     return { type: "doc", version: 1, content };
+  }
+  function textHtml(value) {
+    const escape = text => String(text).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    function html(node) {
+      if (node.type === "text") {
+        let value = escape(node.text);
+        for (const mark of [...(node.marks || [])].reverse()) {
+          const tag = { strong: "strong", em: "em", underline: "u", code: "code" }[mark.type];
+          if (tag) value = `<${tag}>${value}</${tag}>`;
+          else if (mark.type === "link") { try { const url = new URL(mark.attrs.href); if (["http:", "https:"].includes(url.protocol)) value = `<a href="${escape(url.href)}">${value}</a>`; } catch {} }
+        }
+        return value;
+      }
+      const children = (node.content || []).map(html).join("");
+      const tag = { paragraph: "p", bulletList: "ul", orderedList: "ol", listItem: "li", codeBlock: "pre", blockquote: "blockquote" }[node.type] || (node.type === "heading" ? `h${node.attrs.level}` : "");
+      return tag ? `<${tag}>${node.type === "codeBlock" ? `<code>${children}</code>` : children}</${tag}>` : children;
+    }
+    return html(textDocument(value)).replace(/<\/p><p>/g, "<br>");
   }
   function attachmentPlacements(value, ids) {
     if (value === undefined) return [];
@@ -225,5 +254,5 @@
     if (field.kind === "cascade") return { id: String(value.id), ...(value.child ? { child: { id: String(value.child) } } : {}) };
     throw new Error(`Поле «${field.name}» пока нельзя заполнить в QA Report`);
   }
-  return { DEFAULT_PROMPT, TRACKER_DEFAULT_PROMPT, CHECKLIST_DEFAULT_PROMPT, PREVIOUS_DEFAULT_PROMPT, LEGACY_DEFAULT_PROMPT, DRAFT_SCHEMA, FORMAT_INSTRUCTION, IMAGE_LIMITS, imageInputs, audioInput, textInputs, aiFields, ruleFields, parseDraft, textDocument, attachmentPlacements, kind, normalizeField, suggestMapping, contentValues, empty, isLabelField, toJiraValue };
+  return { DEFAULT_PROMPT, TRACKER_DEFAULT_PROMPT, CHECKLIST_DEFAULT_PROMPT, PREVIOUS_DEFAULT_PROMPT, LEGACY_DEFAULT_PROMPT, DRAFT_SCHEMA, FORMAT_INSTRUCTION, IMAGE_LIMITS, imageInputs, audioInput, textInputs, aiFields, ruleFields, parseDraft, textDocument, textHtml, attachmentPlacements, kind, normalizeField, suggestMapping, contentValues, empty, isLabelField, toJiraValue };
 });

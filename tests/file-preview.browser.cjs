@@ -154,14 +154,28 @@ async function main() {
 
   const readableToggle = page.locator('#fileViewerReadable');
   const rawJson = String.raw`{"product":{"category":{"id":5,"name":"\u041a\u0432\u0430\u0440\u0442\u0438\u0440\u044b"},"id":9007199254740993,"title":"\u041c\u0438\u0440\u0430 \ud83d\ude80","literal":"\\u0410","path":"\/upload\/file","control":"\u000a","quote":"\u0022","slash":"\u005c"}}`;
-  const readableJson = String.raw`{"product":{"category":{"id":5,"name":"Квартиры"},"id":9007199254740993,"title":"Мира 🚀","literal":"\\u0410","path":"\/upload\/file","control":"\u000a","quote":"\u0022","slash":"\u005c"}}`;
+  const readableJson = String.raw`{
+  "product": {
+    "category": {
+      "id": 5,
+      "name": "Квартиры"
+    },
+    "id": 9007199254740993,
+    "title": "Мира 🚀",
+    "literal": "\\u0410",
+    "path": "\/upload\/file",
+    "control": "\u000a",
+    "quote": "\u0022",
+    "slash": "\u005c"
+  }
+}`;
   await fixture(Buffer.from(rawJson), 'response.json', 'application/json');
   const jsonBefore = await page.evaluate(() => ({ report: serializeDraft(), undo: undoStack.length, dataUrl: viewingFileCard.dataset.dataUrl }));
   assert.equal(await readableToggle.isChecked(), true);
   assert.equal(await readableToggle.isEnabled(), true);
   assert.equal(await page.locator('#fileViewerReadableHint').isVisible(), true);
   assert.equal(await text.inputValue(), readableJson);
-  assert.match(await page.locator('#fileViewerState').textContent(), /Читаемый текст/);
+  assert.match(await page.locator('#fileViewerState').textContent(), /^15 строк.*Читаемый текст/);
   await page.locator('#copyFileViewerButton').click();
   await page.waitForFunction(() => document.getElementById('copyFileViewerButton').textContent === 'Скопировано');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), readableJson);
@@ -207,6 +221,25 @@ async function main() {
   await readableToggle.uncheck(); await close(); await card.click();
   assert.equal(await readableToggle.isChecked(), true);
   assert.equal(await text.inputValue(), readableJson); await close();
+
+  // Formatting also activates the existing toggle for JSON without Unicode escapes.
+  const plainJson = '{"outer":[{"count":2},true,null,[]],"id":9007199254740993,"duplicate":1,"duplicate":2}';
+  const formattedPlainJson = [
+    '{', '  "outer": [', '    {', '      "count": 2', '    },',
+    '    true,', '    null,', '    []', '  ],', '  "id": 9007199254740993,',
+    '  "duplicate": 1,', '  "duplicate": 2', '}',
+  ].join('\n');
+  await fixture(Buffer.from(plainJson), 'nested.json', 'application/json');
+  assert.equal(await readableToggle.isEnabled(), true);
+  assert.equal(await text.inputValue(), formattedPlainJson);
+  await readableToggle.uncheck();
+  assert.equal(await text.inputValue(), plainJson);
+  await readableToggle.check();
+  assert.equal(await text.inputValue(), formattedPlainJson); await close();
+  const invalidJson = ' {"outer": [1, 2,]}\r\n';
+  await fixture(Buffer.from(invalidJson), 'invalid.json', 'application/json');
+  assert.equal(await readableToggle.isDisabled(), true);
+  assert.equal(await text.inputValue(), invalidJson.replace(/\r\n/g, '\n')); await close();
   await fixture(Buffer.from(String.raw`\u003cimg src="https://example.test/image" onerror="window.previewExecuted=true"\u003e\u003cscript\u003ewindow.previewExecuted=true\u003c/script\u003e`), 'escaped.log');
   assert.match(await text.inputValue(), /^<img/);
   assert.equal(await dialog.locator('script,img,iframe').count(), 0);
@@ -237,7 +270,7 @@ async function main() {
   assert.match(await page.locator('#fileViewerMessage').textContent(), /сохранённых в браузере/); await close();
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: upload/reload, offline XML, readable Unicode/source JSON, exact numbers, literal escapes, clipboard and fallback, original download, keyboard/menu/focus, encodings, safe markup, unsupported/binary/oversized/empty/remote files and responsive layouts.');
+  console.log('PASS: upload/reload, offline XML, indented/readable/source JSON, invalid JSON, exact numbers, literal escapes, clipboard and fallback, original download, keyboard/menu/focus, encodings, safe markup, unsupported/binary/oversized/empty/remote files and responsive layouts.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

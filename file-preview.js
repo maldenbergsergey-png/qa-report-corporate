@@ -67,7 +67,38 @@
         return String.fromCharCode(code);
       });
   }
-  const api = { decode, readableText, isText, MAX_BYTES };
+  function formatJson(text) {
+    if (!/^\s*[\[{]/.test(text)) return text;
+    try { JSON.parse(text); } catch { return text; }
+    // Validate only; format the original tokens to preserve exact numbers,
+    // duplicate keys, key order and every escape inside strings.
+    const tokens = text.match(/"(?:[^"\\]|\\[\s\S])*"|[{}\[\],:]|[^\s{}\[\],:]+/g);
+    const parts = [];
+    let depth = 0, length = 0;
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      let part = token;
+      if (token === "{" || token === "[") {
+        if (++depth > 64) return text;
+        const closing = token === "{" ? "}" : "]";
+        if (tokens[index + 1] !== closing) part += "\n" + "  ".repeat(depth);
+      } else if (token === "}" || token === "]") {
+        depth--;
+        const opening = token === "}" ? "{" : "[";
+        if (tokens[index - 1] !== opening) part = "\n" + "  ".repeat(depth) + token;
+      } else if (token === ",") {
+        part += "\n" + "  ".repeat(depth);
+      } else if (token === ":") {
+        part += " ";
+      }
+      length += part.length;
+      // Keep unusually deep or expanding input from exhausting the viewer.
+      if (length > MAX_BYTES * 4) return text;
+      parts.push(part);
+    }
+    return parts.join("");
+  }
+  const api = { decode, readableText, formatJson, isText, MAX_BYTES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QaReportFilePreview = api;
 })(typeof window === "undefined" ? globalThis : window);

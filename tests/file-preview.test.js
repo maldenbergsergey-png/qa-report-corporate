@@ -92,3 +92,46 @@ test('invalid escapes and lone surrogates survive; valid pairs and JSON lines ar
   assert.equal(preview.readableText('Обычный текст'), 'Обычный текст');
   assert.equal(preview.readableText(''), '');
 });
+
+
+test('JSON formatting follows nested objects and arrays, including empty containers', () => {
+  const source = '{"product":{"name":"Квартира","flags":[true,false,null,{},[]],"count":2}}';
+  const expected = [
+    '{', '  "product": {', '    "name": "Квартира",', '    "flags": [',
+    '      true,', '      false,', '      null,', '      {},', '      []',
+    '    ],', '    "count": 2', '  }', '}',
+  ].join('\n');
+  assert.equal(preview.formatJson(source), expected);
+  assert.equal(preview.formatJson(expected), expected);
+  assert.deepEqual(JSON.parse(expected), JSON.parse(source));
+  assert.equal(preview.formatJson(' \r\n[ { }, [ ], 1 ]\t'), '[\n  {},\n  [],\n  1\n]');
+  assert.equal(preview.formatJson('{ }'), '{}');
+});
+
+test('formatting preserves number tokens, duplicate keys, key order and string contents', () => {
+  const source = String.raw`{"10":9007199254740993,"2":2.5000,"duplicate":1,"duplicate":-0,"exp":1e+003,"text":"{ [ ] } , : \" \\ \n \u0410"}`;
+  const expected = String.raw`{
+  "10": 9007199254740993,
+  "2": 2.5000,
+  "duplicate": 1,
+  "duplicate": -0,
+  "exp": 1e+003,
+  "text": "{ [ ] } , : \" \\ \n \u0410"
+}`;
+  assert.equal(preview.formatJson(source), expected);
+  assert.deepEqual(JSON.parse(expected), JSON.parse(source));
+  assert.match(preview.formatJson(preview.readableText(source)), /\\n А/);
+});
+
+test('invalid JSON and other file syntax retain original whitespace', () => {
+  for (const source of ['', '  обычный текст\r\n', '<x>text</x>', 'return { value: 1 };', '{"a":1,}', '[01]', '{"x":"unterminated}', '{"a":1} trailing', '{"a":1}\n{"b":2}', '  "scalar" ', String.raw`{"x":"\uZZZZ"}`]) {
+    assert.equal(preview.formatJson(source), source);
+  }
+});
+
+test('formatting falls back for excessive depth or output expansion', () => {
+  const deep = '['.repeat(65) + '0' + ']'.repeat(65);
+  assert.equal(preview.formatJson(deep), deep);
+  const expanding = '['.repeat(64) + '0,'.repeat(70000) + '0' + ']'.repeat(64);
+  assert.equal(preview.formatJson(expanding), expanding);
+});

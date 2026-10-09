@@ -6900,7 +6900,7 @@ function updateFileViewer() {
       name, type: viewingFileCard.dataset.mimeType || "",
       dataUrl: viewingFileCard.dataset.dataUrl || "",
     }, fileViewer.Encoding.value);
-    const readable = window.QaReportFilePreview.readableText(preview.text);
+    const readable = window.QaReportFilePreview.formatJson(window.QaReportFilePreview.readableText(preview.text));
     const hasReadableText = readable !== preview.text;
     fileViewer.Readable.disabled = !hasReadableText;
     fileViewer.ReadableHint.hidden = !hasReadableText;

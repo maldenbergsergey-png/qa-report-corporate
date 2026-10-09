@@ -21,7 +21,7 @@ const root = path.resolve(__dirname, "..");
     });
     const page = await context.newPage(); page.setDefaultTimeout(15000); const errors = []; page.on("pageerror", error => errors.push(error.message));
     async function prepare(origin) {
-      await page.goto(origin); await page.click("#reportMenuButton"); await page.click("#openStandaloneBugReport");
+      await page.goto(origin); await page.click("#reportMenuButton"); await page.click("#openStandaloneBugReport"); await page.locator('[name="bugCreationMode"][value="standalone"]').check();
       await page.waitForFunction(() => !document.getElementById("bugProject").disabled); await page.fill("#bugProject", "APP"); await page.press("#bugProject", "Tab");
       await page.waitForFunction(() => !document.getElementById("loadBugContext").disabled); await page.click("#loadBugContext");
     }

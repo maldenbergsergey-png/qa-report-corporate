@@ -1,6 +1,5 @@
 "use strict";
 const http = require("node:http"), fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
-const baseUrl = "https://jira.example.test";
 const fields = [
   { id: "summary", name: "Тема", kind: "text", required: true },
   { id: "description", name: "Описание", kind: "textarea", required: true },
@@ -17,6 +16,8 @@ const fields = [
 ].map(field => ({ schema: {}, allowedValues: [], ...field }));
 const draft = { summary: "Из ИИ-подборщика невозможно удалить объект из избранного", preconditions: "Объект добавлен в избранное.", steps: ["Открыть ИИ-подборщик", "Добавить объект в избранное", "Попытаться удалить объект из избранного"], expected: "Объект удаляется из избранного, не отображается в списке.", actual: "Объект остаётся в избранном.", missingInformation: [] };
 async function start(root, port = 0, options = {}) {
+  const baseUrl = options.provider === "eva" ? "https://eva.example.test/team" : "https://jira.example.test";
+  let failedUploads = 0;
   const jobs = new Map(), creates = [], uploads = [], evidence = [], aiRequests = [], requests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -24,12 +25,17 @@ async function start(root, port = 0, options = {}) {
     if (url.pathname.startsWith("/api/")) {
       let body = ""; for await (const chunk of req) body += chunk;
       let input = {}; try { input = JSON.parse(body || "{}"); } catch {}
-      if (url.pathname === "/api/agent/status") return json({ connected: true, devices: options.devices || [{ online: true, version: "0.6.17", lastSeenAt: new Date().toISOString(), jiraBaseUrls: [baseUrl] }] });
+      if (url.pathname === "/api/agent/status") return json({ connected: true, devices: options.devices || [{ online: true, version: "0.6.17", lastSeenAt: new Date().toISOString(), ...(options.provider === "eva" ? { evaBaseUrls: [baseUrl], jiraBaseUrls: [] } : { jiraBaseUrls: [baseUrl] }) }] });
       if (url.pathname === "/api/jira/connections") return json({ instances: [{ id: "fixture", baseUrl, name: "Jira", connected: true }] });
       if (url.pathname === "/api/auth/csrf") return json({ csrfToken: "fixture-csrf" });
       if (/^\/api\/agent\/jobs\//.test(url.pathname)) return json({ job: { status: "completed", result: jobs.get(url.pathname.split("/").at(-1)) } });
+      const resultJson = value => {
+        if (evaRequest) { const jobId = crypto.randomUUID(); jobs.set(jobId, value); return json({ jobId }); }
+        return json(value);
+      };
+      const evaRequest = url.pathname.startsWith("/api/eva/");
       let result;
-      url.pathname = url.pathname.replace("/api/agent/jira/", "/api/jira/");
+      url.pathname = url.pathname.replace("/api/agent/jira/", "/api/jira/").replace("/api/eva/", "/api/jira/");
       requests.push({ path: url.pathname, input });
       if (["/api/jira/issue-context", "/api/jira/issue-fields"].includes(url.pathname) && options.metadataDelay) await new Promise(resolve => setTimeout(resolve, options.metadataDelay));
       if (url.pathname === "/api/jira/issue-fields" && options.rejectType === input.issueTypeId) return json({ error: "Этот тип задачи недоступен для выбранного режима" }, 422);
@@ -42,14 +48,14 @@ async function start(root, port = 0, options = {}) {
         case "/api/ai/profiles": result = { profiles: options.noAi ? [] : [{ id: "fixture-ai", label: "ChatGPT", model: "Тестовая модель" }], speech: { mode: "browser", available: true } }; break;
         case "/api/ai/bug-draft": aiRequests.push(input); if (options.aiDelay) await new Promise(resolve => setTimeout(resolve, options.aiDelay)); if (options.aiFailure) return json({ error: "ИИ не ответил. Повторите генерацию." }, 503); result = { draft }; break;
         case "/api/jira/issue-options": result = { options: [{ value: "fixture-user", label: "Тестовый пользователь" }] }; break;
-        case "/api/jira/create-issue": creates.push(input); result = { key: "APP-1234", issueUrl: `${baseUrl}/browse/APP-1234`, operationId: input.operationId }; break;
-        case "/api/jira/issue-evidence": evidence.push(input); result = { ok: true }; break;
+        case "/api/jira/create-issue": creates.push(input); result = { key: "APP-1234", issueUrl: `${baseUrl}/${options.provider === "eva" ? "desk/Task" : "browse"}/APP-1234`, operationId: input.operationId }; break;
+        case "/api/jira/issue-evidence": if (options.evidenceDelay) await new Promise(resolve => setTimeout(resolve, options.evidenceDelay)); evidence.push(input); result = { ok: true }; break;
         case "/api/jira/import-attachment": {
           if (path.basename(root) === "qa-report") return json({ file: { type: "text/plain", dataBase64: Buffer.from("remote fixture log").toString("base64") } });
           res.writeHead(200, { "Content-Type": "text/plain" }); return res.end("remote fixture log");
         }
-        case "/api/jira/attachment-manifest": return json({ attachments: uploads, attachmentLimits: { fileBytes: 52428800, totalBytes: 78643200 } });
-        case "/api/jira/attachments": { const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8 }; uploads.push(file); return json({ attachments: [file] }); }
+        case "/api/jira/attachment-manifest": return resultJson({ attachments: uploads, attachmentLimits: { fileBytes: 52428800, totalBytes: 78643200 } });
+        case "/api/jira/attachments": { if (options.uploadDelay) await new Promise(resolve => setTimeout(resolve, options.uploadDelay)); if (failedUploads++ < (options.failUploads || 0)) return json({ error: "Тестовая ошибка загрузки" }, 400); const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8 }; uploads.push(file); return resultJson({ attachments: [file] }); }
         default: return json({ ok: true, reports: [], projects: [], downloads: [], session: null });
       }
       if (url.pathname.startsWith("/api/ai/") || path.basename(root) === "qa-report") { const jobId = crypto.randomUUID(); jobs.set(jobId, result); return json({ jobId }); }

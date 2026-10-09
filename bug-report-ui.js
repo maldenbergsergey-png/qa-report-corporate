@@ -85,7 +85,10 @@
       contextText: $("bugContextText").value, extraAssets: state.pending?.extraAssets || created?.extraAssets || [] });
   }
   const needsContext = () => state.standalone && !$("bugContextText").value.trim();
-  function message(text, error = false) { $("bugReportMessage").textContent = text; $("bugReportState").classList.toggle("error", error); $("bugReportState").hidden = !text; }
+  function message(text, error = false) {
+    if (state?.created) { state.createdError = error ? text : ""; showCreated(); return; }
+    $("bugReportMessage").textContent = text; $("bugReportState").classList.toggle("error", error); $("bugReportState").hidden = !text;
+  }
   function scheduleContextDock() {
     if (contextDockFrame) return;
     contextDockFrame = requestAnimationFrame(() => {
@@ -104,6 +107,7 @@
     state.step = typeof step === "boolean" ? step ? 3 : 1 : step;
     const modal = $("bugReportModal").querySelector("[role=dialog]");
     modal.dataset.step = state.step;
+    modal.setAttribute("aria-labelledby", state.step === 4 ? "bugCreatedTitle" : "bugReportTitle");
     modal.classList.toggle("bug-success-modal", state.step === 4);
     for (const [i, id] of ["bugStepTarget", "bugStepPrepare", "bugStepDraft"].entries()) {
       const item = $(id), number = i + 1;
@@ -123,7 +127,7 @@
     $("bugManualDraft").hidden = state.step !== 2 || Boolean(state.draftReady) || !state.profiles.length;
     $("bugReviewDraft").hidden = state.step !== 2 || !state.draftReady;
     $("generateBugDraft").hidden = state.step !== 3;
-    $("createBugIssue").hidden = state.step < 3 || Boolean(state.created && !state.uploadsPending && !state.evidencePending);
+    $("createBugIssue").hidden = state.step !== 3;
     $("cancelBugReport").textContent = state.step === 4 ? "Закрыть" : "Отмена";
     $("cancelBugReport").hidden = true;
     $("bugReportTitle").textContent = state.step === 4 ? "Баг-репорт создан" : "Завести баг-репорт";
@@ -138,6 +142,9 @@
       state.inlineReady = Boolean(api.bugStatus || parts[0] > 0 || parts[1] > 6 || parts[1] === 6 && parts[2] >= 16);
     }
     const locked = state.busy || Boolean(state.pending || state.created);
+    const chosen = Boolean(target().mode);
+    $("bugTargetChoiceHint").hidden = chosen;
+    for (const id of ["bugProject", "bugParent", "bugIssueType"]) $(id).disabled = locked || !chosen;
     $("loadBugContext").disabled = locked || !state.ready || !state.fields || !target().issueTypeId || state.loadedTarget !== JSON.stringify(target());
     $("bugConnectionStatus").hidden = !state.ready;
     $("bugBack").disabled = locked || voiceActive();
@@ -181,7 +188,7 @@
   }
   function target() {
     const selected = $("bugJiraConnection").value, provider = selected.startsWith("eva:") ? "eva" : "jira";
-    return { provider, baseUrl: provider === "eva" ? selected.slice(4) : selected, mode: document.querySelector('[name="bugCreationMode"]:checked').value,
+    return { provider, baseUrl: provider === "eva" ? selected.slice(4) : selected, mode: document.querySelector('[name="bugCreationMode"]:checked')?.value || "",
       projectKey: provider === "eva" ? $("bugProject").value.trim() : $("bugProject").value.trim().toUpperCase(), parent: $("bugParent").value.trim(), issueTypeId: $("bugIssueType").value };
   }
   const rememberTypes = () => read(TYPE_SETTINGS_KEY, {}).remember !== false;
@@ -236,6 +243,7 @@
     message(""); targetControls();
   }
   async function loadProjects() {
+    if (!target().mode) return;
     const url = target().baseUrl;
     const result = await job("/api/jira/issue-projects", { baseUrl: url });
     if (target().baseUrl !== url) return;
@@ -254,7 +262,7 @@
     return true;
   }
   async function loadContext() {
-    if (!state || state.busy) return;
+    if (!state || state.busy || !target().mode || state.pending || state.created) return;
     if (!parentConnection(true)) return;
     const current = state; busy(true, "Получаем типы задач…");
     try {
@@ -916,23 +924,38 @@
   }
   function showCreated() {
     steps(4);
-    const success = document.createElement("div"); success.className = "bug-success-check";
-    success.innerHTML = '<svg class="ui-icon" aria-hidden="true"><use href="#icon-check"></use></svg>';
-    const title = document.createElement("h3"); title.textContent = "Баг-репорт создан";
-    const status = document.createElement("p");
+    $("bugReportState").hidden = true; $("bugReportMessage").textContent = "";
+    const result = $("bugCreatedResult");
+    if (result.dataset.operationId !== state.created.operationId || !result.firstChild) {
+      result.dataset.operationId = state.created.operationId;
+      const success = document.createElement("div"); success.className = "bug-success-check"; success.append(uiIcon("check"));
+      const title = document.createElement("h3"); title.id = "bugCreatedTitle"; title.textContent = "Баг-репорт создан";
+      const card = document.createElement("div"); card.className = "bug-success-issue";
+      const link = document.createElement("a"); link.href = window.QaReportTrackerLinks.identity(state.created.issueUrl) || state.created.issueUrl;
+      link.target = "_blank"; link.rel = "noopener noreferrer"; link.className = "bug-success-link";
+      const key = document.createElement("strong"); key.textContent = state.created.key; link.append(key, uiIcon("external"));
+      const summary = document.createElement("span"); summary.textContent = state.created.summary || state.createdSummary || ""; card.append(link, summary);
+      const status = document.createElement("div"); status.id = "bugCreatedAttachments"; status.className = "bug-success-attachments";
+      status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+      const error = document.createElement("p"); error.id = "bugCreatedError"; error.className = "bug-success-error"; error.setAttribute("role", "alert");
+      const actions = document.createElement("div"); actions.className = "bug-success-actions";
+      const retry = document.createElement("button"); retry.id = "bugRetryAttachments"; retry.type = "button"; retry.className = "button button-secondary";
+      retry.addEventListener("click", create);
+      const again = document.createElement("button"); again.id = "bugCreateAnother"; again.type = "button"; again.className = "button button-secondary"; again.textContent = "Создать ещё один";
+      again.addEventListener("click", () => { const previous = state; close(); openBugAgain(previous); });
+      actions.append(retry, again); result.replaceChildren(success, title, card, status, error, actions);
+    }
     const count = state.created.attachmentKeys?.length || 0, uploaded = state.created.uploads?.length || 0;
-    status.textContent = state.created.attachmentsPending ? `Вложения: ${uploaded} из ${count} загружено` : state.created.evidencePending ? "Осталось добавить ссылки на вложения" : `Задача успешно создана в ${state.created.provider === "eva" ? "EVA" : "Jira"}`;
-    const card = document.createElement("a"); card.className = "bug-success-issue";
-    card.href = window.QaReportTrackerLinks.identity(state.created.issueUrl) || state.created.issueUrl; card.target = "_blank"; card.rel = "noopener noreferrer";
-    const key = document.createElement("strong"); key.textContent = state.created.key; key.append(uiIcon("external"));
-    const summary = document.createElement("span"); summary.textContent = state.created.summary || state.createdSummary || ""; card.append(uiIcon(state.created.provider === "eva" ? "bug" : "jira"), key, summary);
-    const actions = document.createElement("div"); actions.className = "bug-success-actions";
-    const open = document.createElement("a"); open.href = card.href; open.target = "_blank"; open.rel = "noopener noreferrer"; open.className = "button button-primary"; open.textContent = state.created.provider === "eva" ? "Открыть в EVA" : "Открыть в Jira"; open.append(uiIcon("external"));
-    const again = document.createElement("button"); again.type = "button"; again.className = "button button-secondary"; again.textContent = "Создать ещё один";
-    again.disabled = state.busy || state.created.attachmentsPending || state.created.evidencePending;
-    again.addEventListener("click", () => { const previous = state; close(); openBugAgain(previous); });
-    const done = document.createElement("button"); done.type = "button"; done.className = "button button-secondary"; done.textContent = "Закрыть"; done.disabled = state.busy && state.creating; done.addEventListener("click", close);
-    actions.append(open, again, done); $("bugCreatedResult").replaceChildren(success, title, status, card, actions);
+    const pending = state.created.attachmentsPending || state.created.evidencePending, status = $("bugCreatedAttachments");
+    status.hidden = !count; status.dataset.phase = pending ? state.busy ? "loading" : "pending" : "complete";
+    const indicator = pending && state.busy ? document.createElement("span") : uiIcon(pending ? "paperclip" : "check");
+    if (pending && state.busy) { indicator.className = "bug-spinner"; indicator.setAttribute("aria-hidden", "true"); }
+    const text = document.createElement("span"); text.textContent = "Вложения: " + uploaded + " из " + count + " загружено";
+    status.replaceChildren(indicator, text);
+    $("bugCreatedError").textContent = state.createdError || ""; $("bugCreatedError").hidden = !state.createdError;
+    $("bugCreateAnother").disabled = state.busy || pending;
+    $("bugRetryAttachments").hidden = state.busy || !pending;
+    $("bugRetryAttachments").textContent = state.created.attachmentsPending ? "Повторить загрузку" : "Добавить ссылки";
   }
   function openBugAgain(previous) { open(previous.sectionId, previous.rowId, previous.anchor); }
   async function persistCreated() {
@@ -972,8 +995,9 @@
       state.created.attachmentRefs[key] = { id: String(file.id), filename: file.filename || file.name, content: file.content || "" };
     });
     for (const reused of plan.reused) remember(reused, reused.originals);
+    if (plan.reused.length) { state.created.uploads = [...completed]; await persistCreated(); }
     for (let i = 0; i < plan.uploads.length; i++) {
-      const file = plan.uploads[i]; message(`Задача создана. Загружаем вложение ${i + 1} из ${plan.uploads.length}: ${file.name}`);
+      const file = plan.uploads[i]; showCreated();
       const problem = window.QaReportAttachmentLimits?.fileError(file, manifest.attachmentLimits);
       if (problem) throw new Error(problem);
       state.created.uploadOperations ||= {};
@@ -995,7 +1019,7 @@
   async function evidence() {
     state.evidencePending = Boolean(state.created.evidencePending);
     if (!state.evidencePending) return;
-    message("Вложения загружены. Добавляем ссылки в текст бага…");
+    showCreated();
     await retry(() => job("/api/jira/issue-evidence", { provider: state.created.provider || "jira", baseUrl: state.created.baseUrl || new URL(state.created.issueUrl).href.split("/browse/")[0], operationId: state.created.operationId,
       issueKey: state.created.key, fieldId: state.created.evidenceField, attachmentIds: [...new Set(Object.values(state.created.attachmentRefs || {}).map(ref => ref.id))],
       placements: (state.created.inlineAttachments || []).filter(item => state.created.attachmentRefs?.[item.assetKey]).map(item => ({ placeholder: item.placeholder, attachmentId: state.created.attachmentRefs[item.assetKey].id })) }));
@@ -1039,7 +1063,7 @@
       message("");
     } catch (error) {
       if (state !== current) return;
-      if (state.created) { state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); message(`${state.uploadsPending ? "Баг создан, но не все вложения загружены. Можно повторить загрузку или добавить файлы вручную в задачу." : "Вложения загружены, но ссылки не добавлены в текст. Можно повторить или добавить их в задачу."} ${error.message}`, true); }
+      if (state.created) { state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); message(`${state.uploadsPending ? "Не все вложения загружены." : "Не удалось добавить ссылки на вложения."} ${error.message}`, true); }
       else {
         if (savingNewOperation) state.pending = null;
         if (error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status)) {
@@ -1066,6 +1090,7 @@
         cells: section.columns.map(c => ({ id: c.id, name: c.title, text: htmlText(sourceRow.cells[c.id]).slice(0, 12000) })), attachments: assets.map(a => ({ name: a.name, type: a.type })) } };
     const current = state;
     state.created = sourceRow?.bugs?.find(b => b.attachmentsPending || b.evidencePending) || null;
+    document.querySelectorAll('[name="bugCreationMode"]').forEach(input => { input.checked = false; });
     state.extraAssets = state.pending?.extraAssets || state.created?.extraAssets || [];
     state.assets.push(...state.extraAssets); state.source.attachments = state.assets.map(a => ({ name: a.name, type: a.type }));
     $("bugAttachmentList").replaceChildren(); $("bugContextText").value = ""; $("bugExtraContext").open = false; $("bugExtraFiles").replaceChildren(); $("bugVoiceHint").textContent = ""; $("bugContextFiles").value = "";
@@ -1134,7 +1159,7 @@
       const locked = state.pending || state.created;
       selectOptions($("bugJiraConnection"), urls.map(url => { const eva = url.startsWith("eva:"), address = new URL(eva ? url.slice(4) : url); return { value: url, label: `${eva ? "EVA" : "Jira"} · ${address.host}${address.pathname.replace(/\/$/, "")}` }; }), !locked && urls.includes(reportSelected) ? reportSelected : urls.includes(selected) ? selected : urls[0]);
       $("bugJiraConnection").options[0].remove();
-      document.querySelector(`[name="bugCreationMode"][value="${saved.mode === "subtask" ? "subtask" : "standalone"}"]`).checked = true;
+      document.querySelectorAll('[name="bugCreationMode"]').forEach(input => { input.checked = Boolean(locked) && input.value === (saved.mode === "subtask" ? "subtask" : "standalone"); });
       $("bugProject").value = ($("bugJiraConnection").value === selected && saved.projectKey) || (!standalone && String(report.issueUrl || "").match(/\/browse\/([A-Z][A-Z0-9_]*)-\d+/i)?.[1]) || "";
       $("bugParent").value = !locked && !standalone && reportTarget ? reportTarget.issueUrl : saved.parent || (!standalone && report.issueUrl) || "";
       $("bugParentField").hidden = target().mode !== "subtask"; $("bugProjectField").hidden = target().mode === "subtask";
@@ -1155,7 +1180,7 @@
         steps(true); showCreated();
       }
       if (!state.busy) message(state.created ? state.uploadsPending ? "Баг создан. Повторите загрузку вложений или добавьте файлы вручную в задачу." : "Файлы загружены. Осталось добавить ссылки в текст бага." : state.pending ? "Проверим результат предыдущего создания." : "");
-      document.querySelector('[name="bugCreationMode"]:checked').focus();
+      (document.querySelector('[name="bugCreationMode"]:checked') || document.querySelector('[name="bugCreationMode"]')).focus();
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current && state.activity === "initializing") busy(false); }
   }
@@ -1246,17 +1271,17 @@
       }
     });
     for (const id of ["bugJiraConnection", "bugCreationMode", "bugProject", "bugParent"]) $(id).addEventListener("change", invalidate);
-    $("bugJiraConnection").addEventListener("change", () => { loadProjects().catch(error => message(error.message, true)); });
+    for (const id of ["bugJiraConnection", "bugCreationMode"]) $(id).addEventListener("change", () => { loadProjects().catch(error => message(error.message, true)); });
     $("bugParent").addEventListener("input", () => parentConnection());
     for (const id of ["bugJiraConnection", "bugCreationMode", "bugProject", "bugParent"]) $(id).addEventListener("change", () => {
       if (!state || state.busy || state.created || state.pending) return;
-      if (target().baseUrl && (target().mode === "subtask" ? target().parent : target().projectKey)) loadContext();
+      if (target().mode && target().baseUrl && (target().mode === "subtask" ? target().parent : target().projectKey)) loadContext();
     });
     for (const id of ["bugProject", "bugParent"]) {
       $(id).addEventListener("input", targetControls);
       $(id).addEventListener("blur", () => {
         if (!state || state.busy || state.created || state.pending || state.loadedTarget === JSON.stringify(target())) return;
-        if (target().mode === "subtask" ? target().parent : target().projectKey) { invalidate(); loadContext(); }
+        if (target().mode && (target().mode === "subtask" ? target().parent : target().projectKey)) { invalidate(); loadContext(); }
       });
     }
     $("bugIssueType").addEventListener("change", () => { state.fields = null; $("bugEditor").hidden = true; $("createBugIssue").hidden = true; loadFields(); });

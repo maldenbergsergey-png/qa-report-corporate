@@ -15,7 +15,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
         assert.match(await page.locator('.report-publication-buttons').evaluate(el => getComputedStyle(el).backgroundColor), /255, 255, 255, 0.72/);
         await page.screenshot({ path: path.join(output, 'light-publication.png') });
       }
-      await page.click("#reportMenuButton"); await page.click("#openStandaloneBugReport");
+      await page.click("#reportMenuButton"); await page.click("#openStandaloneBugReport"); await page.locator('[name="bugCreationMode"][value="standalone"]').check();
       await page.waitForFunction(() => !document.getElementById("bugProject").disabled);
       assert.equal(await page.locator("#loadBugContext").isDisabled(), true);
       const disabledAppearance = await page.locator('#loadBugContext').evaluate(el => { const style = getComputedStyle(el); return { background: style.backgroundColor, color: style.color, cursor: style.cursor }; });
@@ -195,10 +195,12 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       assert.deepEqual(fixture.creates.at(-1).fields.components, ["1"]); assert.deepEqual(fixture.creates.at(-1).fields.fixVersions, ["1"]);
       assert.deepEqual(fixture.evidence.at(-1).placements.map(item => item.placeholder), ["[Вложение: fixture.txt]", "[Вложение: screen.png]", "[Вложение: direct.txt]"]);
       assert.equal(fixture.evidence.at(-1).fieldId, "description");
-      assert.equal(await page.locator(".bug-success-issue").getAttribute("href"), "https://jira.example.test/browse/APP-1234");
+      assert.equal(await page.locator(".bug-success-link").getAttribute("href"), "https://jira.example.test/browse/APP-1234");
       await page.screenshot({ path: path.join(output, `${theme}-success.png`) });
       await page.getByRole("button", { name: "Создать ещё один", exact: true }).click();
-      await page.waitForFunction(() => document.querySelector(".bug-report-modal").dataset.step === "1" && !document.getElementById("loadBugContext").disabled);
+      await page.waitForFunction(() => document.querySelector(".bug-report-modal").dataset.step === "1" && !document.getElementById("bugCreationMode").disabled);
+      assert.equal(await page.locator('[name="bugCreationMode"]:checked').count(), 0);
+      assert.equal(await page.locator("#loadBugContext").isDisabled(), true);
       assert.equal(await page.inputValue("#bugContextText"), ""); assert.equal(await page.locator(".bug-extra-file").count(), 0);
       assert.deepEqual(errors, []); await context.close();
     }
@@ -209,7 +211,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       draft.sections[0].rows[0].cells.comment = window.QaReportAttachments.reference({ id: "remote-log", name: "remote.txt", type: "text/plain", source: { issueUrl: "https://jira.example.test/browse/APP-1", id: "42", name: "remote.txt", kind: "file" } });
       renderSections();
     });
-    await remotePage.locator(".row-menu-button").first().click(); await remotePage.getByRole("button", { name: "Завести баг-репорт", exact: true }).click();
+    await remotePage.locator(".row-menu-button").first().click(); await remotePage.getByRole("button", { name: "Завести баг-репорт", exact: true }).click(); await remotePage.locator('[name="bugCreationMode"][value="standalone"]').check();
     await remotePage.waitForFunction(() => !document.getElementById("bugProject").disabled);
     await remotePage.fill("#bugProject", "APP"); await remotePage.press("#bugProject", "Tab");
     await remotePage.waitForFunction(() => !document.getElementById("loadBugContext").disabled);
@@ -222,7 +224,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 }, serviceWorkers: 'block' });
       await ctx.addInitScript(theme => localStorage.setItem('qa-report-theme', theme), theme);
       const p = await ctx.newPage(); await p.goto(fixture.origin);
-      await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport');
+      await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport'); await p.locator('[name="bugCreationMode"][value="standalone"]').check();
       await p.waitForFunction(() => !document.getElementById('bugProject').disabled);
       await p.fill('#bugProject', 'APP'); await p.press('#bugProject', 'Tab');
       await p.waitForFunction(() => !document.getElementById('loadBugContext').disabled); await p.click('#loadBugContext');
@@ -351,7 +353,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       // Existing checklist attachments remain available even in a standalone bug.
       await p.click('#closeBugReport');
       await p.evaluate(() => { draft.sections[0].rows[0].cells[draft.sections[0].columns[0].id] = 'Контекст проверки из пункта чек-листа'; draft.sections[0].rows[0].cells.comment = window.QaReportAttachments.reference({ id: 'library-log', name: 'Ранее загруженный.log', type: 'text/plain', source: { issueUrl: 'https://jira.example.test/browse/APP-1', id: '42', name: 'Ранее загруженный.log', kind: 'file' } }); renderSections(); });
-      await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport');
+      await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport'); await p.locator('[name="bugCreationMode"][value="standalone"]').check();
       await p.waitForFunction(() => !document.getElementById('loadBugContext').disabled); await p.click('#loadBugContext');
       await p.fill('#bugContextText', 'Проверка вложения из чек-листа.'); await p.click('#bugManualDraft');
       await p.locator('[data-bug-field="description"] .bug-rich-visual').fill('Описание с ранее загруженным файлом.');
@@ -361,7 +363,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       await p.screenshot({ path: path.join(output, `${theme}-attachment-reuse.png`) });
       await p.click('#bugBack'); await p.screenshot({ path: path.join(output, `${theme}-prepare-compact.png`) });
       await p.click('#closeBugReport');
-      await p.locator('.row-menu-button').first().click(); await p.getByRole('button', {name:'Завести баг-репорт',exact:true}).click();
+      await p.locator('.row-menu-button').first().click(); await p.getByRole('button', {name:'Завести баг-репорт',exact:true}).click(); await p.locator('[name="bugCreationMode"][value="standalone"]').check();
       await p.waitForFunction(() => !document.getElementById('loadBugContext').disabled); await p.click('#loadBugContext');
       assert.equal(await p.inputValue('#bugContextText'), '');
       assert.equal(await p.locator('#bugContextText').getAttribute('aria-required'), 'false');
@@ -375,7 +377,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       await ctx.close();
     }
     const retryContext = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" }), retryPage = await retryContext.newPage();
-    await retryPage.goto(failedAi.origin); await retryPage.click('#reportMenuButton'); await retryPage.click('#openStandaloneBugReport');
+    await retryPage.goto(failedAi.origin); await retryPage.click('#reportMenuButton'); await retryPage.click('#openStandaloneBugReport'); await retryPage.locator('[name="bugCreationMode"][value="standalone"]').check();
     await retryPage.waitForFunction(() => !document.getElementById('bugProject').disabled);
     await retryPage.fill('#bugProject', 'APP'); await retryPage.press('#bugProject', 'Tab');
     await retryPage.waitForFunction(() => !document.getElementById('loadBugContext').disabled); await retryPage.click('#loadBugContext');
@@ -397,7 +399,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       const ctx = await browser.newContext({viewport:{width:1280,height:960}, serviceWorkers:'block'});
       try {
         await ctx.addInitScript(id => localStorage.setItem('qa-report-bug-target-v1', JSON.stringify({provider:'jira',baseUrl:'https://jira.example.test',projectKey:'APP',mode:'standalone',issueTypeId:id})), remembered);
-        const p = await ctx.newPage(); await p.goto(startup.origin); await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport');
+        const p = await ctx.newPage(); await p.goto(startup.origin); await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport'); await p.locator('[name="bugCreationMode"][value="standalone"]').check();
         await p.waitForFunction(() => document.getElementById('bugReportMessage').textContent.includes('тип задачи и поля'));
         assert.equal(await p.locator('#bugReportState').isVisible(), true); assert.equal(await p.locator('#bugSpinner').isVisible(), true);
         assert.equal(await p.locator('#loadBugContext').isDisabled(), true);

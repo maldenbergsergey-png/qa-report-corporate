@@ -131,21 +131,29 @@
 .bug-prompt-overlay h3 { margin: 0 0 16px; }
 #bugWizardPrompt { display: block; width: 100%; min-height: 240px; padding: 12px; color: var(--ink); line-height: 1.5; font: inherit; resize: vertical; }
 .bug-prompt-overlay .modal-actions { margin-top: 16px; justify-content: flex-end; }
-#bugReportModal .bug-success-modal { width: min(530px, calc(100vw - 40px)); height: auto; min-height: 380px; padding: 24px; position: relative; }
+#bugReportModal .bug-success-modal { width: min(480px, calc(100vw - 40px)); height: auto; min-height: 0; padding: 28px; position: relative; }
 .bug-success-modal .bug-wizard-header { position: absolute; top: 10px; right: 10px; padding: 0 !important; margin: 0 !important; border: 0 !important; }
 .bug-success-modal .bug-wizard-header > div, .bug-success-modal .bug-steps { display: none !important; }
 #bugReportModal .bug-success-modal .bug-report-body { padding: 0; }
-.bug-success-modal .bug-wizard-footer:has(#createBugIssue[hidden]) { display: none; }
+.bug-success-modal .bug-wizard-footer, .bug-success-modal #bugReportState { display: none !important; }
 #bugReportModal .bug-created-result { display: grid; justify-items: center; gap: 16px; margin: 8px 0 0; padding: 0; border: 0; background: none; text-align: center; }
-.bug-success-check { display: grid; place-items: center; width: 62px; height: 62px; background: var(--green); color: white; border-radius: 50%; box-shadow: 0 0 32px color-mix(in srgb, var(--green) 25%, transparent); }
-.bug-success-check .ui-icon { width: 40px; height: 40px; }
+.bug-success-check { display: grid; place-items: center; width: 48px; height: 48px; background: var(--green); color: white; border-radius: 50%; }
+.bug-success-check .ui-icon { width: 28px; height: 28px; }
 #bugReportModal .bug-created-result h3 { font-size: 20px; margin: 4px 0 0; }
 #bugReportModal .bug-created-result p { font-size: 13px; margin: 0; color: var(--muted); }
-.bug-success-issue { display: grid; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 22px; margin-top: 6px; background: var(--surface-strong); text-decoration: none; }
+.bug-success-issue { display: grid; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 16px; background: var(--surface-strong); }
+.bug-success-link { display: inline-flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%; min-width: 0; color: #2899ff; text-decoration: none; }
+.bug-success-link:hover { text-decoration: underline; }
+.bug-success-link .ui-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+.bug-success-link strong { min-width: 0; overflow-wrap: anywhere; }
+.bug-success-attachments { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.bug-success-attachments .bug-spinner, .bug-success-attachments .ui-icon { width: 16px; height: 16px; }
+.bug-success-attachments[data-phase="complete"] .ui-icon { color: var(--green); }
+#bugReportModal .bug-created-result .bug-success-error { color: var(--primary); text-align: left; width: 100%; }
 #bugReportModal .bug-success-issue strong { font-size: 15px; color: #2899ff; }
 .bug-success-issue span { font-size: 14px; color: var(--ink); line-height: 1.5; overflow-wrap: anywhere; }
-.bug-success-actions { display: flex; width: 100%; gap: 10px; }
-#bugReportModal .bug-success-actions .button { flex: 1; min-width: 0; padding: 10px 12px; font-size: 12px; text-decoration: none; }
+.bug-success-actions { display: flex; justify-content: center; width: 100%; gap: 10px; }
+#bugReportModal .bug-success-actions .button { min-width: 160px; padding: 10px 12px; font-size: 12px; text-decoration: none; }
 @media (max-width: 720px) { #bugReportModal .bug-preparation { grid-template-columns: minmax(0, 1fr); } .bug-draft-columns { grid-template-columns: minmax(0, 1fr); } .bug-draft-parameters { border-left: 0; padding-left: 0; } #bugReportModal .bug-wizard-footer { flex-wrap: wrap; } #bugReportModal .modal-actions { flex-wrap: wrap; } .bug-draft-ready { flex-wrap: wrap; } #bugReportModal .bug-steps { padding-inline: 12px; font-size: 10px; } .bug-steps li:not(:last-child)::after { margin: 0 6px; } #bugReportModal .bug-report-body { padding-inline: 16px; } .bug-success-actions { flex-wrap: wrap; } }
 
 :root[data-theme="dark"] #bugReportModal { --surface: #131f2b; --surface-strong: #1b2835; --line: #304253; --green: #2bd566; --muted: #b1bfce; }
@@ -197,11 +205,6 @@
 #bugReportModal [data-bug-text-section="steps"] textarea, #bugReportModal textarea[data-bug-section="steps"] { height: 160px; }
 #bugReportModal [data-bug-text-section="expected"] textarea, #bugReportModal [data-bug-text-section="actual"] textarea, #bugReportModal textarea[data-bug-section="expected"], #bugReportModal textarea[data-bug-section="actual"] { height: 120px; }
 #bugReportModal .bug-steps .complete .ui-icon { width: 18px; height: 18px; }
-#bugReportModal .bug-success-issue { grid-template-columns: 34px minmax(0, 1fr); column-gap: 18px; }
-.bug-success-issue > .ui-icon { grid-column: 1; grid-row: 1 / 3; align-self: center; width: 32px; height: 32px; stroke: none; }
-.bug-success-issue strong, .bug-success-issue span { grid-column: 2; }
-.bug-success-issue strong { display: flex; align-items: center; gap: 8px; }
-.bug-success-issue strong .ui-icon { width: 15px; height: 15px; }
 
 #bugReportModal .bug-attachments { padding: 12px 0 0; margin: 12px 0 0; border: 0; border-top: 1px solid var(--line); min-width: 0; }
 #bugReportModal .bug-attachments legend { padding: 0; font-size: 12px; }

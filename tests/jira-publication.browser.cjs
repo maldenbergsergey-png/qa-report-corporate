@@ -75,20 +75,79 @@ let child, browser;
     });
   }
   await prepare();
+  const conversion = await page.evaluate(() => {
+    const html = '<p>GET /items/{id} {color:red}literal{color} unmatched { }</p>'
+      + '<p><span style="color:#0052cc">Color {value}</span></p>'
+      + '<ul><li><a href="https://example.test/?value={original}">Label {name}</a></li></ul>'
+      + '<pre class="cell-code-block"><code>{"id": {"value": 1}}</code></pre>'
+      + '<p><code>const item = { id: 1 };</code></p>'
+      + '<span class="jira-file-placeholder" data-jira-name="log{original}.json">file</span>'
+      + '<img data-jira-name="shot{original}.png">';
+    const wiki = jiraCell(html, {forPublication: true});
+    const imported = parseJiraMarkup('h2. 1. Endpoint \\[id\\]\n||Text \\[value\\]||Status||\n|' + wiki + '|OK|').sections[0];
+    const importedHtml = document.createElement('div');
+    importedHtml.innerHTML = Object.values(imported.rows[0].cells)[0];
+    return { wiki, original: jiraCell(html), imported, importedCode: importedHtml.querySelector('pre').textContent,
+      adf: typeof htmlToAdfBlocks === 'function' ? htmlToAdfBlocks(html, {forPublication: true}) : null };
+  });
+  for (const literal of [String.raw`/items/\[id\]`,
+    String.raw`\[color:red\]literal\[color\]`, String.raw`unmatched \[ \]`,
+    String.raw`{color:#0052cc}Color \[value\]{color}`,
+    String.raw`[Label \[name\]|https://example.test/?value={original}]`,
+    '{code}\n{"id": {"value": 1}}\n{code}', '{{const item = { id: 1 };}}',
+    '[^log{original}.json]', '!shot{original}.png|thumbnail!']) {
+    assert.ok(conversion.wiki.includes(literal), literal);
+  }
+  assert.ok(conversion.original.includes('/items/{id}'), 'Ordinary export keeps source braces');
+  assert.equal(conversion.imported.title, 'Endpoint [id]');
+  assert.equal(conversion.imported.columns[0].title, 'Text [value]');
+  assert.equal(conversion.imported.rows.length, 1);
+  assert.equal(conversion.imported.columns.length, 1);
+  const importedCell = Object.values(conversion.imported.rows[0].cells)[0];
+  assert.ok(importedCell.includes('/items/[id]'));
+  assert.equal(conversion.importedCode, '{"id": {"value": 1}}');
+  if (conversion.adf) {
+    const text = JSON.stringify(conversion.adf);
+    assert.ok(text.includes('/items/[id]'));
+    assert.ok(text.includes('const item = { id: 1 };'));
+    assert.equal(conversion.adf.find(node => node.type === 'codeBlock').content[0].text, '{"id": {"value": 1}}');
+    assert.ok(!text.includes(String.raw`\[id\]`), 'ADF contains no wiki escapes');
+  }
   await page.fill('#issueUrl', 'https://jira.example/browse/QA-1');
-  await page.fill('#environment', 'STAGE'); await page.selectOption('#overallStatus', 'НЕ ОК');
-  await page.locator('.cell-editor').first().fill('Ошибка сохранения настроек');
+  await page.fill('#environment', 'STAGE {zone}'); await page.selectOption('#overallStatus', 'НЕ ОК');
+  await page.locator('.cell-editor').first().fill('GET /api/items/{id}');
+  await page.evaluate(() => {
+    document.querySelector('.section-title').value = 'Endpoints {group}';
+    document.querySelector('th[data-column-id] input').value = 'Check {column}';
+    elements.introEditor.innerHTML = '<p>Description {context}</p><pre class="cell-code-block"><code>{"id": 1}</code></pre>';
+    collectDocumentFields();
+  });
+  const publicationSource = await page.evaluate(() => JSON.stringify(draftContentSnapshot()));
+  const preparedWiki = await page.evaluate(() => generateMarkup({forPublication: true}));
+  for (const literal of [String.raw`STAGE \[zone\]`, String.raw`Endpoints \[group\]`,
+    String.raw`Check \[column\]`, String.raw`Description \[context\]`, String.raw`/api/items/\[id\]`,
+    '{code}\n{"id": 1}\n{code}']) assert.ok(preparedWiki.includes(literal), literal);
+  assert.equal(await page.evaluate(() => JSON.stringify(draftContentSnapshot())), publicationSource, 'Preparing a comment keeps the draft');
+  if (!corporate) {
+    const adf = await page.evaluate(() => JSON.stringify(generateAdfDocument({forPublication: true})));
+    for (const literal of ['STAGE [zone]', 'Endpoints [group]', 'Check [column]', 'Description [context]', '/api/items/[id]']) assert.ok(adf.includes(literal), literal);
+    assert.equal(await page.evaluate(() => JSON.stringify(draftContentSnapshot())), publicationSource);
+  }
   await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
   await page.waitForFunction(() => !publishInProgress);
   assert.equal(creates, 1); assert.equal(await page.locator('#publishButton').innerText(), 'Обновить отчёт');
+  assert.equal(comments.get('10001'), preparedWiki, 'Jira receives the converted comment');
+  assert.equal(await page.locator('.cell-editor').first().innerText(), 'GET /api/items/{id}');
   const first = await page.evaluate(() => structuredClone(draft.jiraPublication));
   assert.equal(first.firstPublishedAt, '2026-10-08T09:01:00.000Z');
   assert.match(await page.locator('#publicationInfo').innerText(), /Опубликован/);
   await page.click('#publishCancelButton');
-  await page.locator('.cell-editor').first().fill('Проверка после исправления');
+  await page.locator('.cell-editor').first().fill('PATCH /api/items/{itemId}');
   await page.click('#copyMenuButton'); await page.click('#publishExportButton'); await page.click('#acceptPublishScopeButton');
   await page.waitForFunction(() => !publishInProgress);
   assert.equal(creates, 1); assert.equal(updates, 1); assert.equal(preflights, 1);
+  assert.ok(comments.get('10001').includes(String.raw`/api/items/\[itemId\]`), 'Updates also convert the text');
+  assert.equal(await page.locator('.cell-editor').first().innerText(), 'PATCH /api/items/{itemId}');
   assert.equal(await page.evaluate(() => draft.jiraPublication.firstPublishedAt), first.firstPublishedAt);
   assert.equal(await page.evaluate(() => draft.jiraPublication.lastPublishedAt), '2026-10-08T10:00:00.000Z');
   await page.click('#publishCancelButton');

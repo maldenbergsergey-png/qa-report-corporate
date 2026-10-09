@@ -373,14 +373,14 @@
       }
       if (/^h1\.\s+/i.test(line)) continue;
       if (/^h[23]\.\s+/i.test(line)) {
-        pendingTitle = line.replace(/^h[23]\.\s+/i, "").replace(/\\!=/g, "!=").trim();
+        pendingTitle = line.replace(/^h[23]\.\s+/i, "").replace(/\\!=/g, "!=").replace(/\\([\[\]])/g, "$1").trim();
         headers = null;
         currentSection = null;
         continue;
       }
       if (line.startsWith("||")) {
         tableNumber += 1;
-        const rawHeaders = splitWikiRow(line).map((header) => header.replace(/\\!=/g, "!=").trim());
+        const rawHeaders = splitWikiRow(line).map((header) => header.replace(/\\!=/g, "!=").replace(/\\([\[\]])/g, "$1").trim());
         const numberIndex = rawHeaders.findIndex((header) => /^(номер|№|nº)$/i.test(header));
         const statusIndex = rawHeaders.findIndex((header) => /статус|^test status$|^status$/i.test(statusText(header)));
         const columns = rawHeaders

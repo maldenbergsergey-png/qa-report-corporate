@@ -3968,7 +3968,7 @@ function escapeWikiNotEquals(value, protect = value => value) {
   return value.replace(/!=/g, () => protect("\\!="));
 }
 
-function htmlToWiki(html, {protect = value => value} = {}) {
+function htmlToWiki(html, {protect = value => value, forPublication = false} = {}) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
   function childrenToWiki(parent) {
@@ -3998,7 +3998,12 @@ function htmlToWiki(html, {protect = value => value} = {}) {
     return output;
   }
   function walk(node) {
-    if (node.nodeType === Node.TEXT_NODE) return escapeWikiNotEquals(node.textContent, protect);
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = forPublication
+        ? window.QaReportJiraPublication.textForPublication(node.textContent, { wiki: true, protect })
+        : node.textContent;
+      return escapeWikiNotEquals(text, protect);
+    }
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     if (node.matches?.("[data-editor-ui]")) return "";
     if (node.matches?.(".cell-file")) return protect(fileCardToWiki(node));
@@ -4009,6 +4014,9 @@ function htmlToWiki(html, {protect = value => value} = {}) {
     }
     if (node.matches?.(".jira-file-placeholder")) return protect(`[^${node.dataset.jiraName || "file"}]`);
     const tag = node.tagName.toLowerCase();
+    if (forPublication && tag === "code" && node.parentElement?.tagName !== "PRE") {
+      return protect(`{{${extractCodeText(node)}}}`);
+    }
     if ((tag === "span" && node.style.color) || (tag === "font" && node.getAttribute("color"))) {
       const content = childrenToWiki(node);
       if (!content.trim()) return content;
@@ -4068,12 +4076,12 @@ function normalizeJiraCellWhitespace(value) {
   return lines.join("\n");
 }
 
-function jiraCell(value) {
+function jiraCell(value, {forPublication = false} = {}) {
   const protectedBlocks = [];
   const tokenPrefix = `@@JIRA_CELL_${crypto.randomUUID()}_`;
   // Generate syntax only after escaping text; never run a second escape over it.
   const escapeCellText = text => text.replace(/\\/g, "&#92;").replace(/\|/g, "\\|");
-  let content = htmlToWiki(value, {protect: (block, kind) => {
+  let content = htmlToWiki(value, {forPublication, protect: (block, kind) => {
     const token = `${tokenPrefix}${protectedBlocks.length}@@`;
     protectedBlocks.push(kind === "list" ? escapeCellText(block) : block);
     return token;
@@ -4164,31 +4172,34 @@ function sectionsForPublication(sectionIds = null, sourceDraft = draft, statuses
 }
 
 function generateMarkup(options = {}) {
-  const { sectionIds = null, statuses = null } = options;
+  const { sectionIds = null, statuses = null, forPublication = false } = options;
+  const publicationText = value => forPublication
+    ? window.QaReportJiraPublication.textForPublication(value, { wiki: true })
+    : value;
   collectDocumentFields();
   const rowNumbers = ChecklistNumbering.rowNumbers(draft);
   const blocks = [];
   const heading = [];
-  if (draft.environment) heading.push(`*Проверено на ${escapeWikiNotEquals(draft.environment)}*`);
+  if (draft.environment) heading.push(`*Проверено на ${escapeWikiNotEquals(publicationText(draft.environment))}*`);
   if (draft.overallStatus) {
     const overallColor = STATUS_META[draft.overallStatus]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor;
     heading.push(`{color:${overallColor}}*ТЕСТ — ${draft.overallStatus}*{color}`);
   }
   if (heading.length) blocks.push(heading.join("\n"));
-  const intro = htmlToWiki(draft.intro);
+  const intro = htmlToWiki(draft.intro, {forPublication});
   if (intro) blocks.push(intro);
 
   sectionsForPublication(sectionIds, draft, statuses).forEach((section) => {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length) return;
-    const lines = [`h2. ${escapeWikiNotEquals(ChecklistNumbering.sectionTitle(draft, section))}`];
+    const lines = [`h2. ${escapeWikiNotEquals(publicationText(ChecklistNumbering.sectionTitle(draft, section)))}`];
     lines.push(
-      `||${["Номер", ...section.columns.map((column) => escapeWikiNotEquals(column.title || "Без названия")), "Статус"].join("||")}||`,
+      `||${["Номер", ...section.columns.map((column) => escapeWikiNotEquals(publicationText(column.title || "Без названия"))), "Статус"].join("||")}||`,
     );
     rows.forEach((row) => {
-      const values = section.columns.map((column) => jiraCell(row.cells[column.id] || ""));
+      const values = section.columns.map((column) => jiraCell(row.cells[column.id] || "", {forPublication}));
       const status = `{color:${STATUS_META[row.status].jiraColor}}*${row.status}*{color}`;
-      lines.push(`|${[jiraCell(escapeHtml(rowNumbers.get(row.id))), ...values, status].join("|")}|`);
+      lines.push(`|${[jiraCell(escapeHtml(rowNumbers.get(row.id)), {forPublication}), ...values, status].join("|")}|`);
     });
     blocks.push(lines.join("\n"));
   });
@@ -5303,7 +5314,7 @@ async function publishToJira(mode = "auto") {
       },
     });
     if (draft.reportId !== publicationReportId) throw new Error("Открыт другой отчёт. Повторите публикацию из нужного отчёта.");
-    const comment = { format: "wiki", body: generateMarkup({ sectionIds, statuses }) };
+    const comment = { format: "wiki", body: generateMarkup({ sectionIds, statuses, forPublication: true }) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
       sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],

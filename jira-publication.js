@@ -5,6 +5,14 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
+  // Apply to user text before generating Jira syntax, never to a finished comment.
+  function textForPublication(value, { wiki = false, protect = value => value } = {}) {
+    return String(value || "").replace(/[{}]/g, brace => {
+      const bracket = brace === "{" ? "[" : "]";
+      return wiki ? protect("\\" + bracket) : bracket;
+    });
+  }
+
   function target(value) {
     try {
       const url = new URL(value);
@@ -113,5 +121,5 @@
       commentUrl: commentUrl(String(issue.issueUrl), id) };
   }
 
-  return { target, commentUrl, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
+  return { textForPublication, target, commentUrl, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
 });

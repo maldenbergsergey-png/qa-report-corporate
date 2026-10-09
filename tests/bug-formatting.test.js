@@ -33,3 +33,17 @@ test("HTML conversion preserves nested formatting and rejects executable links",
   assert.equal(Bugs.textHtml("*+_Nested_+* {{<code>}} [Link|https://example.test]"), '<p><strong><u><em>Nested</em></u></strong> <code>&lt;code&gt;</code> <a href="https://example.test/">Link</a></p>');
   assert(!Bugs.textHtml("[x|javascript:alert(1)] <img src=x onerror=alert(1)>").includes("<img"));
 });
+
+test("checklist colors, strike, headings and Jira attachment references retain their meaning", () => {
+  const value = 'h2. Заголовок\n{color:#0052cc}*Цвет*-старое-{color}\n[^messages_file.json] !original_image.png|thumbnail!\nВерсия 2026-10-09';
+  const doc = Bugs.textDocument(value);
+  assert.equal(doc.content[0].type, 'heading');
+  assert.deepEqual(doc.content[1].content[0].marks, [{type:'textColor',attrs:{color:'#0052cc'}},{type:'strong'}]);
+  assert.equal(doc.content[1].content[1].marks.at(-1).type, 'strike');
+  assert.equal(doc.content[2].content.map(node => node.text).join(''), '[^messages_file.json] !original_image.png|thumbnail!');
+  assert.ok(doc.content[2].content.every(node => !node.marks), 'Filenames never turn into italic text');
+  assert.equal(doc.content[3].content[0].text, 'Версия 2026-10-09');
+  assert.match(Bugs.textHtml(value), /<span style="color:#0052cc"><strong>Цвет<\/strong><\/span>/);
+  assert.match(Bugs.textHtml(value), /<s>старое<\/s>/);
+  assert(!Bugs.textHtml('{color:expression(alert(1))}текст{color}').includes('style='));
+});

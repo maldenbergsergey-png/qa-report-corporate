@@ -115,13 +115,13 @@
     const inline = (value, marks = [], depth = 0) => {
       const text = value => ({ type: "text", text: value, ...(marks.length ? { marks } : {}) });
       if (depth > 12) return [text(value)];
-      const nodes = [], pattern = /\\([\\*_+\[\]{}#-])|\[Вложение: [^\]\r\n]{1,220}\]|\{\{([^{}\n]+)\}\}|\[([^\]\n|]+)\|(https?:\/\/[^\]\s]+)\]|\*((?:\\.|[^*\\\n])+)\*|_((?:\\.|[^_\\\n])+)_|\+((?:\\.|[^+\\\n])+)\+/g;
+      const nodes = [], pattern = /\\([\\*_+\[\]{}#-])|\[Вложение: [^\]\r\n]{1,220}\]|\[\^[^\]\r\n]{1,220}\]|![^!|\r\n]{1,220}\|thumbnail!|\{\{([^{}\n]+)\}\}|\[([^\]\n|]+)\|(https?:\/\/[^\]\s]+)\]|\*((?:\\.|[^*\\\n])+)\*|_((?:\\.|[^_\\\n])+)_|\+((?:\\.|[^+\\\n])+)\+|(?<![\p{L}\p{N}])-((?:\\.|[^-\\\n])+)-(?![\p{L}\p{N}])|\{color:(#[a-f\d]{6})\}([\s\S]*?)\{color\}/giu;
       let offset = 0, match;
       while ((match = pattern.exec(value))) {
         if (match.index > offset) nodes.push(text(value.slice(offset, match.index)));
-        if (match[1] || match[0].startsWith("[Вложение: ")) { nodes.push(text(match[1] || match[0])); offset = pattern.lastIndex; continue; }
-        const content = match[2] || match[3] || match[5] || match[6] || match[7];
-        const mark = match[2] ? { type: "code" } : match[3] ? { type: "link", attrs: { href: match[4] } } : { type: match[5] ? "strong" : match[6] ? "em" : "underline" };
+        if (match[1] || /^(?:\[Вложение: |\[\^|!)/.test(match[0])) { nodes.push(text(match[1] || match[0])); offset = pattern.lastIndex; continue; }
+        const content = match[2] || match[3] || match[5] || match[6] || match[7] || match[8] || match[10] || "";
+        const mark = match[2] ? { type: "code" } : match[3] ? { type: "link", attrs: { href: match[4] } } : match[9] ? { type: "textColor", attrs: { color: match[9].toLowerCase() } } : { type: match[5] ? "strong" : match[6] ? "em" : match[7] ? "underline" : "strike" };
         nodes.push(...(match[2] ? [{ type: "text", text: content, marks: [...marks, mark] }] : inline(content, [...marks, mark], depth + 1))); offset = pattern.lastIndex;
       }
       if (offset < value.length) nodes.push(text(value.slice(offset)));
@@ -156,8 +156,9 @@
       if (node.type === "text") {
         let value = escape(node.text);
         for (const mark of [...(node.marks || [])].reverse()) {
-          const tag = { strong: "strong", em: "em", underline: "u", code: "code" }[mark.type];
+          const tag = { strong: "strong", em: "em", underline: "u", strike: "s", code: "code" }[mark.type];
           if (tag) value = `<${tag}>${value}</${tag}>`;
+          else if (mark.type === "textColor") value = `<span style="color:${escape(mark.attrs.color)}">${value}</span>`;
           else if (mark.type === "link") { try { const url = new URL(mark.attrs.href); if (["http:", "https:"].includes(url.protocol)) value = `<a href="${escape(url.href)}">${value}</a>`; } catch {} }
         }
         return value;

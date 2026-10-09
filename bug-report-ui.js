@@ -22,27 +22,32 @@
   function insertAssets(assets, offset = descriptionControl()?.selectionStart) {
     const control = descriptionControl();
     if (!control || !state || !state.inlineReady || state.busy || state.pending || state.created) return;
+    const tokens = inlineTokens(assets);
+    if (!tokens.length) return;
+    const rich = window.QaReportBugRich.get(control);
+    if (control.hidden && rich) { rich.insertTokens(tokens, offset instanceof Range ? offset : undefined); return; }
+    const start = Math.max(0, Math.min(control.value.length, (typeof offset === "object" ? offset.start : offset) ?? control.value.length)), text = tokens.join("\n");
+    const end = typeof offset === "object" ? Math.max(start, Math.min(control.value.length, offset.end ?? start)) : start;
+    control.focus(); control.setRangeText(text, start, end, "end"); control.dataset.touched = "true";
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function inlineTokens(assets) {
     const added = assets.filter(asset => !state.assets.some(current => assetKey(current) === assetKey(asset)));
-    if (added.length) { state.assets.push(...added); $("bugAiAttachments").checked = true; refreshAssets(); }
-    const tokens = assets.map(asset => {
+    if (added.length) { state.assets.push(...added); state.extraAssets.push(...added.filter(asset => !state.extraAssets.some(current => assetKey(current) === assetKey(asset)))); $("bugAiAttachments").checked = true; refreshAssets(); }
+    return assets.map(asset => {
       const key = assetKey(asset);
       if (!state.inlineAssets[key]) {
-        const name = String(asset.name || "Файл").replace(/[\[\]\r\n\x00-\x1f]/g, " ").slice(0, 180).trim() || "Файл";
-        let suffix = 1, token = `[Вложение: ${name}]`;
-        while (Object.values(state.inlineAssets).includes(token)) token = `[Вложение: ${name} (${++suffix})]`;
+        const name = String(asset.name || "Файл").replace(/[\[\]|!\r\n\x00-\x1f]/g, " ").slice(0, 180).trim() || "Файл";
+        const image = asset.type.startsWith("image/") || asset.source.kind === "image" || /\.(png|jpe?g|gif|webp|bmp)$/i.test(asset.name);
+        const reference = name => image ? `!${name}|thumbnail!` : `[^${name}]`;
+        let suffix = 1, token = reference(name);
+        while (Object.values(state.inlineAssets).includes(token)) token = reference(`${name} (${++suffix})`);
         state.inlineAssets[key] = token;
       }
       const check = [...$("bugAttachmentList").querySelectorAll("input")].find(el => el.dataset.assetKey === key);
       if (check) check.checked = true;
       return state.inlineAssets[key];
     });
-    if (!tokens.length) return;
-    const rich = window.QaReportBugRich.get(control);
-    if (control.hidden && rich) { rich.insertTokens(tokens, offset instanceof Range ? offset : undefined); return; }
-    const start = Math.max(0, Math.min(control.value.length, (typeof offset === "object" ? offset.start : offset) ?? control.value.length)), text = tokens.join("\n");
-    const end = typeof offset === "object" ? Math.max(start, Math.min(control.value.length, offset.end ?? start)) : start;
-    control.setRangeText(text, start, end, "end"); control.dataset.touched = "true";
-    control.dispatchEvent(new Event("input", { bubbles: true })); control.focus();
   }
   function dropOffset(control, event) {
     // Match the textarea's wrapping and scroll position so a drop inserts at the pointer.
@@ -437,6 +442,16 @@
       ...(description ? {
         attachments: () => [...new Map([...state.assets, ...state.availableAssets].map(asset => [assetKey(asset), asset])).values()],
         insertAsset: (asset, at) => insertAssets([asset], at),
+        clipboardAssets: template => {
+          if (!state.inlineReady) return;
+          for (const node of template.content.querySelectorAll(".cell-image, .cell-file, img[data-attachment-id]")) {
+            if (!node.isConnected && !template.content.contains(node)) continue;
+            const assets = window.QaReportJiraReuse.collect({ intro: node.outerHTML });
+            if (assets.length) {
+              const reference = document.createElement("span"); reference.dataset.attachmentPlaceholder = inlineTokens(assets).join("\n"); reference.textContent = reference.dataset.attachmentPlaceholder; node.replaceWith(reference);
+            }
+          }
+        },
         insertFiles: async (files, at) => { const current = state, assets = await addContextFiles(files); if (state === current) insertAssets(assets || [], at); }
       } : {})
     });
@@ -995,8 +1010,14 @@
         if (!state.pending) {
           const fields = values();
           state.selectedAssets = [...$("bugAttachmentList").querySelectorAll("input:checked")].map(el => state.assets[Number(el.dataset.bugAttachment)]);
+          // Keep the established Connect wire format; the editor shows Jira references.
+          const inlineAttachments = state.selectedAssets.filter(asset => state.inlineAssets[assetKey(asset)] && String(fields.description || "").includes(state.inlineAssets[assetKey(asset)])).map(asset => {
+            const token = state.inlineAssets[assetKey(asset)], placeholder = token.startsWith("[Вложение: ") ? token : `[Вложение: ${token.startsWith("!") ? token.slice(1, -11) : token.slice(2, -1)}]`;
+            fields.description = fields.description.split(token).join(placeholder);
+            return { assetKey: assetKey(asset), placeholder };
+          });
           state.pending = { id: crypto.randomUUID(), payload: { ...target(), fields }, assets: state.selectedAssets.map(a => assetKey(a)), evidenceField: state.evidenceField, extraAssets: state.extraAssets.filter(a => state.selectedAssets.includes(a)),
-            inlineAttachments: state.selectedAssets.filter(asset => state.inlineAssets[assetKey(asset)] && String(fields.description || "").includes(state.inlineAssets[assetKey(asset)])).map(asset => ({ assetKey: assetKey(asset), placeholder: state.inlineAssets[assetKey(asset)] })) };
+            inlineAttachments };
           state.pending.payload.operationId = state.pending.id;
           busy(true, "Создаём задачу…");
           if (!state.standalone) row().pendingBug = state.pending;
@@ -1050,12 +1071,13 @@
     $("bugAttachmentList").replaceChildren(); $("bugContextText").value = ""; $("bugExtraContext").open = false; $("bugExtraFiles").replaceChildren(); $("bugVoiceHint").textContent = ""; $("bugContextFiles").value = "";
     $("bugExtraContext").open = standalone;
     $("bugContextSummary").textContent = standalone ? "Описание проблемы" : "Добавить контекст";
-    $("bugContextHint").textContent = standalone ? "Опишите, где возникает проблема, что вы делаете и что происходит. Это нужно для генерации с ИИ. Можно надиктовать текст и приложить файлы или заполнить поля бага вручную." : "Уточните проблему, шаги или требования. ИИ учтёт этот текст вместе с материалами проверки и вашим системным промптом.";
+    $("bugContextHint").textContent = standalone ? "" : "Контекст пункта чек-листа уже передан. Дополнительные уточнения необязательны.";
+    $("bugContextHint").hidden = standalone;
     $("bugContextTitle").textContent = standalone ? "Контекст для ИИ" : "Уточнения для ИИ";
     $("bugContextRequired").hidden = !standalone;
     $("bugContextText").setAttribute("aria-required", String(standalone));
     $("bugExtraContext").open = true;
-    $("bugContextSummary").textContent = "Опишите проблему для ИИ";
+    $("bugContextSummary").textContent = standalone ? "Опишите проблему для ИИ" : "Уточнения для ИИ";
     $("bugAiHint").textContent = "Проверяем подключение ИИ…";
     analysisOptions(); resetVoiceMeter();
     state.voice = new window.QaReportVoiceInput.VoiceInput({ onText: text => {
@@ -1193,6 +1215,15 @@
     $("closeBugReport").setAttribute("aria-label", "Закрыть баг-репорт");
     $("closeBugReport").addEventListener("click", close); $("cancelBugReport").addEventListener("click", close);
     $("bugReportModal").addEventListener("click", event => { if (!$("bugVoiceInfo").contains(event.target)) $("bugVoiceInfo").open = false; });
+    // Editing history belongs to the focused field, not the checklist below the modal.
+    $("bugReportModal").addEventListener("keydown", event => {
+      if (event.isComposing || event.altKey || !(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (!["z", "y"].includes(key)) return;
+      event.stopPropagation(); event.preventDefault();
+      const active = document.activeElement;
+      if (active?.matches("input, textarea, [contenteditable=true]") && !active.disabled && !active.readOnly) document.execCommand(key === "y" || event.shiftKey ? "redo" : "undo");
+    });
     // Keep outside interactions from reaching page-level dismissal handlers.
     $("bugReportModal").addEventListener("pointerdown", event => { if (event.target === $("bugReportModal")) event.preventDefault(); event.stopPropagation(); });
     $("bugReportModal").addEventListener("click", event => { if (event.target === $("bugReportModal")) event.preventDefault(); event.stopPropagation(); });

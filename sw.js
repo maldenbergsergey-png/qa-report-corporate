@@ -1,10 +1,10 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v108';
+const CACHE_NAME = 'qa-report-corporate-assets-v109';
 const SHELL = [
-  "/bug-report.js?v=6", "/bug-rich-editor.js?v=8", "/bug-report-ui.js?v=34", "/tracker-links.js?v=4", "/bug-attachment-analysis.js?v=2",
+  "/bug-report.js?v=7", "/bug-rich-editor.js?v=9", "/bug-report-ui.js?v=35", "/tracker-links.js?v=4", "/bug-attachment-analysis.js?v=2",
   "/vendor/jszip/jszip.min.js", "/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs",
-  "/bug-wizard.css?v=20",
+  "/bug-wizard.css?v=21",
   "/jira-publication.js?v=2",
   "/dictation-input.js?v=2",
   "/bug-voice-input.js?v=5",
@@ -21,7 +21,7 @@ const SHELL = [
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
   '/styles.css?v=139', '/app.js?v=144', '/pwa.js?v=5',
   '/jira-markup-import.js?v=12', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=76',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=77',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

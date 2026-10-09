@@ -4934,8 +4934,7 @@ async function uploadPendingImages(settings, issue, options = {}) {
   if (!manifest.attachmentReuse) throw new Error("Обновите подключение Jira: проверка существующих вложений не поддерживается");
   if (reuse.issueIdentity(manifest.issueUrl) !== reuse.issueIdentity(issue.issueUrl)) throw new Error("Список вложений получен для другой задачи. Обновление отчёта остановлено.");
   const plan = await reuse.plan(assets, { issueUrl: manifest.issueUrl, attachments: manifest.attachments, signal,
-    recoverExisting: Boolean(currentJiraPublication()),
-    onCheck: file => setPublishProgress({ step: "prepare", percent: 12, status: `Сверяем содержимое «${file.filename}»…` }),
+    links: draft.jiraAttachmentLinks, stopOnUnlinked: Boolean(currentJiraPublication()),
     loadSource: async source => window.QaReportAttachments.dataUrl(await jiraRequest("/api/jira/import-attachment", {
       ...settings, commentUrl: source.issueUrl, attachmentId: source.id,
     }, { binary: true, signal })),

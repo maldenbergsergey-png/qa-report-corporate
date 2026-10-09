@@ -59,48 +59,76 @@ test('reference-only copies across issues read the source once and do not reuse 
  assert.equal(downloads,1);assert.equal(result.uploads.length,1);assert.equal(result.reused.length,0);
 });
 
-const recoveryOptions = (attachments, loadSource) => ({ ...options(attachments), recoverExisting: true, loadSource });
-test('linked report recovers missing bindings by bytes even when Jira uses another filename', async () => {
- const original = await asset('original', false); const calls = [];
- const result = await reuse.plan([original, { ...original, attachmentId: 'second' }], recoveryOptions(
-  [{ ...remote, filename: 'legacy-generated.txt', size: 8 }], async source => { calls.push(source); return data('original'); }));
- assert.equal(result.uploads.length, 0); assert.equal(result.reused.length, 1);
- assert.equal(result.reused[0].hash, (await reuse.digest(data('original'))).hash);
- assert.equal(result.reused[0].originals.length, 2);
- assert.deepEqual(calls.map(source => [source.issueUrl, source.id]), [[issueUrl, '7']]);
+test('legacy saved ID and URL recover the binding without a Jira content request', async () => {
+ const original = await asset(); original.source.issueUrl = ''; original.source.hash = ''; original.source.url = remote.content;
+ const result = await reuse.plan([original], { ...options(), stopOnUnlinked: true });
+ assert.equal(result.uploads.length, 0); assert.equal(result.reused[0].id, '7');
+ assert.equal(result.reused[0].hash, (await reuse.digest(original.dataUrl)).hash);
 });
-test('a saved attachment ID without a hash is verified before reuse', async () => {
- const original = await asset(); original.source.hash = ''; let calls = 0;
- const result = await reuse.plan([original], { ...options(), loadSource: async () => { calls++; return data('original'); } });
- assert.equal(result.uploads.length, 0); assert.equal(result.reused[0].id, '7'); assert.equal(calls, 1);
+test('saved issue and ID without a hash use the manifest without downloading bytes', async () => {
+ const original = await asset(); original.source.hash = '';
+ const result = await reuse.plan([original], options());
+ assert.equal(result.uploads.length, 0); assert.equal(result.reused[0].id, '7');
 });
-test('same filename and size with different bytes must upload while identical bytes with another ID are reused', async () => {
- const original = await asset('original', false); const calls = [];
- const inventory = [{ ...remote, size: 8 }, { ...remote, id: '8', size: 8 }, { ...remote, id: '9', size: 100 }];
- const result = await reuse.plan([original], recoveryOptions(inventory, async source => {
-  calls.push(source.id); return data(source.id === '8' ? 'original' : 'modified');
- }));
- assert.deepEqual(calls, ['7', '8']); assert.equal(result.uploads.length, 0);
- assert.equal(result.reused[0].id, '8'); assert.equal(result.reused[0].exactUrl, true);
- const changed = await reuse.plan([original], recoveryOptions([inventory[0]], async () => data('modified')));
- assert.equal(changed.reused.length, 0); assert.equal(changed.uploads[0].name, 'Screenshot 2 (2).txt');
+test('legacy ID from another instance, another task or a different-sized file never binds blindly', async () => {
+ const original = await asset(); original.source.hash = '';
+ for (const source of [{ issueUrl: '', url: 'https://other.example/file' }, { issueUrl: 'https://jira.example/jira/browse/QA-2', url: remote.content }]) {
+  const result = await reuse.plan([{ ...original, source: { ...original.source, ...source } }], options());
+  assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
+ }
+ const result = await reuse.plan([original], options([{ ...remote, size: 100 }]));
+ assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
 });
-test('recovery compares all equal-sized candidates but skips different sizes', async () => {
- const original = await asset('original', false); const calls = [];
- const result = await reuse.plan([original], recoveryOptions([{ ...remote, size: 12 }, { ...remote, id: '8', filename: 'other.txt', size: 8 }],
-  async source => { calls.push(source.id); return data('original'); }));
- assert.deepEqual(calls, ['8']); assert.equal(result.reused[0].id, '8');
+test('separate confirmed links restore stripped HTML metadata with no remote downloads', async () => {
+ const original = await asset('original', false); const document = {};
+ reuse.remember(document, [{ ...remote, attachmentId: 'local', issueUrl, hash: (await reuse.digest(original.dataUrl)).hash }]);
+ const result = await reuse.plan([original], { ...options(), links: document.jiraAttachmentLinks, stopOnUnlinked: true });
+ assert.equal(result.uploads.length, 0); assert.equal(result.reused[0].id, '7');
 });
-test('recovery fails closed on download failure and cancellation', async () => {
- const original = await asset('original', false);
- await assert.rejects(reuse.plan([original], recoveryOptions([remote], async () => { throw Error('HTTP 403'); })), /HTTP 403/);
- const controller = new AbortController();
- await assert.rejects(reuse.plan([original], { ...recoveryOptions([remote], async () => { controller.abort(); return data('original'); }), signal: controller.signal }), { name: 'AbortError' });
+test('remembered links keep each byte version and target; changed bytes and task changes still upload', async () => {
+ const original = await asset('original', false); const changed = await asset('modified', false); const document = {};
+ for (const [candidate, id] of [[original, '7'], [changed, '8']]) reuse.remember(document, [{ ...remote, id, attachmentId: 'local', issueUrl, hash: (await reuse.digest(candidate.dataUrl)).hash }]);
+ reuse.remember(document, [{ ...remote, attachmentId: 'local', issueUrl: 'https://other.example/browse/QA-1', hash: (await reuse.digest(original.dataUrl)).hash }]);
+ assert.equal(document.jiraAttachmentLinks.length, 3);
+ for (const [candidate, id] of [[original, '7'], [changed, '8']]) {
+  const result = await reuse.plan([candidate], { ...options([remote, { ...remote, id: '8' }]), links: document.jiraAttachmentLinks });
+  assert.equal(result.reused[0].id, id);
+ }
+ const result = await reuse.plan([await asset('new bytes', false)], { ...options(), links: document.jiraAttachmentLinks });
+ assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
+ const moved = await reuse.plan([original], { ...options([]), issueUrl: 'https://jira.example/jira/browse/QA-2', links: document.jiraAttachmentLinks });
+ assert.equal(moved.reused.length, 0); assert.equal(moved.uploads.length, 1);
 });
-test('missing or edited source metadata does not bind to a coincident ID from another task without comparing bytes', async () => {
- const original = await asset(); original.source.issueUrl = 'https://other.example/browse/QA-1'; let calls = 0;
- const result = await reuse.plan([original], recoveryOptions([remote], async source => {
-  assert.equal(source.issueUrl, issueUrl); calls++; return data('modified');
- }));
- assert.equal(calls, 1); assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
+test('unbound same-name file stops an update without scanning Jira or guessing by name', async () => {
+ await assert.rejects(reuse.plan([await asset('original', false)], { ...options(), stopOnUnlinked: true }), /Связь.*утрачена/);
+ const original = await asset(); original.source.issueUrl = ''; original.source.hash = '';
+ await assert.rejects(reuse.plan([original], { ...options(), stopOnUnlinked: true }), /Связь.*утрачена/);
+});
+test('a new same-name file can still upload when the previous local file is known', async () => {
+ const original = await asset(); const document = {};
+ reuse.remember(document, [{ ...remote, attachmentId: 'older-local', issueUrl, hash: (await reuse.digest(original.dataUrl)).hash }]);
+ const result = await reuse.plan([await asset('new bytes', false)], { ...options(), links: document.jiraAttachmentLinks, stopOnUnlinked: true });
+ assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
+});
+test('malformed stored metadata is ignored and cancellation stays an AbortError', async () => {
+ const document = { jiraAttachmentLinks: {} }; reuse.remember(document, []); assert.deepEqual(document.jiraAttachmentLinks, []);
+ const controller = new AbortController(); controller.abort();
+ await assert.rejects(reuse.plan([await asset()], { ...options(), signal: controller.signal }), { name: 'AbortError' });
+});
+
+test('partial metadata loss keeps a verified ID/URL and a local hash fast', async () => {
+ const original = await asset(); original.source.issueUrl = ''; original.source.url = remote.content;
+ const result = await reuse.plan([original], { ...options(), stopOnUnlinked: true });
+ assert.equal(result.reused[0].id, '7'); assert.equal(result.uploads.length, 0);
+ const changed = await reuse.plan([{ ...original, dataUrl: data('modified') }], options());
+ assert.equal(changed.reused.length, 0); assert.equal(changed.uploads.length, 1);
+});
+test('a reference from another instance cannot use remembered metadata based on a coincident numeric ID', async () => {
+ const original = await asset(); original.dataUrl = ''; original.source.issueUrl = 'https://other.example/browse/QA-1';
+ const document = {}; reuse.remember(document, [{ ...remote, attachmentId: 'local', issueUrl, hash: '' }]);
+ let downloads = 0;
+ const result = await reuse.plan([original], { ...options(), links: document.jiraAttachmentLinks, loadSource: async source => {
+  downloads++; assert.equal(source.issueUrl, original.source.issueUrl); return data('another instance');
+ } });
+ assert.equal(downloads, 1); assert.equal(result.reused.length, 0); assert.equal(result.uploads.length, 1);
 });

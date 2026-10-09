@@ -40,6 +40,11 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       res.setHeader("Content-Type", "image/png"); res.end(Buffer.from("iVBORw0KGgo=", "base64")); return;
     }
     res.setHeader("Content-Type", "application/json");
+    if (req.url.startsWith("/jira7/rest/api/2/issue/createmeta/QA/issuetypes")) {
+      const fields = [{ fieldId: "summary", name: "Тема", required: true, schema: { type: "string" } }, { fieldId: "description", name: "Описание", schema: { type: "string" } }];
+      res.end(JSON.stringify({ values: req.url.includes("/issuetypes/1?") ? fields : [{ id: "1", name: "Ошибка", subtask: false }], isLast: true })); return;
+    }
+    if (req.url === "/jira7/rest/api/2/issue" && req.method === "POST") { res.statusCode = 201; res.end(JSON.stringify({ key: "QA-2" })); return; }
     if (req.url === "/jira7/rest/api/2/issue/QA-1?fields=attachment") {
       res.end(JSON.stringify({ fields: { attachment: [{ id: "42", filename: "screen.png", mimeType: "image/png", content: `http://${req.headers.host}/jira7/secure/attachment/42/screen.png` }] } })); return;
     }
@@ -129,6 +134,16 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     assert.equal(afterPayload.instances[0].jiraUsername, "user-a");
     assert.equal(afterPayload.instances[1].connected, false);
 
+    // The wizard uses the same session-owned OAuth connection and CSRF gate.
+    const bugBody = { instanceId: "jira7", csrfToken, projectKey: "QA", mode: "standalone", issueTypeId: "1", operationId: crypto.randomUUID(), fields: { summary: "Тестовый баг", description: "Описание" } };
+    const bugCall = (route, body = bugBody, cookie = `${sessionCookie()}; ${csrfCookie}`) => fetch(`${appOrigin}/api/jira/${route}`, { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await bugCall("issue-fields", { ...bugBody, csrfToken: "invalid" })).status, 403);
+    assert.equal((await bugCall("issue-fields", bugBody, "")).status, 401);
+    assert.equal((await bugCall("issue-fields", bugBody, `${sessionCookie("user-b@example.com")}; ${csrfCookie}`)).status, 409);
+    const meta = await bugCall("issue-fields"); assert.equal(meta.status, 200); assert.equal((await meta.json()).fields[0].id, "summary");
+    const created = await bugCall("create-issue"); assert.equal(created.status, 200); assert.equal((await created.json()).key, "QA-2");
+    assert.equal((await bugCall("create-issue")).status, 200);
+    assert.equal(received.filter(item => item.url === "/jira7/rest/api/2/issue" && item.method === "POST").length, 1);
     const disconnectedAction = await request(`${appOrigin}/api/jira/test`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instanceId: "jira8" }),
     });

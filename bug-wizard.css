@@ -1,0 +1,249 @@
+/* Shared wizard geometry and theme tokens in both editions. */
+#bugReportModal { --primary: #ff193d; --primary-hover: #e81032; --surface-strong: color-mix(in srgb, var(--surface) 80%, var(--canvas)); padding: 20px; background: #060e19b8; backdrop-filter: blur(7px); }
+#bugReportModal .bug-report-modal { width: min(1000px, calc(100vw - 40px)); height: min(750px, calc(100dvh - 40px)); max-width: calc(100vw - 40px); max-height: calc(100dvh - 40px); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 24px 90px #0005; overflow: hidden; }
+#bugReportModal .bug-wizard-header { padding: 18px 24px; margin: 0; border-bottom: 1px solid var(--line); background: transparent; }
+#bugReportModal .bug-wizard-header h2 { margin: 0; font-size: 20px; font-weight: 700; }
+#closeBugReport { font-size: 24px; font-weight: 300; }
+#bugReportModal .bug-steps { flex: 0 0 auto; display: flex; justify-content: center; gap: 0; padding: 20px 24px; margin: 0; font-size: 12px; }
+#bugReportModal .bug-steps li { flex: 1; max-width: 270px; gap: 9px; white-space: nowrap; }
+.bug-steps li:not(:last-child)::after { content: ''; flex: 1; height: 1px; margin: 0 14px; background: var(--line); }
+#bugReportModal .bug-steps li > span { flex: 0 0 30px; width: 30px; height: 30px; font-size: 13px; background: var(--surface-strong); }
+#bugReportModal .bug-steps [aria-current="step"] > span { background: var(--primary); color: #fff; }
+#bugReportModal .bug-steps .complete > span { background: transparent; border-color: var(--green); color: var(--green); }
+#bugReportModal .bug-report-body { flex: 1 1 auto; min-height: 0; padding: 0 24px 16px; overflow: auto; }
+#bugReportModal .bug-report-modal[data-step="2"] .bug-report-body { padding-bottom: 0; }
+#bugReportModal .bug-wizard-footer { flex: 0 0 auto; min-height: 72px; padding: 12px 24px 18px; gap: 12px; border: 0; background: transparent; }
+#bugReportModal .bug-wizard-footer .button, #bugReportModal .bug-success-actions .button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 42px; min-height: 42px; padding-block: 0; line-height: 20px; }
+.bug-footer-leading { flex: 1; }
+#bugReportModal .modal-actions { flex-wrap: nowrap; gap: 10px; }
+#bugReportModal .button { min-height: 42px; border-radius: 6px; font-size: 13px; padding: 10px 16px; white-space: nowrap; }
+#bugReportModal .button .ui-icon { width: 16px; height: 16px; }
+#bugReportModal .field { gap: 7px; margin: 0; min-width: 0; }
+#bugReportModal .field > span, #bugReportModal legend { font-size: 13px; font-weight: 550; }
+#bugReportModal input:not([type="checkbox"]):not([type="radio"]), #bugReportModal select, #bugReportModal textarea { border-radius: 6px; font-size: 13px; background-color: var(--surface-strong); }
+#bugReportModal input:not([type="checkbox"]):not([type="radio"]), #bugReportModal select:not([multiple]) { min-height: 38px; padding: 8px 12px; }
+#bugReportModal select:not([multiple]) { padding-right: 36px; }
+#bugReportModal .bug-required-badge { background: none; padding: 0; font-size: 13px; color: var(--red); }
+#bugTargetSection > summary { display: none; }
+#bugReportModal .bug-target-grid { gap: 18px; }
+#bugTargetSection { padding: 10px 4px; }
+#bugTargetSection .bug-type-row { margin-top: 18px; }
+.bug-connection-control { position: relative; }
+.bug-connection-control select { width: 100%; padding-right: 165px !important; }
+.bug-connection-status { position: absolute; right: 44px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--green); pointer-events: none; }
+.bug-connection-status::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+#bugReportModal .bug-creation-mode label { align-items: flex-start; padding: 14px; border-radius: 6px; }
+#bugReportModal .bug-creation-mode input { margin-top: 2px; width: 20px; height: 20px; }
+.bug-creation-mode small { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+#bugReportModal .bug-preparation { display: grid; grid-template-columns: minmax(0, 2.1fr) minmax(250px, 1fr); gap: 12px; min-height: 100%; }
+.bug-preparation-main { border: 1px solid var(--line); border-radius: 7px; padding: 16px; min-width: 0; background: color-mix(in srgb, var(--surface-strong) 45%, transparent); }
+#bugReportModal .bug-extra-context { margin: 0; padding: 0; border: 0; }
+#bugExtraContext > .bug-context-heading { display: block; cursor: default; pointer-events: none; font-size: 15px; font-weight: 600; margin: 0; padding: 0 0 14px; }
+#bugExtraContext > .bug-context-heading::marker { content: ''; }
+#bugReportModal .bug-context-entry { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; }
+#bugReportModal .bug-context-entry textarea { grid-column: 1 / -1; height: 255px; min-height: 160px; resize: vertical; padding: 12px; line-height: 1.6; }
+#bugReportModal .bug-context-tools { position: static; justify-content: flex-start; align-self: start; gap: 8px; display: flex; }
+#bugReportModal .bug-context-tools .icon-button { width: 44px; height: 44px; border-radius: 6px; background: var(--surface-strong); }
+#bugReportModal .bug-voice-panel { position: static; grid-column: 2; grid-row: 2; border: 0; background: none; padding: 0; gap: 10px; border-radius: 0; }
+#bugReportModal .bug-voice-cancel { width: 24px; }
+#bugVoiceCancel { width: 24px; height: 24px; flex-basis: 24px; border: 0; background: none; }
+#bugVoiceStop { width: 32px; height: 32px; flex-basis: 32px; }
+#bugVoiceWave { display: block; width: 100%; height: 26px; margin-top: 3px; color: var(--ink); }
+#bugVoiceStatus { color: var(--ink); }
+#bugVoicePanel[data-phase="recording"] #bugVoiceStatus::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+#bugReportModal .bug-context-dock { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; position: sticky; bottom: 0; z-index: 3; margin-inline: -6px; padding: 10px 6px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(16px) saturate(1.35); -webkit-backdrop-filter: blur(16px) saturate(1.35); border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+#bugReportModal .bug-context-dock .bug-voice-panel { flex: 1; min-width: 0; }
+#bugReportModal .bug-context-tools { flex-shrink: 0; align-items: center; }
+.bug-voice-info { position: relative; }
+.bug-voice-info > summary { display: grid; place-items: center; width: 28px; height: 44px; cursor: pointer; color: var(--muted); list-style: none; border-radius: 6px; }
+.bug-voice-info > summary::-webkit-details-marker { display: none; }
+.bug-voice-info > summary:hover, .bug-voice-info[open] > summary { color: var(--ink); }
+.bug-voice-info > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+#bugVoicePrivacy { position: absolute; bottom: calc(100% + 10px); left: -104px; width: min(340px, calc(100vw - 100px)); padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-strong); color: var(--ink); font-size: 12px; line-height: 1.55; box-shadow: 0 8px 28px #0003; }
+.bug-preparation-help, .bug-prompt-note { margin: 14px 0 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+#bugReportModal .bug-ai-panel { margin: 0; padding: 16px 12px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--surface-strong) 35%, transparent); }
+#bugAiHint { margin: 12px 0 16px; font-size: 11px !important; line-height: 1.65; }
+.bug-prompt-card { border: 1px solid #2899ff70; padding: 9px; border-radius: 6px; background: #2899ff09; }
+.bug-prompt-card > span { display: flex; align-items: center; gap: 6px; color: #2899ff; font-size: 12px; margin-bottom: 8px; }
+#bugReportModal #editBugPrompt { width: 100%; padding: 8px; min-height: 34px; font-size: 11px; border-color: #2899ff70; color: #2899ff; justify-content: space-between; }
+.bug-draft-ready { display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--green) 30%, var(--line)); background: color-mix(in srgb, var(--green) 9%, var(--surface)); padding: 10px 12px; margin-bottom: 14px; border-radius: 6px; }
+.bug-draft-caption { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.bug-draft-caption > .ui-icon { flex-shrink: 0; width: 24px; height: 24px; color: var(--green); }
+.bug-draft-caption strong { font-size: 12px; font-weight: 600; }
+.bug-draft-caption small { display: block; margin-top: 4px; font-size: 10px; line-height: 1.45; color: var(--muted); }
+#bugReportModal .bug-draft-ready .button { min-height: 32px; padding: 6px 10px; font-size: 10px; background: transparent; }
+.bug-draft-columns { display: grid; grid-template-columns: minmax(0, var(--bug-draft-left, 65fr)) 12px minmax(0, var(--bug-draft-right, 35fr)); gap: 8px; }
+.bug-draft-content { min-width: 0; }
+.bug-draft-parameters { min-width: 0; padding-left: 8px; }
+#bugReportModal .bug-field-group, #bugReportModal .bug-people { margin: 0 0 12px; padding: 0; border: 0; }
+#bugReportModal .bug-field-group > legend, #bugReportModal .bug-people > legend { display: none; }
+#bugReportModal .bug-jira-fields, #bugReportModal .bug-people-fields { gap: 10px; margin: 0; }
+#bugReportModal .bug-field-title { font-size: 12px; gap: 4px; }
+#bugReportModal .bug-jira-field textarea { height: 56px; min-height: 48px; padding: 9px 10px; resize: vertical; line-height: 1.5; }
+#bugReportModal [data-bug-field="description"] textarea { height: 72px; }
+.bug-rich-field { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface-strong); }
+#bugReportModal .bug-rich-field textarea { display: block; border: 0; border-radius: 0; margin: 0; }
+.bug-rich-field:focus-within { border-color: var(--primary); }
+.bug-rich-toolbar { display: flex; gap: 4px; align-items: center; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+.bug-rich-toolbar button { display: grid; place-items: center; width: 25px; height: 24px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); cursor: pointer; }
+.bug-rich-toolbar button:hover, .bug-rich-toolbar button:focus-visible { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.bug-rich-toolbar [data-format="bold"] { font-weight: 800; }
+.bug-rich-toolbar [data-format="italic"] { font-style: italic; }
+.bug-rich-toolbar [data-format="underline"] { text-decoration: underline; }
+.bug-rich-toolbar .ui-icon { width: 14px; height: 14px; }
+#bugReportModal .bug-draft-parameters .bug-jira-field:not(:has(textarea)) { display: grid; grid-template-columns: minmax(70px, .8fr) minmax(0, 1.3fr); align-items: start; gap: 8px; }
+.bug-draft-parameters .bug-field-title { padding-top: 10px; }
+#bugReportModal .bug-user-picker { gap: 4px; }
+#bugReportModal .bug-user-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 38px; min-width: 0; padding: 4px 30px 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-strong); }
+#bugReportModal .bug-user-entry:focus-within { border-color: var(--primary); outline: 2px solid color-mix(in srgb, var(--primary) 18%, transparent); outline-offset: 1px; }
+#bugReportModal .bug-field-error .bug-user-entry { border-color: var(--red); }
+
+#bugReportModal .bug-user-chips { display: contents; }
+#bugReportModal .bug-user-chips > span { max-width: 100%; min-width: 0; }
+#bugReportModal .bug-user-entry:has(.bug-user-clear:not([hidden])) { padding-right: 54px; }
+#bugReportModal .bug-user-clear { right: 26px; width: 24px; height: 24px; font-size: 18px; }
+#bugReportModal .bug-user-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 24px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+#bugReportModal .bug-user-toggle:hover { color: var(--ink); }
+#bugReportModal .bug-user-toggle .ui-icon { width: 14px; height: 14px; }
+#bugReportModal .bug-user-chips button { flex-shrink: 0; }
+#bugReportModal .bug-user-chips > span { font-size: 11px; padding: 2px 5px 2px 7px; background: color-mix(in srgb, #2899ff 15%, var(--surface)); }
+#bugReportModal .bug-optional-fields, #bugReportModal .bug-field-mapping { padding: 10px; margin: 14px 0 0; border-radius: 6px; font-size: 11px; }
+.bug-optional-fields > .bug-jira-fields, .bug-field-mapping > .bug-target-grid { margin-top: 12px !important; }
+#bugReportModal .bug-field-mapping .bug-target-grid { grid-template-columns: 1fr; gap: 10px; }
+#bugReportModal .bug-field-mapping .settings-note { font-size: 11px; }
+#bugReportModal .bug-state { font-size: 12px; padding: 9px 12px; border-radius: 6px; }
+#bugReportModal .bug-state.loading { top: 0; }
+#bugReportModal .bug-report-modal[data-generating="true"] .bug-report-body { position: relative; overflow: hidden; }
+#bugReportModal .bug-report-modal[data-generating="true"] .bug-report-body > :not(#bugReportState) { visibility: hidden; }
+#bugReportModal .bug-report-modal[data-generating="true"] #bugReportState { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; justify-content: center; gap: 20px; margin: 0; padding: 30px; border: 0; border-radius: 0; box-shadow: none; background: var(--surface); text-align: center; font-size: 15px; }
+#bugReportModal .bug-report-modal[data-generating="true"] #bugSpinner { width: 48px; height: 48px; border-width: 3px; }
+#bugReportModal .bug-analysis-receipt { font-size: 11px; padding: 9px 12px; }
+#bugReportModal .bug-ai-review { margin: 12px 0; padding: 12px; }
+.bug-file-drop { outline: 2px dashed var(--primary); outline-offset: 6px; }
+.bug-prompt-overlay { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; padding: 30px; background: #0008; backdrop-filter: blur(4px); }
+.bug-prompt-overlay > section { width: min(680px, 100%); max-height: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 24px; background: var(--surface); box-shadow: 0 16px 60px #0004; }
+.bug-prompt-overlay h3 { margin: 0 0 16px; }
+#bugWizardPrompt { display: block; width: 100%; min-height: 240px; padding: 12px; color: var(--ink); line-height: 1.5; font: inherit; resize: vertical; }
+.bug-prompt-overlay .modal-actions { margin-top: 16px; justify-content: flex-end; }
+#bugReportModal .bug-success-modal { width: min(530px, calc(100vw - 40px)); height: auto; min-height: 380px; padding: 24px; position: relative; }
+.bug-success-modal .bug-wizard-header { position: absolute; top: 10px; right: 10px; padding: 0 !important; margin: 0 !important; border: 0 !important; }
+.bug-success-modal .bug-wizard-header > div, .bug-success-modal .bug-steps { display: none !important; }
+#bugReportModal .bug-success-modal .bug-report-body { padding: 0; }
+.bug-success-modal .bug-wizard-footer:has(#createBugIssue[hidden]) { display: none; }
+#bugReportModal .bug-created-result { display: grid; justify-items: center; gap: 16px; margin: 8px 0 0; padding: 0; border: 0; background: none; text-align: center; }
+.bug-success-check { display: grid; place-items: center; width: 62px; height: 62px; background: var(--green); color: white; border-radius: 50%; box-shadow: 0 0 32px color-mix(in srgb, var(--green) 25%, transparent); }
+.bug-success-check .ui-icon { width: 40px; height: 40px; }
+#bugReportModal .bug-created-result h3 { font-size: 20px; margin: 4px 0 0; }
+#bugReportModal .bug-created-result p { font-size: 13px; margin: 0; color: var(--muted); }
+.bug-success-issue { display: grid; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 22px; margin-top: 6px; background: var(--surface-strong); text-decoration: none; }
+#bugReportModal .bug-success-issue strong { font-size: 15px; color: #2899ff; }
+.bug-success-issue span { font-size: 14px; color: var(--ink); line-height: 1.5; overflow-wrap: anywhere; }
+.bug-success-actions { display: flex; width: 100%; gap: 10px; }
+#bugReportModal .bug-success-actions .button { flex: 1; min-width: 0; padding: 10px 12px; font-size: 12px; text-decoration: none; }
+@media (max-width: 720px) { #bugReportModal .bug-preparation { grid-template-columns: minmax(0, 1fr); } .bug-draft-columns { grid-template-columns: minmax(0, 1fr); } .bug-draft-parameters { border-left: 0; padding-left: 0; } #bugReportModal .bug-wizard-footer { flex-wrap: wrap; } #bugReportModal .modal-actions { flex-wrap: wrap; } .bug-draft-ready { flex-wrap: wrap; } #bugReportModal .bug-steps { padding-inline: 12px; font-size: 10px; } .bug-steps li:not(:last-child)::after { margin: 0 6px; } #bugReportModal .bug-report-body { padding-inline: 16px; } .bug-success-actions { flex-wrap: wrap; } }
+
+:root[data-theme="dark"] #bugReportModal { --surface: #131f2b; --surface-strong: #1b2835; --line: #304253; --green: #2bd566; --muted: #b1bfce; }
+
+#bugReportModal [hidden] { display: none !important; }
+
+#bugReportModal .bug-draft-parameters [data-bug-field="environment"] { display: grid; grid-template-columns: minmax(70px, .8fr) minmax(0, 1.3fr); gap: 8px; align-items: start; }
+#bugReportModal .bug-draft-parameters [data-bug-field="environment"] textarea { min-height: 38px; height: 38px; }
+/* Comfortable editor sizing; the body scrolls above the fixed navigation. */
+#bugReportModal .bug-jira-fields { gap: 14px; }
+#bugReportModal .bug-jira-field { gap: 6px; }
+#bugReportModal .bug-jira-field .bug-field-title { font-size: 13px; line-height: 1.4; }
+#bugReportModal .bug-jira-field textarea, #bugReportModal .bug-rich-visual { height: 120px; min-height: 96px; padding: 12px; font-size: 14px; line-height: 1.6; }
+#bugReportModal [data-bug-field="description"] textarea, #bugReportModal [data-bug-field="description"] .bug-rich-visual { height: 180px; }
+#bugReportModal .bug-rich-toolbar { flex-wrap: wrap; padding: 6px; gap: 3px; }
+#bugReportModal .bug-rich-toolbar button { width: 32px; height: 32px; font-size: 14px; }
+#bugReportModal .bug-rich-toolbar .ui-icon { width: 18px; height: 18px; }
+#bugReportModal .bug-rich-toolbar button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
+#bugReportModal .bug-rich-modes { display: flex; gap: 2px; margin-left: auto; }
+#bugReportModal .bug-rich-modes button { width: auto; padding: 0 8px; font-size: 11px; font-weight: 500; }
+#bugReportModal .bug-jira-field input, #bugReportModal .bug-jira-field select { border: 1px solid var(--line); }
+.bug-rich-field { position: relative; overflow: visible; }
+.bug-rich-visual { box-sizing: border-box; overflow: auto; resize: vertical; outline: 0; color: var(--ink); font-weight: 400; cursor: text; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bug-rich-visual > div, .bug-rich-visual > p { margin: 0; min-height: 1.6em; }
+.bug-rich-visual ul, .bug-rich-visual ol { margin: 0; padding-left: 24px; }
+.bug-rich-visual li { margin: 0; }
+.bug-rich-visual a { color: #2899ff; text-decoration: underline; }
+.bug-rich-visual code { font: .95em ui-monospace, monospace; background: color-mix(in srgb, var(--ink) 8%, transparent); border-radius: 3px; padding: 1px 4px; }
+.bug-rich-asset { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; padding: 6px 8px; margin: 3px 2px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--surface) 75%, transparent); vertical-align: middle; font-size: 12px; white-space: normal; cursor: default; }
+.bug-rich-asset img { display: block; flex-basis: 100%; max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 3px; }
+.bug-rich-asset .ui-icon { width: 14px; height: 14px; }
+.bug-rich-asset > span { overflow-wrap: anywhere; }
+.bug-rich-attachment-picker { position: absolute; top: 48px; left: 6px; right: 6px; z-index: 5; display: grid; gap: 4px; max-height: 240px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+#bugReportModal .bug-rich-attachment-picker button { text-align: left; padding: 9px 12px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+#bugReportModal .bug-rich-attachment-picker button:hover { background: var(--line-soft); }
+#bugReportModal .bug-rich-link-row { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); }
+#bugReportModal .bug-rich-link-row input { flex: 1; min-width: 0; }
+#bugReportModal .bug-rich-link-row button { padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--ink); cursor: pointer; }
+
+/* Preserve wizard affordances over the host application's theme rules. */
+#bugReportModal .bug-connection-status { color: var(--green); }
+#bugReportModal input:not([type="checkbox"]):not([type="radio"]), #bugReportModal select { border: 1px solid var(--line); }
+#bugReportModal select:not([multiple]) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%237f8b9d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-position: right 14px center; background-size: 16px; background-repeat: no-repeat; }
+#bugReportModal .button-secondary { border: 1px solid var(--line); color: var(--ink); background: var(--surface-strong); font-weight: 500; }
+#bugReportModal .button-secondary:hover { background: color-mix(in srgb, var(--ink) 8%, var(--surface-strong)); }
+#bugReportModal .bug-draft-ready .button-secondary { background: transparent; }
+#bugReportModal #editBugPrompt { color: #2899ff; border-color: #2899ff70; background: #2899ff09; }
+#bugReportModal .bug-draft-caption > .ui-icon { padding: 4px; background: var(--green); border-radius: 50%; color: white; }
+#bugReportModal [data-bug-text-section="steps"] textarea, #bugReportModal textarea[data-bug-section="steps"] { height: 160px; }
+#bugReportModal [data-bug-text-section="expected"] textarea, #bugReportModal [data-bug-text-section="actual"] textarea, #bugReportModal textarea[data-bug-section="expected"], #bugReportModal textarea[data-bug-section="actual"] { height: 120px; }
+#bugReportModal .bug-steps .complete .ui-icon { width: 18px; height: 18px; }
+#bugReportModal .bug-success-issue { grid-template-columns: 34px minmax(0, 1fr); column-gap: 18px; }
+.bug-success-issue > .ui-icon { grid-column: 1; grid-row: 1 / 3; align-self: center; width: 32px; height: 32px; stroke: none; }
+.bug-success-issue strong, .bug-success-issue span { grid-column: 2; }
+.bug-success-issue strong { display: flex; align-items: center; gap: 8px; }
+.bug-success-issue strong .ui-icon { width: 15px; height: 15px; }
+
+#bugReportModal .bug-attachments { padding: 12px 0 0; margin: 12px 0 0; border: 0; border-top: 1px solid var(--line); min-width: 0; }
+#bugReportModal .bug-attachments legend { padding: 0; font-size: 12px; }
+#bugAttachmentList { display: grid; gap: 6px; max-height: 150px; overflow: auto; margin-top: 8px; }
+.bug-draft-attachment { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-strong); }
+.bug-draft-attachment[draggable="true"] { cursor: grab; }
+#bugReportModal .bug-draft-attachment .bug-attachment-option { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; }
+.bug-draft-attachment .bug-attachment-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+#bugReportModal .bug-insert-attachment { min-height: 26px; padding: 4px 5px; font-size: 10px; color: #2899ff; }
+#bugAttachmentHint { margin: 8px 0 0; font-size: 10px; line-height: 1.5; }
+#bugReportModal .bug-description-drop.bug-file-drop { outline-offset: -3px; }
+
+/* Center the visible sequence, including its final label rather than an empty column. */
+#bugReportModal .bug-steps li { flex: 0 0 auto; max-width: none; }
+#bugReportModal .bug-steps li:not(:last-child)::after { flex: 0 0 90px; width: 90px; margin: 0 20px; }
+#bugReportModal .bug-preparation { height: auto; min-height: 0; align-items: start; }
+#bugReportModal .bug-preparation-main { display: block; padding: 12px 4px; border: 0; background: none; }
+#bugReportModal .bug-extra-context { display: block; }
+#bugReportModal .bug-context-entry { grid-template-rows: auto auto; row-gap: 4px; }
+#bugReportModal .bug-context-entry textarea { height: clamp(160px, calc(100dvh - 520px), 330px); min-height: 160px; clip-path: inset(0 0 var(--bug-context-occlusion, 0px) 0); }
+#bugReportModal #bugContextText:focus { outline: none; border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+#bugReportModal .bug-preparation-main:has(#bugAiAttachmentsOption:not([hidden])) .bug-context-entry textarea { height: clamp(160px, calc(100dvh - 720px), 220px); }
+#bugReportModal .bug-preparation-help { margin-bottom: 0; }
+#bugReportModal .bug-extra-files { max-height: 150px; overflow: auto; flex-shrink: 0; }
+#bugReportModal #bugVoice[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: white; opacity: 1; }
+#bugReportModal #bugVoice:not([aria-pressed="true"]):hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, var(--surface-strong)); }
+#bugReportModal #bugVoice .ui-icon { color: inherit; }
+#bugReportModal #bugVoiceHint[data-state="error"] { color: var(--red); }
+@media (max-width: 720px) {
+  #bugReportModal .bug-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  #bugReportModal .bug-steps li { flex-direction: column; gap: 5px; justify-content: center; white-space: normal; text-align: center; }
+  #bugReportModal .bug-steps li::after { display: none; }
+  #bugReportModal .bug-preparation { height: auto; }
+  #bugReportModal .bug-context-entry textarea { height: 230px; }
+}
+
+@media (max-width: 480px) { #bugReportModal .bug-context-dock:has(#bugVoicePanel:not([hidden])) { flex-wrap: wrap; } #bugReportModal .bug-context-dock .bug-voice-panel { flex-basis: 100%; } }
+
+/* The search is part of the value field rather than a second framed input. */
+#bugReportModal .bug-user-entry input[type="search"] { flex: 1 1 40px; width: 0; min-width: 40px; height: 28px; min-height: 28px; padding: 3px 4px; border: 0; outline: 0; box-shadow: none; background: transparent; border-radius: 0; }
+#bugReportModal .bug-user-entry input[type="search"][placeholder=""] { flex-basis: 12px; min-width: 12px; }
+#bugReportModal .bug-user-entry input[type="search"]:not(:placeholder-shown) { min-width: 60px; }
+
+.bug-draft-resize { position: relative; min-height: 100%; cursor: col-resize; touch-action: none; outline: none; }
+.bug-draft-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line); transition: background .15s; }
+.bug-draft-resize:hover::before, .bug-draft-resize:focus-visible::before, .bug-draft-columns.resizing .bug-draft-resize::before { width: 3px; margin-left: -1px; background: var(--primary); }
+.bug-draft-columns.resizing { user-select: none; cursor: col-resize; }
+.bug-draft-resize[aria-disabled="true"] { cursor: default; }
+@media (max-width: 720px) { .bug-draft-columns { grid-template-columns: minmax(0, 1fr); } #bugDraftResize { display: none; } }
+
+#bugReportModal [data-bug-text-section="steps"] .bug-rich-visual, #bugReportModal [data-bug-virtual="steps"] .bug-rich-visual { height: 160px; }

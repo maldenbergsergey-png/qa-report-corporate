@@ -10,7 +10,8 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=137" />
+    <link rel="stylesheet" href="/styles.css?v=139" />
+    <link rel="stylesheet" href="/bug-wizard.css?v=18" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -100,6 +101,7 @@
             <div class="header-dropdown-menu" id="reportMenu" role="menu" aria-label="Приложения" hidden>
               <button class="header-dropdown-item current-app" type="button" role="menuitemradio" aria-checked="true"><span>Report</span><svg class="ui-icon" aria-hidden="true"><use href="#icon-check"></use></svg></button>
               <a class="header-dropdown-item" href="https://qa-capture.mlbrg.ru/" target="_blank" rel="noopener noreferrer" role="menuitem" aria-label="Capture — открыть в новой вкладке">Capture</a>
+              <button class="header-dropdown-item" id="openStandaloneBugReport" type="button" role="menuitem"><svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg> Bug Report</button>
             </div>
           </div>
           <div class="save-state" id="saveState" tabindex="0" role="status" aria-live="polite" aria-label="Сохранено">
@@ -1200,19 +1202,70 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=69"></script>
+    <script src="/release-notes.js?v=74"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=6"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=1"></script>
-    <script src="/report-file.js?v=3"></script>
-    <script src="/bug-voice-input.js?v=4"></script>
+    <script src="/report-file.js?v=4"></script>
+    <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
     <script src="/jira-publication.js?v=2"></script>
-    <script src="/app.js?v=143"></script>
+    <div class="modal-backdrop" id="bugReportModal" hidden>
+      <section class="modal bug-report-modal" role="dialog" aria-modal="true" aria-labelledby="bugReportTitle" data-step="1">
+        <header class="modal-header bug-wizard-header"><div><div class="eyebrow" id="bugReportEyebrow">Jira</div><h2 id="bugReportTitle">Завести баг-репорт</h2></div><button id="closeBugReport" class="icon-button" type="button" aria-label="Закрыть окно баг-репорта">×</button></header>
+        <ol class="bug-steps" aria-label="Создание баг-репорта"><li id="bugStepTarget" aria-current="step"><span>1</span>Место создания</li><li id="bugStepPrepare"><span>2</span>Подготовка</li><li id="bugStepDraft"><span>3</span>Баг-репорт</li></ol>
+        <div class="modal-body bug-report-body">
+          <div id="bugReportState" class="bug-state" role="status" aria-live="polite" hidden><span id="bugSpinner" class="bug-spinner" aria-hidden="true" hidden></span><span id="bugReportMessage"></span></div>
+          <details class="bug-target-section" id="bugTargetSection" open><summary id="bugTargetSummary">Куда создать баг</summary>
+            <div class="bug-target-grid">
+              <label class="field"><span>Подключение к Jira</span><div class="bug-connection-control"><select id="bugJiraConnection"></select><span id="bugConnectionStatus" class="bug-connection-status" hidden>Подключено</span></div></label>
+              <fieldset id="bugCreationMode" class="bug-creation-mode"><legend>Создать как</legend><div><label><input type="radio" name="bugCreationMode" value="standalone" checked /><span>Самостоятельная задача<small>Баг будет создан в выбранном проекте</small></span></label><label><input type="radio" name="bugCreationMode" value="subtask" /><span>Подзадача<small>Баг будет создан как подзадача к существующей задаче</small></span></label></div></fieldset>
+              <label class="field" id="bugProjectField"><span>Проект <small class="bug-required-badge">*</small></span><input id="bugProject" list="bugProjectOptions" placeholder="Выберите или введите ключ проекта" autocomplete="off" /><datalist id="bugProjectOptions"></datalist></label>
+              <label class="field" id="bugParentField" hidden><span>Родительская задача <small class="bug-required-badge">*</small></span><input id="bugParent" placeholder="APP-123 или ссылка задачи" autocomplete="off" /></label>
+            </div><p id="bugParentSummary" class="settings-note" hidden></p>
+            <div class="bug-type-row" id="bugTypeRow" hidden><label class="field"><span>Тип задачи <small class="bug-required-badge">*</small></span><select id="bugIssueType"></select></label></div>
+            <button id="loadBugFields" class="button button-secondary" type="button">Повторить загрузку</button>
+          </details>
+          <div id="bugPreparation" class="bug-preparation" hidden>
+            <section class="bug-preparation-main"><section id="bugExtraContext" class="bug-extra-context"><h3 id="bugContextSummary" class="bug-context-heading">Опишите проблему для ИИ</h3><p id="bugContextHint" class="settings-note" hidden></p><label for="bugContextText" class="field" hidden><span id="bugContextTitle">Описание проблемы</span><small id="bugContextRequired" hidden></small></label>
+              <div class="bug-context-entry"><textarea id="bugContextText" rows="8" maxlength="16000" aria-label="Описание проблемы" aria-describedby="bugContextHint" placeholder="Опишите, что произошло, какие были действия и какой результат вы ожидали. Можно приложить файлы или продиктовать голосом."></textarea>
+                <div class="bug-context-dock"><div class="bug-context-tools"><button id="bugAddContextFiles" class="icon-button" type="button" aria-label="Прикрепить файл" title="Добавить вложения"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l10-10"/><path d="m6 15 8-8"/></svg></button><button id="bugVoice" class="icon-button" type="button" aria-label="Надиктовать проблему" aria-pressed="false" title="Надиктовать проблему"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></button><details id="bugVoiceInfo" class="bug-voice-info"><summary aria-label="О диктовке" title="О диктовке"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg></summary><div id="bugVoicePrivacy" class="bug-voice-privacy">Способ диктовки выбирается в Connect → ИИ → Распознавание речи.</div></details></div>
+                <div id="bugVoicePanel" class="bug-voice-panel" data-phase="idle" hidden>
+                  <button id="bugVoiceCancel" class="bug-voice-action" type="button" aria-label="Отменить диктовку" title="Отменить диктовку"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+                  <div class="bug-voice-activity"><div class="bug-voice-caption"><span id="bugVoiceStatus" role="status" aria-live="polite">Подключаем микрофон…</span><span id="bugVoiceTime">0:00 / 3:00</span></div><svg id="bugVoiceWave" class="bug-voice-wave" viewBox="0 0 512 32" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+                  <button id="bugVoiceStop" class="bug-voice-action bug-voice-stop" type="button" aria-label="Остановить и распознать" title="Остановить и распознать"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>
+                </div></div>
+              </div><input id="bugContextFiles" type="file" multiple hidden /><p id="bugVoiceHint" class="bug-voice-hint" role="status" aria-live="polite"></p><div id="bugExtraFiles" class="bug-extra-files"></div>
+
+              <p class="bug-preparation-help">Можно прикрепить файлы (drag &amp; drop) или продиктовать текст голосом.<br />ИИ подготовит черновик бага на основе введённой информации.</p>
+            </section>              <div id="bugAiAttachmentsOption" class="bug-ai-images" hidden><label><input id="bugAiAttachments" type="checkbox" aria-describedby="bugAiAttachmentsHint" /><span>Анализировать вложения</span></label><p id="bugAiAttachmentsHint">Выбранные файлы отправятся ИИ: изображения, текст и код, документы, кадры видео без звука. Для изображений нужна подходящая модель; расход лимитов может увеличиться.</p><details id="bugAiAttachmentSelection" hidden><summary id="bugAiAttachmentCount">Выбрать вложения</summary><div id="bugAiAttachmentList"></div></details></div></section>
+            <aside class="bug-ai-panel"><label class="field"><span>Подключение ИИ</span><select id="bugAiProfile"></select></label><p class="settings-note" id="bugAiHint"></p><div class="bug-prompt-card"><span><svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg> Промпт и настройки</span><button id="editBugPrompt" class="button button-secondary" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg> Открыть и изменить <svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg></button></div><p class="bug-prompt-note">Используется текущий промпт для подготовки баг-репортов.</p></aside>
+          </div>
+          <div id="bugEditor" hidden>
+            <details class="bug-analysis-receipt" id="bugAnalysisReceipt" hidden><summary id="bugAnalysisSummary">Учтённые вложения</summary><ul id="bugAnalysisFiles"></ul></details>
+            <details class="bug-analysis-receipt" id="bugRuleReceipt" hidden><summary id="bugRuleSummary">Предзаполнено по вашему промпту</summary><ul id="bugRuleFields"></ul></details>
+            <section class="bug-ai-review" id="bugMissingInformation" aria-labelledby="bugMissingTitle" hidden></section>
+
+            <div class="bug-draft-columns"><div class="bug-draft-content"><fieldset class="bug-field-group"><legend>Баг-репорт</legend><div id="bugRequiredFields" class="bug-jira-fields"></div></fieldset></div>
+              <div id="bugDraftResize" class="bug-draft-resize" role="separator" aria-label="Изменить ширину колонок" aria-orientation="vertical" aria-controls="bugRequiredFields" aria-valuemin="40" aria-valuemax="74" aria-valuenow="65" tabindex="0" title="Перетащите, чтобы изменить ширину колонок. Двойной щелчок — сброс."></div>
+              <aside class="bug-draft-parameters"><fieldset class="bug-field-group" id="bugCommonSection" hidden><legend>Параметры бага</legend><div id="bugCommonFields" class="bug-jira-fields"></div></fieldset><fieldset class="bug-field-group" id="bugVersionsSection" hidden><legend>Версии</legend><div id="bugVersionFields" class="bug-jira-fields"></div></fieldset><fieldset class="bug-people" id="bugPeopleSection" hidden><legend>Участники</legend><div id="bugPeopleFields" class="bug-people-fields"></div></fieldset><fieldset class="bug-attachments" id="bugAttachmentSection"><legend id="bugAttachmentSummary">Вложения</legend><div id="bugAttachmentList"></div><p class="settings-note" id="bugAttachmentHint"></p></fieldset><details id="bugOptionalSection" class="bug-optional-fields"><summary id="bugOptionalSummary">Дополнительные поля</summary><div id="bugOptionalFields" class="bug-jira-fields"></div></details><details class="bug-field-mapping"><summary>Настроить поля шагов и результатов</summary><p class="settings-note">Разделы без отдельного поля добавляются в описание.</p><div id="bugMappingFields" class="bug-target-grid"></div></details></aside>
+            </div>
+          </div><div id="bugCreatedResult" class="bug-created-result" hidden></div>
+        </div>
+        <footer class="modal-footer bug-wizard-footer"><div class="bug-footer-leading"><button id="bugBack" class="button button-ghost" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg> Назад</button><span id="bugFooterHint" hidden></span></div><div class="modal-actions"><button id="cancelBugReport" class="button button-ghost" type="button" hidden>Отмена</button><button id="generateBugDraft" class="button button-secondary" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg> Пересобрать с ИИ</button><button id="loadBugContext" class="button button-primary" type="button">Продолжить <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button><button id="bugManualDraft" class="button button-secondary" type="button" hidden>Заполнить вручную</button><button id="bugReviewDraft" class="button button-secondary" type="button" hidden>Перейти к черновику</button><button id="bugPrepareDraft" class="button button-primary" type="button">Сформировать баг-репорт <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button><button id="createBugIssue" class="button button-primary" type="button">Создать баг в Jira <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></button></div></footer>
+        <div class="bug-prompt-overlay" id="bugPromptDialog" hidden><section role="dialog" aria-modal="true" aria-labelledby="bugPromptTitle"><h3 id="bugPromptTitle">Промпт для баг-репорта</h3><label class="field"><span>Правила для ИИ</span><textarea id="bugWizardPrompt" rows="12" maxlength="16000"></textarea></label><div class="modal-actions"><button id="cancelBugPrompt" class="button button-ghost" type="button">Отмена</button><button id="saveBugPrompt" class="button button-primary" type="button">Сохранить</button></div></section></div>
+      </section>
+    </div>
+    <script src="/bug-report.js?v=4"></script>
+    <script src="/bug-attachment-analysis.js?v=2"></script>
+    <script src="/tracker-links.js?v=4"></script>
+    <script src="/bug-rich-editor.js?v=3"></script>
+    <script src="/bug-report-ui.js?v=31"></script>
+    <script src="/app.js?v=144"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

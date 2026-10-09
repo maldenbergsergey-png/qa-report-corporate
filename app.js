@@ -3354,6 +3354,7 @@ function createRowElement(section, row, number) {
   menuButton.addEventListener("click", (event) => {
     event.stopPropagation();
     showFloatingMenu(menuButton, [
+      { label: row.pendingBug ? "Проверить создание бага" : row.bugs?.some(b => b.attachmentsPending || b.evidencePending) ? "Завершить создание бага" : "Завести баг-репорт", icon: "bug", action: () => window.QaReportBugUI.open(section.id, row.id, menuButton) },
       { label: "Добавить строку выше", icon: "row-insert-above", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-above") },
       { label: "Добавить строку ниже", icon: "row-insert-below", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-below") },
       { label: "Дублировать", icon: "copy", action: () => applyRowAction(section, row.id, "duplicate") },
@@ -9988,3 +9989,35 @@ document.getElementById("dictationConnectPair").addEventListener("click", async 
   finally { button.disabled = false; }
 });
 document.getElementById("dictationConnectCheck").addEventListener("click", refreshDictationConnect);
+
+// The shared wizard uses corporate Jira directly and Connect only for AI/speech.
+window.QaReportBugUI.init({
+  getDraft: () => draft, flush: flushDraftFromDom,
+  changed: () => { renderSections(); saveLocalMutationNow(); },
+  reportApi: dictationConnectApi,
+  jiraRequest: async (path, body, options = {}) => {
+    if (path !== "/api/jira/import-attachment") return jiraRequest(path, body, options);
+    const blob = await jiraRequest(path, body, { ...options, binary: true });
+    const dataUrl = await window.QaReportAttachments.dataUrl(blob);
+    return { file: { type: blob.type, dataBase64: dataUrl.slice(dataUrl.indexOf(",") + 1) } };
+  },
+  jiraSettings: () => ({}),
+  bugRequest: async (path, body) => {
+    const { instances } = await reportApi("/api/jira/connections");
+    const reference = body.baseUrl || "";
+    const connection = instances.find(item => item.connected && item.baseUrl.replace(/\/$/, "") === reference.replace(/\/$/, ""));
+    if (!connection) throw new Error("Подключите выбранную Jira в настройках приложения.");
+    const { csrfToken } = await reportApi("/api/auth/csrf");
+    try { return await reportApi(path, { method: "POST", body: JSON.stringify({ ...body, instanceId: connection.id, csrfToken }) }); }
+    catch (error) { error.fieldErrors = error.payload?.fieldErrors || {}; throw error; }
+  },
+  bugStatus: async () => {
+    const { instances } = await reportApi("/api/jira/connections");
+    const urls = instances.filter(item => item.connected).map(item => item.baseUrl);
+    return { connected: Boolean(urls.length), devices: urls.length ? [{ online: true, version: "0.6.12", lastSeenAt: new Date().toISOString(), jiraBaseUrls: urls }] : [] };
+  },
+  modalOverflow: syncBodyModalOverflow, settingsDirty: markSettingsDirty,
+});
+document.getElementById("openStandaloneBugReport").addEventListener("click", () => {
+  closeHeaderDropdowns(); window.QaReportBugUI.openStandalone(elements.reportMenuButton);
+});

@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 const fail = (message, status = 422) => { throw Object.assign(new Error(message), { status }); };
 const ttl = 5 * 60 * 1000;
-// Only speech jobs are supported here. Device credentials never authorize reports or Jira.
+// Speech and bug-draft AI jobs only. Device credentials never authorize reports or Jira.
 function createDictationService({ database, readJson, sendJson, origin, owner, verifyCsrf, audit }) {
   function db() {
     const value = database();
@@ -58,7 +58,7 @@ function createDictationService({ database, readJson, sendJson, origin, owner, v
       const job = store.prepare("SELECT * FROM dictation_jobs WHERE id = ? AND device_id = ? AND status = 'running'").get(resultRoute[1], current.id);
       if (!job) fail("Задание Connect не найдено", 404);
       const result = value.ok ? value.result : {}, serialized = JSON.stringify(result || {});
-      if (serialized.length > 25000) fail("Ответ Connect слишком большой", 413);
+      if (serialized.length > (job.type === "ai.bug-draft" ? 200000 : 25000)) fail("Ответ Connect слишком большой", 413);
       store.prepare("UPDATE dictation_jobs SET status = ?, result_json = ?, error = ?, payload_json = '{}' WHERE id = ?")
         .run(value.ok ? "completed" : "failed", serialized, String(value.error || "").slice(0, 1000), job.id);
       sendJson(response, 200, { ok: true }); return true;
@@ -72,7 +72,7 @@ function createDictationService({ database, readJson, sendJson, origin, owner, v
   async function browser(request, response) {
     const pathname = new URL(request.url, "http://localhost").pathname;
     const jobRoute = pathname.match(/^\/api\/agent\/jobs\/([a-f0-9-]{36})$/i);
-    const jobTypes = { "/api/ai/profiles": "ai.profiles", "/api/ai/transcribe": "ai.transcribe", "/api/ai/refine": "ai.refine" };
+    const jobTypes = { "/api/ai/profiles": "ai.profiles", "/api/ai/bug-draft": "ai.bug-draft", "/api/ai/transcribe": "ai.transcribe", "/api/ai/refine": "ai.refine" };
     if (!((request.method === "GET" && (jobRoute || pathname === "/api/agent/status")) || (request.method === "POST" && (jobTypes[pathname] || ["/api/agent/pairings", "/api/agent/preferences"].includes(pathname))))) return false;
     const identity = owner(request), store = db();
     if (request.method === "GET") {
@@ -101,7 +101,17 @@ function createDictationService({ database, readJson, sendJson, origin, owner, v
       sendJson(response, 200, { ok: true }); return true;
     }
     const type = jobTypes[pathname], payload = {};
-    if (type !== "ai.profiles") {
+    if (type === "ai.bug-draft") {
+      const Bugs = require("./bug-report");
+      for (const key of ["profileId", "prompt", "context", "additionalContext"]) if (Object.hasOwn(value, key)) payload[key] = value[key];
+      if (typeof payload.profileId !== "string" || !payload.profileId || payload.profileId.length > 200 || typeof payload.prompt !== "string" || !payload.prompt.trim() || payload.prompt.length > 16000 || (payload.additionalContext !== undefined && (typeof payload.additionalContext !== "string" || payload.additionalContext.length > 16000))) fail("Проверьте подключение ИИ и описание проблемы");
+      if (JSON.stringify(payload).length > 200000) fail("Форма баг-репорта слишком большая", 413);
+      try {
+        if (Object.hasOwn(value, "images")) payload.images = Bugs.imageInputs(value.images);
+        if (Object.hasOwn(value, "textAttachments")) payload.textAttachments = Bugs.textInputs(value.textAttachments);
+        if (Object.hasOwn(value, "jiraFields")) payload.jiraFields = Bugs.aiFields(value.jiraFields);
+      } catch (error) { fail(error.message); }
+    } else if (type !== "ai.profiles") {
       if (typeof value.selection !== "string" || value.selection.length > 4096) fail("Обновите настройки диктовки");
       payload.selection = value.selection;
       if (type === "ai.transcribe") payload.audio = audioInput(value.audio);

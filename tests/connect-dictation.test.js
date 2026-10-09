@@ -35,3 +35,19 @@ test("corporate speech pairing and queues isolate owners, sessions, CSRF and dev
 test("corporate audio validation rejects malformed and oversized data before queuing", () => {
   for(const audio of [{type:"audio/webm",dataBase64:"AAAA"},{type:"audio/wav",dataBase64:"!!!!"},{type:"audio/wav",dataBase64:"A".repeat(7680064)}]) assert.throws(()=>audioInput(audio));
 });
+test("corporate bug-draft AI jobs use the existing owner and CSRF boundary and validate attachments", async t => {
+  const database = new DatabaseSync(":memory:"); t.after(() => database.close());
+  const service = createDictationService({ database: () => database, readJson: async req => req.body, sendJson: (res, status, value) => Object.assign(res, { status, value }), origin: () => "https://report.example.test", owner: req => { if (!req.user) throw Object.assign(Error("Unauthorized"), { status: 401 }); return { source: "session", id: req.user }; }, verifyCsrf: (_, token) => token === "fixture-csrf", audit: () => {} });
+  const call = async (channel, url, body, user = "alice", token) => { const response = {}; await service[channel]({ url, method: "POST", user, body, headers: token ? { authorization: token } : {} }, response); return response.value; };
+  const pairing = await call("browser", "/api/agent/pairings", { csrfToken: "fixture-csrf" });
+  const device = await call("machine", "/api/agent/pair", { code: pairing.code }); const token = `Bearer ${device.deviceId}.${device.secret}`;
+  const body = { csrfToken: "fixture-csrf", profileId: "fixture", prompt: "Только переданные факты", context: { attachments: [] }, additionalContext: "Описание бага", jiraFields: [] };
+  await assert.rejects(call("browser", "/api/ai/bug-draft", body, null), { status: 401 });
+  await assert.rejects(call("browser", "/api/ai/bug-draft", { ...body, csrfToken: "invalid" }), { status: 403 });
+  await assert.rejects(call("browser", "/api/ai/bug-draft", body, "bob"), { status: 503 });
+  await assert.rejects(call("browser", "/api/ai/bug-draft", { ...body, images: [{ type: "image/png", name: "bad", dataBase64: "!" }] }), { status: 422 });
+  const queued = await call("browser", "/api/ai/bug-draft", body);
+  const job = (await call("machine", "/api/agent/poll", {}, "alice", token)).job; assert.equal(job.id, queued.jobId); assert.equal(job.type, "ai.bug-draft"); assert.equal(job.payload.csrfToken, undefined);
+  await call("machine", `/api/agent/jobs/${job.id}/result`, { ok: true, result: { draft: { summary: "Тестовый баг" } } }, "alice", token);
+  assert.equal(database.prepare("SELECT payload_json FROM dictation_jobs WHERE id = ?").get(job.id).payload_json, "{}");
+});

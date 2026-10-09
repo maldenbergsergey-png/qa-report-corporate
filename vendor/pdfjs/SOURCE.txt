@@ -1,0 +1,2 @@
+pdfjs-dist 5.6.205
+Vendored from the installed package. Original license is included.

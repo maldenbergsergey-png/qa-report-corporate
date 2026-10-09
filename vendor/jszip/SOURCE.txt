@@ -1,0 +1,2 @@
+jszip 3.10.1
+Vendored from the installed package. Original license is included.

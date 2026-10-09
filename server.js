@@ -178,6 +178,8 @@ const SECURITY_HEADERS = {
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".wasm": "application/wasm",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
@@ -1708,6 +1710,10 @@ function serveStatic(request, response) {
   const relative = requestPath === "/login" ? "login.html" : requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
   const filePath = path.resolve(ROOT, relative);
   const pathFromRoot = path.relative(ROOT, filePath);
+  const privateOperations = path.join(path.dirname(REPORTS_DB_PATH), "issue-operations");
+  if (filePath === privateOperations || filePath.startsWith(privateOperations + path.sep)) {
+    response.writeHead(403); response.end("Forbidden"); return;
+  }
   if (pathFromRoot.startsWith("..") || path.isAbsolute(pathFromRoot)) {
     response.writeHead(403);
     response.end("Forbidden");
@@ -1729,6 +1735,11 @@ function serveStatic(request, response) {
 
 const dictationService = require("./connect-dictation-server").createDictationService({
   database: getReportsDb, readJson, sendJson, origin: requestOrigin, owner: resolveReportOwner, verifyCsrf, audit,
+});
+
+const bugReportService = require("./bug-report-server").createBugReportService({
+  readJson, sendJson, requireUser, verifyCsrf, jiraConnection, jiraFetch,
+  directory: path.dirname(REPORTS_DB_PATH), audit,
 });
 
 const server = http.createServer(async (request, response) => {
@@ -1760,7 +1771,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (await localImportService.producer(request, response, requestOrigin(request))) return;
-    // A device key grants access only to its speech queue, never to session-protected APIs.
+    // A device key grants access only to its speech/AI queue, never to session-protected APIs.
     if (await dictationService.machine(request, response)) return;
     request.user = sessionFromRequest(request);
     if (request.method === "GET" && requestPath === "/api/auth/session") {
@@ -1789,6 +1800,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (await dictationService.browser(request, response)) return;
+    if (await bugReportService(request, response)) return;
     if (requestPath.startsWith("/api/local-import/sessions")) {
       const owner = resolveReportOwner(request);
       if (await localImportService.browser(request, response, {
@@ -1900,6 +1912,7 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, status, {
       error: hideDetails ? "Внутренняя ошибка сервера" : error.message || "Неизвестная ошибка",
       ...(hideDetails ? {} : { errorCode: error.code || "", jiraPath: error.pathname || "" }),
+      ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
       ...(!hideDetails && error.instanceId ? { instanceId: error.instanceId } : {}),
     });
   }

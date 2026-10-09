@@ -94,7 +94,12 @@
           rows: section.rows.map(row => {
             if (!row || !row.cells || typeof row.cells !== "object" || !statuses.has(row.status)) bad();
             const cells = Object.fromEntries(columns.map(c => [c.id, string(row.cells[c.id])]));
-            return { id: id(row.id), status: row.status, cells, ...(row.manualNumber !== undefined ? { manualNumber: string(row.manualNumber) } : {}) };
+            const bugs = (Array.isArray(row.bugs) ? row.bugs : []).slice(0, 100).map(bug => {
+              const url = new URL(string(bug.issueUrl));
+              if (!/^https?:$/.test(url.protocol) || url.username || url.password || !/^[A-Z][A-Z0-9_]*-\d+$/i.test(bug.key || "")) bad();
+              return { key: string(bug.key), issueUrl: url.href, createdAt: string(bug.createdAt || "") };
+            });
+            return { id: id(row.id), status: row.status, cells, ...(bugs.length ? { bugs } : {}), ...(row.manualNumber !== undefined ? { manualNumber: string(row.manualNumber) } : {}) };
           }) };
       }) };
     unique(result.sections.map(s => s.id)); unique(result.sections.flatMap(s => s.rows.map(r => r.id)));

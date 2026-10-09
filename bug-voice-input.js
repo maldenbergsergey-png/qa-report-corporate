@@ -74,8 +74,8 @@
         }
         if (browser) {
           const recognition = this.recognition = new Recognition(); recognition.lang = speech.language === "en" ? "en-US" : "ru-RU"; recognition.continuous = true; recognition.interimResults = true;
-          const final = new Map(); let failed = false;
-          recognition.onstart = () => { if (token === this.token) { this.update("recording", "Запись идёт. Нажмите квадрат, чтобы закончить, или крестик, чтобы отменить."); this.meter(token); } };
+          const final = new Map(), completed = []; let failed = false;
+          recognition.onstart = () => { if (token === this.token) { this.update("recording", "Запись идёт. Нажмите квадрат, чтобы закончить, или крестик, чтобы отменить."); if (!this.frame) this.meter(token); } };
           recognition.onresult = event => {
             if (token !== this.token) return;
             let interim = "";
@@ -86,14 +86,27 @@
             if (interim && this.phase === "recording") this.update("recording", `Слушаю: ${interim.slice(0, 300)}`);
           };
           recognition.onerror = event => {
+            // Silence ends a browser recognition session, not the user's recording.
+            if (event.error === "no-speech" && token === this.token) return;
             if (token !== this.token) return; failed = true; this.releaseInput();
             const errors = { "not-allowed": "Разрешите микрофон в настройках браузера и повторите диктовку.", "service-not-allowed": "Сервис диктовки браузера недоступен. Выберите локальную модель или ИИ в Connect.", "audio-capture": "Микрофон недоступен. Проверьте его подключение и разрешения.", "network": "Сервис диктовки браузера недоступен. Проверьте интернет или выберите локальную модель в Connect.", "no-speech": "Речь не распознана. Повторите диктовку ближе к микрофону." };
             this.update("error", errors[event.error] || "Не удалось распознать речь. Повторите диктовку или введите текст.");
           };
-          recognition.onend = async () => {
+          const finish = this.finishRecognition = async () => {
             if (token !== this.token) return;
-            clearTimeout(this.timer); this.recognition = null; this.releaseInput();
-            if (!failed) { try { const text = [...final.values()].filter(Boolean).join(" "); if (text) await this.deliver(text, speech, token); else this.update("idle", "Речь не распознана. Повторите запись."); } catch (error) { this.update("error", error.message); } }
+            clearTimeout(this.timer); clearTimeout(this.restartTimer); this.restartTimer = null; this.recognition = null; this.finishRecognition = null; this.releaseInput();
+            if (!failed) { try { const text = [...completed, ...final.values()].filter(Boolean).join(" "); if (text) await this.deliver(text, speech, token); else this.update("idle", "Речь не распознана. Повторите запись."); } catch (error) { if (token === this.token) this.update("error", error.message); } }
+          };
+          recognition.onend = () => {
+            if (token !== this.token) return;
+            if (failed || this.phase === "stopping") { finish(); return; }
+            completed.push(...[...final.values()].filter(Boolean)); final.clear();
+            this.restartTimer = setTimeout(() => {
+              this.restartTimer = null;
+              if (token !== this.token || this.phase === "stopping") return;
+              try { recognition.start(); }
+              catch { failed = true; finish(); this.update("error", "Сервис диктовки браузера недоступен. Выберите локальную модель или ИИ в Connect."); }
+            }, 200);
           };
           recognition.start(); this.timer = setTimeout(() => this.stop(), 180000); return;
         }
@@ -118,8 +131,8 @@
         if (token === this.token) { this.cancel(); this.update("error", error.name === "NotAllowedError" ? "Разрешите микрофон в настройках браузера и повторите запись." : error.message); }
       }
     }
-    stop() { if (this.phase !== "recording") return; clearTimeout(this.timer); this.update("stopping", "Завершаем запись…"); this.recognition?.stop(); if (this.recorder?.state === "recording") this.recorder.stop(); this.releaseInput(); }
-    cancel() { this.token++; clearTimeout(this.timer); this.recognition?.abort(); this.recognition = null; if (this.recorder?.state === "recording") this.recorder.stop(); this.releaseInput(); this.recorder = null; this.phase = "idle"; }
+    stop() { if (this.phase !== "recording") return; clearTimeout(this.timer); this.update("stopping", "Завершаем запись…"); if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; this.finishRecognition?.(); } else this.recognition?.stop(); if (this.recorder?.state === "recording") this.recorder.stop(); this.releaseInput(); }
+    cancel() { this.token++; clearTimeout(this.timer); clearTimeout(this.restartTimer); this.restartTimer = null; this.finishRecognition = null; this.recognition?.abort(); this.recognition = null; if (this.recorder?.state === "recording") this.recorder.stop(); this.releaseInput(); this.recorder = null; this.phase = "idle"; }
   }
   window.QaReportVoiceInput = { VoiceInput, wav };
 })();

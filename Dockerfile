@@ -13,6 +13,8 @@ COPY --chown=node:node server.js jira-publication.js auth.js jira-oauth.js app.j
 COPY --chown=node:node checklist-selection.js checklist-table.js checklist-numbering.js release-notes.js pwa.js sw.js manifest.webmanifest ./
 COPY --chown=node:node local-import-server.js jira-attachment-transfer.js attachment-limits.js attachment-import.js import-options.js import-wizard.js jira-attachment-reuse.js local-import-client.js ./
 COPY --chown=node:node dictation-input.js bug-voice-input.js connect-dictation-server.js ./
+COPY --chown=node:node bug-report.js bug-report-ui.js bug-rich-editor.js bug-report-server.js jira-issues.js bug-attachment-analysis.js bug-wizard.css tracker-links.js ./
+COPY --chown=node:node vendor ./vendor
 COPY --chown=node:node icons ./icons
 RUN mkdir -p /app/reports-data && chown -R node:node /app/reports-data
 

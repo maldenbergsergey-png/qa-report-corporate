@@ -53,7 +53,21 @@
     }
     return { text, encoding: decoder.encoding, size: bytes.length };
   }
-  const api = { decode, isText, MAX_BYTES };
+  function readableText(text) {
+    // Consume other escapes too, so literal \\uXXXX stays literal. Do not parse
+    // and serialize JSON: that would change whitespace, duplicate keys and numbers.
+    return text.replace(/\\u([dD][89aAbB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\[\s\S]/g,
+      (escape, high, low, hex) => {
+        if (high) return String.fromCharCode(parseInt(high, 16), parseInt(low, 16));
+        if (!hex) return escape;
+        const code = parseInt(hex, 16);
+        // Keep JSON delimiters, controls and unpaired surrogates escaped.
+        if (code < 0x20 || code === 0x22 || code === 0x5c || (code >= 0x7f && code <= 0x9f) ||
+          (code >= 0xd800 && code <= 0xdfff)) return escape;
+        return String.fromCharCode(code);
+      });
+  }
+  const api = { decode, readableText, isText, MAX_BYTES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QaReportFilePreview = api;
 })(typeof window === "undefined" ? globalThis : window);

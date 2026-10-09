@@ -6879,7 +6879,7 @@ function replaceStoredObjectWithLink(object, kind) {
 let viewingFileCard = null;
 let fileViewerTextContent = "";
 const fileViewer = Object.fromEntries([
-  "Dialog", "Title", "Meta", "Encoding", "Wrap", "Message", "Text", "State",
+  "Dialog", "Title", "Meta", "Encoding", "Wrap", "Readable", "ReadableHint", "Message", "Text", "State",
 ].map(name => [name, document.getElementById(`fileViewer${name}`)]));
 const copyFileViewerButton = document.getElementById("copyFileViewerButton");
 
@@ -6887,6 +6887,8 @@ function updateFileViewer() {
   fileViewer.Text.value = "";
   fileViewerTextContent = "";
   fileViewer.Message.hidden = true;
+  fileViewer.ReadableHint.hidden = true;
+  fileViewer.Readable.disabled = true;
   fileViewer.Text.hidden = true;
   copyFileViewerButton.disabled = true;
   copyFileViewerButton.textContent = "Копировать текст";
@@ -6898,14 +6900,19 @@ function updateFileViewer() {
       name, type: viewingFileCard.dataset.mimeType || "",
       dataUrl: viewingFileCard.dataset.dataUrl || "",
     }, fileViewer.Encoding.value);
-    fileViewerTextContent = preview.text;
-    fileViewer.Text.value = preview.text;
+    const readable = window.QaReportFilePreview.readableText(preview.text);
+    const hasReadableText = readable !== preview.text;
+    fileViewer.Readable.disabled = !hasReadableText;
+    fileViewer.ReadableHint.hidden = !hasReadableText;
+    fileViewerTextContent = fileViewer.Readable.checked ? readable : preview.text;
+    fileViewer.Text.value = fileViewerTextContent;
     fileViewer.Text.hidden = false;
     fileViewer.Text.scrollTop = 0; fileViewer.Text.scrollLeft = 0;
     copyFileViewerButton.disabled = !preview.text;
     fileViewer.Meta.textContent = `${getFileExtension(name, viewingFileCard.dataset.mimeType)} · ${formatFileSize(preview.size)} · ${preview.encoding.toUpperCase()}`;
-    const lineCount = preview.text.split(/\r\n|\r|\n/).length;
-    fileViewer.State.textContent = preview.text ? `${lineCount} ${pluralizeLines(lineCount)} · Только просмотр` : "Пустой файл";
+    const lineCount = fileViewerTextContent.split(/\r\n|\r|\n/).length;
+    const viewMode = hasReadableText ? (fileViewer.Readable.checked ? " · Читаемый текст" : " · Исходный текст") : "";
+    fileViewer.State.textContent = fileViewerTextContent ? `${lineCount} ${pluralizeLines(lineCount)} · Только просмотр${viewMode}` : "Пустой файл";
   } catch (error) {
     fileViewer.Message.textContent = error.message;
     fileViewer.Message.hidden = false;
@@ -6924,6 +6931,7 @@ function openFileViewer(card) {
   fileViewer.Meta.textContent = `${getFileExtension(fileViewer.Title.textContent, card.dataset.mimeType)} · ${formatFileSize(card.dataset.fileSize)}`;
   fileViewer.Encoding.value = "auto";
   fileViewer.Wrap.checked = true;
+  fileViewer.Readable.checked = true;
   fileViewer.Text.setAttribute("wrap", "soft");
   fileViewer.Encoding.disabled = !window.QaReportFilePreview.isText(fileViewer.Title.textContent, card.dataset.mimeType);
   updateFileViewer();
@@ -6964,6 +6972,7 @@ fileViewer.Dialog.addEventListener("click", event => {
 });
 document.getElementById("closeFileViewerButton").addEventListener("click", closeFileViewer);
 fileViewer.Encoding.addEventListener("change", updateFileViewer);
+fileViewer.Readable.addEventListener("change", updateFileViewer);
 fileViewer.Wrap.addEventListener("change", () => fileViewer.Text.setAttribute("wrap", fileViewer.Wrap.checked ? "soft" : "off"));
 document.getElementById("downloadFileViewerButton").addEventListener("click", () => {
   if (viewingFileCard) downloadFileCard(viewingFileCard);

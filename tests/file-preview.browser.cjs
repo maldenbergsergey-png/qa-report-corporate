@@ -82,6 +82,8 @@ async function main() {
   assert.equal(await dialog.isVisible(), true);
   assert.equal(await text.inputValue(), xml.replace(/\r\n/g, '\n'));
   assert.equal(await text.getAttribute('readonly'), '');
+  assert.equal(await page.locator('#fileViewerReadable').isDisabled(), true);
+  assert.equal(await page.locator('#fileViewerReadableHint').isVisible(), false);
   assert.match(await page.locator('#fileViewerMeta').textContent(), /UTF-8/);
   await page.locator('#copyFileViewerButton').click();
   await page.waitForFunction(() => document.getElementById('copyFileViewerButton').textContent === 'Скопировано');
@@ -149,6 +151,66 @@ async function main() {
     }, { dataUrl: `data:${type};base64,${Buffer.from(bytes).toString('base64')}`, name, type, size: bytes.length, overrides });
     await card.click();
   };
+
+  const readableToggle = page.locator('#fileViewerReadable');
+  const rawJson = String.raw`{"product":{"category":{"id":5,"name":"\u041a\u0432\u0430\u0440\u0442\u0438\u0440\u044b"},"id":9007199254740993,"title":"\u041c\u0438\u0440\u0430 \ud83d\ude80","literal":"\\u0410","path":"\/upload\/file","control":"\u000a","quote":"\u0022","slash":"\u005c"}}`;
+  const readableJson = String.raw`{"product":{"category":{"id":5,"name":"Квартиры"},"id":9007199254740993,"title":"Мира 🚀","literal":"\\u0410","path":"\/upload\/file","control":"\u000a","quote":"\u0022","slash":"\u005c"}}`;
+  await fixture(Buffer.from(rawJson), 'response.json', 'application/json');
+  const jsonBefore = await page.evaluate(() => ({ report: serializeDraft(), undo: undoStack.length, dataUrl: viewingFileCard.dataset.dataUrl }));
+  assert.equal(await readableToggle.isChecked(), true);
+  assert.equal(await readableToggle.isEnabled(), true);
+  assert.equal(await page.locator('#fileViewerReadableHint').isVisible(), true);
+  assert.equal(await text.inputValue(), readableJson);
+  assert.match(await page.locator('#fileViewerState').textContent(), /Читаемый текст/);
+  await page.locator('#copyFileViewerButton').click();
+  await page.waitForFunction(() => document.getElementById('copyFileViewerButton').textContent === 'Скопировано');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), readableJson);
+  await readableToggle.uncheck();
+  assert.equal(await text.inputValue(), rawJson);
+  assert.match(await page.locator('#fileViewerState').textContent(), /Исходный текст/);
+  assert.equal(await page.locator('#copyFileViewerButton').textContent(), 'Копировать текст');
+  await page.locator('#fileViewerEncoding').selectOption('utf-8');
+  assert.equal(await text.inputValue(), rawJson);
+  await page.locator('#copyFileViewerButton').click();
+  await page.waitForFunction(() => document.getElementById('copyFileViewerButton').textContent === 'Скопировано');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), rawJson);
+  await readableToggle.check();
+  await page.locator('#fileViewerWrap').uncheck();
+  await readableToggle.uncheck(); await readableToggle.check();
+  assert.equal(await text.getAttribute('wrap'), 'off');
+  // Copy fallback also copies the chosen readable view.
+  await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw Error('fixture denial'); }; });
+  await page.locator('#copyFileViewerButton').click();
+  await page.waitForFunction(() => document.getElementById('copyFileViewerButton').textContent === 'Скопировано');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), readableJson);
+  await page.evaluate(() => { delete navigator.clipboard.writeText; });
+  const jsonDownloadPending = page.waitForEvent('download');
+  await page.locator('#downloadFileViewerButton').click();
+  const jsonDownload = await jsonDownloadPending;
+  assert.equal(jsonDownload.suggestedFilename(), 'response.json');
+  assert.equal(fs.readFileSync(await jsonDownload.path()).toString(), rawJson);
+  assert.deepEqual(await page.evaluate(() => ({ report: serializeDraft(), undo: undoStack.length, dataUrl: viewingFileCard.dataset.dataUrl })), jsonBefore);
+  await page.locator('#fileViewerWrap').check();
+  if (screenshots) {
+    for (const theme of ['light', 'dark', 'graphite']) {
+      await page.evaluate(theme => applyTheme(theme), theme);
+      await page.screenshot({ path: path.join(screenshots, `json-readable-${theme}.png`) });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(screenshots, 'json-readable-mobile.png') });
+    for (const id of ['#fileViewerReadable', '#fileViewerReadableHint', '#fileViewerText', '#copyFileViewerButton', '#downloadFileViewerButton']) {
+      const rect = await page.locator(id).boundingBox();
+      assert.ok(rect.x >= 0 && rect.x + rect.width <= 390 && rect.y >= 0 && rect.y + rect.height <= 844, id);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
+  await readableToggle.uncheck(); await close(); await card.click();
+  assert.equal(await readableToggle.isChecked(), true);
+  assert.equal(await text.inputValue(), readableJson); await close();
+  await fixture(Buffer.from(String.raw`\u003cimg src="https://example.test/image" onerror="window.previewExecuted=true"\u003e\u003cscript\u003ewindow.previewExecuted=true\u003c/script\u003e`), 'escaped.log');
+  assert.match(await text.inputValue(), /^<img/);
+  assert.equal(await dialog.locator('script,img,iframe').count(), 0);
+  assert.equal(await page.evaluate(() => window.previewExecuted), undefined); await close();
   await fixture(Buffer.concat([Buffer.from('<?xml version="1.0" encoding="windows-1251"?><x>'), Buffer.from([0xcf,0xf0,0xe8,0xe2,0xe5,0xf2]), Buffer.from('</x>')]), 'legacy.xml');
   assert.match(await text.inputValue(), /Привет/); await close();
   await fixture(Buffer.from('<?xml version="1.0" encoding="bad-encoding"?><x>Привет</x>'), 'wrong.xml');
@@ -163,6 +225,8 @@ async function main() {
   for (const [bytes, name, expected] of [[Buffer.from('binary'), 'archive.zip', /формата/], [Buffer.from([0,1,2,3]), 'fake.xml', /двоичные/], [Buffer.alloc(2 * 1024 * 1024 + 1, 0x61), 'large.xml', /до 2 МБ/]]) {
     await fixture(bytes, name, 'application/octet-stream', { size: 1 });
     assert.equal(await text.isVisible(), false);
+    assert.equal(await readableToggle.isDisabled(), true);
+    assert.equal(await page.locator('#fileViewerReadableHint').isVisible(), false);
     assert.equal(await page.locator('#copyFileViewerButton').isDisabled(), true);
     assert.match(await page.locator('#fileViewerMessage').textContent(), expected);
     assert.equal(await page.locator('#downloadFileViewerButton').isEnabled(), true); await close();
@@ -173,7 +237,7 @@ async function main() {
   assert.match(await page.locator('#fileViewerMessage').textContent(), /сохранённых в браузере/); await close();
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: upload/reload, offline XML, clipboard and fallback, original download, keyboard/menu/focus, encodings, safe markup, unsupported/binary/oversized/empty/remote files and responsive layouts.');
+  console.log('PASS: upload/reload, offline XML, readable Unicode/source JSON, exact numbers, literal escapes, clipboard and fallback, original download, keyboard/menu/focus, encodings, safe markup, unsupported/binary/oversized/empty/remote files and responsive layouts.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

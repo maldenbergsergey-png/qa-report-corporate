@@ -66,3 +66,29 @@ test('preview limit uses actual bytes and accepts the exact boundary', () => {
   assert.throws(() => preview.decode({ ...file(Buffer.alloc(preview.MAX_BYTES + 1, 0x61)), size: 1 }), /до 2 МБ/);
   assert.throws(() => preview.decode(file(Buffer.alloc(preview.MAX_BYTES + 3, 0x61))), /до 2 МБ/);
 });
+
+
+test('readable Unicode preserves JSON formatting, duplicate keys and exact numbers', () => {
+  const source = String.raw`{ "name": "\u041a\u0432\u0430\u0440\u0442\u0438\u0440\u044b", "emoji": "\uD83D\uDE80", "id": 9007199254740993, "price": 2.5000, "name": "\u0041" }`;
+  const expected = '{ "name": "Квартиры", "emoji": "🚀", "id": 9007199254740993, "price": 2.5000, "name": "A" }';
+  assert.equal(preview.readableText(source), expected);
+  assert.deepEqual(JSON.parse(preview.readableText(source)), JSON.parse(source));
+  assert.equal(preview.decode(file(source, 'response.json')).text, source);
+});
+
+test('literal backslashes, JSON delimiters and controls remain escaped', () => {
+  const source = String.raw`{"literal":"\\u0410","unicode":"\u0410","mixed":"\\\u0411","quote":"\u0022","slash":"\u005c","newline":"\u000a","tab":"\u0009","control":"\u007f","path":"\/upload\/file"}`;
+  const expected = String.raw`{"literal":"\\u0410","unicode":"А","mixed":"\\Б","quote":"\u0022","slash":"\u005c","newline":"\u000a","tab":"\u0009","control":"\u007f","path":"\/upload\/file"}`;
+  assert.equal(preview.readableText(source), expected);
+  assert.deepEqual(JSON.parse(preview.readableText(source)), JSON.parse(source));
+  assert.equal(preview.readableText(String.raw`\u005cu0410`), String.raw`\u005cu0410`);
+});
+
+test('invalid escapes and lone surrogates survive; valid pairs and JSON lines are readable', () => {
+  const invalid = String.raw`\u041G \u123 \u \U0410 \uD83D! \ude80 \uDE80\uD83D`;
+  assert.equal(preview.readableText(invalid), invalid);
+  const lines = String.raw`{"text":"\u043f\u0440\u0438\u0432\u0435\u0442"}` + '\r\n' + String.raw`{"text":"\ud83d\ude80"}`;
+  assert.equal(preview.readableText(lines), '{"text":"привет"}\r\n{"text":"🚀"}');
+  assert.equal(preview.readableText('Обычный текст'), 'Обычный текст');
+  assert.equal(preview.readableText(''), '');
+});

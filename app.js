@@ -4936,6 +4936,18 @@ async function uploadPendingImages(settings, issue, options = {}) {
   const persist = async entries => {
     const changes = reuse.bindings(entries);
     reuse.apply(draft, changes); reuse.applyRoot(elements.introEditor, changes); reuse.applyRoot(elements.sections, changes);
+    // Confirmed uploads are external facts, not an undoable edit. Only patch
+    // matching bytes/source keys in snapshots for this report and target task.
+    const preserve = serialized => {
+      const value = JSON.parse(serialized);
+      if (value.reportId !== publication.reportId || reuse.issueIdentity(value.issueUrl) !== reuse.issueIdentity(publication.issueUrl)) return serialized;
+      reuse.apply(value, changes);
+      return JSON.stringify(value);
+    };
+    historyCurrent = preserve(historyCurrent);
+    undoStack = undoStack.map(preserve); redoStack = redoStack.map(preserve);
+    savedContentForHistory = null;
+    updateHistoryButtons();
     if (await saveDraft() === false) throw new Error("Не удалось сохранить связь с вложениями. Проверьте текущую версию отчёта");
     await saveReportSnapshot("jira-attachment-links");
   };

@@ -36,7 +36,7 @@
     if (!match) throw new Error("Некорректные локальные данные файла");
     const raw = atob(match[2]); const bytes = Uint8Array.from(raw,c=>c.charCodeAt(0));
     const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(n=>n.toString(16).padStart(2,"0")).join("");
-    return {hash, dataBase64:match[2], type:match[1]};
+    return {hash, dataBase64:match[2], type:match[1], size:bytes.length};
   }
   function uniqueName(original, names) {
     const name = String(original || "file").replace(/[\r\n\u0000/\\]/g,"_");
@@ -45,7 +45,7 @@
     let n=2; while([...names].some(value=>value.toLowerCase()===`${stem} (${n})${ext}`.toLowerCase())) n++;
     const chosen=`${stem} (${n})${ext}`; names.add(chosen);return chosen;
   }
-  async function plan(assets, { issueUrl, attachments, loadSource, signal }) {
+  async function plan(assets, { issueUrl, attachments, loadSource, signal, recoverExisting = false, onCheck = () => {} }) {
     const target = issueIdentity(issueUrl); if (!target) throw new Error("Некорректная задача для публикации");
     if (!Array.isArray(attachments)) throw new Error("Не удалось проверить вложения Jira");
     const remote = new Map(attachments.map(file=>[String(file.id),file]));
@@ -53,6 +53,33 @@
     attachments.forEach(file=>nameCounts.set(file.filename,(nameCounts.get(file.filename)||0)+1));
     const reused = new Map(), uploads = new Map(), downloads = new Map(), hashes = new Map();
     const getDigest = data => { if (!hashes.has(data)) hashes.set(data,digest(data)); return hashes.get(data); };
+    // Old reports can lose source attributes. Only actual byte equality can
+    // recover them; filenames and sizes merely order/narrow the candidates.
+    const verifiedRemote = new Map();
+    const verifyRemote = file => {
+      const id = String(file.id);
+      if (!verifiedRemote.has(id)) verifiedRemote.set(id, (async () => {
+        signal?.throwIfAborted?.(); onCheck(file); signal?.throwIfAborted?.();
+        try {
+          const hash = (await digest(await loadSource({ issueUrl: target, id, name: file.filename }))).hash;
+          signal?.throwIfAborted?.();
+          return hash;
+        } catch (error) {
+          if (error?.name === "AbortError") throw error;
+          throw new Error(`Не удалось проверить существующее вложение «${file.filename}»: ${error.message}. Повторная загрузка остановлена.`);
+        }
+      })());
+      return verifiedRemote.get(id);
+    };
+    const recover = async (asset, bytes, current) => {
+      const rank = file => file === current ? 0 : [asset.name, asset.source.name].includes(file.filename) ? 1 : 2;
+      const candidates = (recoverExisting ? attachments : current && !asset.source.hash ? [current] : [])
+        .filter(file => !(file === current && asset.source.hash && asset.source.hash !== bytes.hash))
+        .filter(file => file.size == null || !Number.isSafeInteger(Number(file.size)) || Number(file.size) === bytes.size)
+        .sort((a, b) => rank(a) - rank(b));
+      for (const file of candidates) if (await verifyRemote(file) === bytes.hash) return file;
+      return null;
+    };
     const localSources = new Map();
     for (const asset of assets) if (asset.dataUrl && asset.source.issueUrl && asset.source.id) {
       const bytes = await getDigest(asset.dataUrl);
@@ -64,12 +91,13 @@
       let bytes = asset.dataUrl ? await getDigest(asset.dataUrl) : null;
       const current = asset.source.issueUrl === target ? remote.get(asset.source.id) : null;
       const unchanged = !bytes || (asset.source.hash && asset.source.hash === bytes.hash);
-      if (current && unchanged) {
-        if (nameCounts.get(current.filename)>1 && !sourceUrl(current.content,target)) throw new Error(`Jira не вернула точную ссылку на «${current.filename}» с одинаковыми именами`);
-        if (!reused.has(String(current.id))) reused.set(String(current.id),{...current, originals:[], hash:bytes?.hash || asset.source.hash, issueUrl:target, exactUrl:nameCounts.get(current.filename)>1});
-        reused.get(String(current.id)).hash ||= bytes?.hash || asset.source.hash;
-        reused.get(String(current.id)).originals.push(original); continue;
-      }
+      const use = file => {
+        if (nameCounts.get(file.filename)>1 && !sourceUrl(file.content,target)) throw new Error(`Jira не вернула точную ссылку на «${file.filename}» с одинаковыми именами`);
+        if (!reused.has(String(file.id))) reused.set(String(file.id),{...file, originals:[], hash:bytes?.hash || asset.source.hash, issueUrl:target, exactUrl:nameCounts.get(file.filename)>1});
+        reused.get(String(file.id)).hash ||= bytes?.hash || asset.source.hash;
+        reused.get(String(file.id)).originals.push(original);
+      };
+      if (current && unchanged) { use(current); continue; }
       if (!bytes) {
         if (!asset.source.issueUrl || !asset.source.id) throw new Error(`Не удалось определить исходное вложение «${asset.name}». Импортируйте его из Jira ещё раз`);
         const sourceKey=`${asset.source.issueUrl}#${asset.source.id}`;
@@ -79,6 +107,8 @@
         catch(error) { throw new Error(`Не удалось получить «${asset.name}» из исходной Jira: ${error.message}`); }
         bytes=await getDigest(data);
       }
+      const recovered = await recover(asset, bytes, current);
+      if (recovered) { use(recovered); continue; }
       // Identical content with the same original name is uploaded once per publication.
       const uploadKey=JSON.stringify([asset.name,bytes.hash]);
       if (!uploads.has(uploadKey)) uploads.set(uploadKey,{attachmentId:crypto.randomUUID(),name:uniqueName(asset.name,names),type:bytes.type,dataBase64:bytes.dataBase64,hash:bytes.hash,issueUrl:target,originals:[]});

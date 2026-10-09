@@ -41,25 +41,35 @@ async function main() {
   const externalRequests = [];
   const publication = require(path.join(root, 'jira-publication'));
   const issueUrl = 'https://jira.example/browse/QA-1';
-  const inventories = new Map(), comments = new Map();
-  let uploads = 0, commentWrites = 0;
+  const inventories = new Map(), comments = new Map(), remoteBytes = new Map();
+  let downloads = 0;
+  let uploads = 0, commentWrites = 0, downloadFailure = false, wrongManifest = false;
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) { externalRequests.push(url.href); return route.abort(); }
-    const action = url.pathname.match(/^\/api\/(?:agent\/)?jira\/(attachment-manifest|attachments|comment|update-comment)$/)?.[1];
+    const action = url.pathname.match(/^\/api\/(?:agent\/)?jira\/(attachment-manifest|attachments|import-attachment|comment|update-comment)$/)?.[1];
     if (!action) return route.continue();
     const body = route.request().postDataJSON();
-    const target = publication.target(body.issueUrl).issueUrl;
+    const target = publication.target(body.issueUrl || body.commentUrl).issueUrl;
     if (!inventories.has(target)) inventories.set(target, []);
     const inventory = inventories.get(target);
     if (action === 'attachment-manifest') return route.fulfill({ json: {
-      attachmentReuse: true, issueUrl: target, attachments: inventory,
+      attachmentReuse: true, issueUrl: wrongManifest ? 'https://jira.example/browse/QA-99' : target, attachments: inventory,
     } });
+    if (action === 'import-attachment') {
+      if (downloadFailure) return route.fulfill({ status: 403, json: { error: 'HTTP 403: synthetic access denial' } });
+      const file = remoteBytes.get(String(body.attachmentId));
+      assert.ok(inventory.some(item => item.id === String(body.attachmentId)));
+      assert.ok(file); downloads++;
+      return url.pathname.includes('/agent/') ? route.fulfill({ json: { file } })
+        : route.fulfill({ body: Buffer.from(file.dataBase64, 'base64'), contentType: file.type });
+    }
     if (action === 'attachments') {
       const attachments = body.files.map(file => {
         uploads++;
-        const remote = { id: String(uploads), filename: file.name, mimeType: file.type,
+        const remote = { id: String(uploads), filename: file.name, mimeType: file.type, size: Buffer.from(file.dataBase64, 'base64').length,
           content: `https://jira.example/secure/attachment/${uploads}/${encodeURIComponent(file.name)}` };
+        remoteBytes.set(remote.id, { type: file.type, dataBase64: file.dataBase64 });
         inventory.push(remote);
         return { ...remote, attachmentId: file.attachmentId };
       });
@@ -103,10 +113,12 @@ async function main() {
   }, issueUrl);
   await page.fill('#environment', 'STAGE2');
   await page.waitForFunction(() => !hasUnsavedLocalChanges && historyCurrent === serializeDraft() && undoStack.length > 0);
-  const publish = async () => {
+  const publish = async (expectedError = null) => {
     await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
     await page.waitForFunction(() => !publishInProgress);
-    assert.equal(await page.locator('#publishErrorText').isVisible(), false, await page.locator('#publishErrorText').textContent());
+    const message = await page.locator('#publishErrorText').textContent();
+    assert.equal(await page.locator('#publishErrorText').isVisible(), Boolean(expectedError), message);
+    if (expectedError) assert.match(message, expectedError);
     await page.click('#publishCancelButton');
   };
   const sources = async () => page.evaluate(() => QaReportJiraReuse.collect(draft).map(asset => ({
@@ -165,8 +177,59 @@ async function main() {
   assert.equal(await page.locator('#issueUrl').inputValue(), issueUrl);
   assert.deepEqual(await sources(), firstTargetSources, 'Older snapshots keep bindings to their original task');
   await publish(); assert.equal(uploads, 6, 'Returning to the original task must not duplicate attachments');
+  // A linked legacy report may have local bytes but no saved Jira bindings.
+  await page.evaluate(() => {
+    const files = Array.from({ length: 27 }, (_, index) => createFileCardHtml({
+      id: `legacy-${index}`, name: `legacy-${index}.json`, type: 'application/json',
+      dataUrl: `data:application/json;base64,${btoa(JSON.stringify({ index, result: 'published earlier' }))}`,
+    })).join('');
+    applyDraftLocally({ ...draft, intro: '', sections: [{
+      id: 'reuse-section', title: 'Старый отчёт', columns: [{ id: 'check', title: 'Проверка', width: 700 }],
+      rows: [{ id: 'reuse-row', status: 'OK', cells: { check: '<p>Вложения</p>' + files } }],
+    }] });
+    collectDocumentFields(); historyCurrent = serializeDraft(); undoStack = []; redoStack = [];
+  });
+  await publish(); assert.equal(uploads, 33);
+  // Old publications can use generated names, so names alone cannot recover them.
+  inventories.get(issueUrl).find(file => file.filename === 'legacy-0.json').filename = 'old-generated-name.json';
+  await page.evaluate(async () => {
+    for (const node of document.querySelectorAll('.cell-file[data-attachment-id]')) {
+      for (const attribute of [...node.attributes]) if (attribute.name.startsWith('data-jira-')) node.removeAttribute(attribute.name);
+    }
+    collectDocumentFields(); historyCurrent = serializeDraft(); undoStack = []; redoStack = [];
+    await saveDraft();
+  });
+  await page.reload(); await page.waitForSelector('.cell-file'); await setup();
+  assert.equal((await sources()).length, 27);
+  assert.equal((await sources()).every(asset => !asset.id && !asset.hash), true);
+  assert.equal(await page.evaluate(() => Boolean(currentJiraPublication())), true);
+  const beforeRecovery = downloads;
+  await publish();
+  assert.equal(uploads, 33, 'All 27 previously published files must be recovered without new uploads');
+  assert.equal((await sources()).every(asset => asset.id && asset.hash), true, 'Recovered links must be saved');
+  assert.ok(downloads > beforeRecovery, 'Recovery must compare actual bytes from Jira');
+  assert.equal(await page.locator('#publishAttachmentSummary').textContent(), 'Используем повторно: 27 · Загрузим: 0');
+  const afterRecovery = downloads;
+  await page.reload(); await page.waitForSelector('.cell-file'); await setup();
+  await publish(); assert.equal(uploads, 33); assert.equal(downloads, afterRecovery, 'Confirmed bindings need no repeat downloads');
+  // Failures must never fall back to uploading every unrecognised file.
+  const writesBeforeFailure = commentWrites;
+  wrongManifest = true;
+  await publish(/другой задачи/);
+  wrongManifest = false;
+  assert.equal(uploads, 33); assert.equal(commentWrites, writesBeforeFailure);
+  await page.evaluate(() => {
+    const node = document.querySelector('.cell-file[data-attachment-id="legacy-1"]');
+    for (const attribute of [...node.attributes]) if (attribute.name.startsWith('data-jira-')) node.removeAttribute(attribute.name);
+    collectDocumentFields(); historyCurrent = serializeDraft();
+  });
+  downloadFailure = true;
+  await publish(/HTTP 403/);
+  assert.equal(uploads, 33); assert.equal(commentWrites, writesBeforeFailure);
+  downloadFailure = false;
+  await publish(); assert.equal(uploads, 33);
   assert.deepEqual(externalRequests, []); assert.deepEqual(errors, []);
-  console.log('PASS: publish/update, shared occurrences, undo/redo/reload, changed bytes, deleted attachments and task changes keep correct bindings without duplicate uploads.');
+  console.log('PASS: publish/update, shared occurrences, undo/redo/reload, changed bytes, deleted attachments, task changes and recovery of 27 unbound files keep correct bindings without duplicate uploads.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

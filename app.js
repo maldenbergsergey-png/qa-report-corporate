@@ -4921,7 +4921,10 @@ async function uploadPendingImages(settings, issue, options = {}) {
   setPublishProgress({ step: "prepare", percent: 10, status: "Проверяем вложения в Jira…" });
   const manifest = await jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal });
   if (!manifest.attachmentReuse) throw new Error("Обновите подключение Jira: проверка существующих вложений не поддерживается");
+  if (reuse.issueIdentity(manifest.issueUrl) !== reuse.issueIdentity(issue.issueUrl)) throw new Error("Список вложений получен для другой задачи. Обновление отчёта остановлено.");
   const plan = await reuse.plan(assets, { issueUrl: manifest.issueUrl, attachments: manifest.attachments, signal,
+    recoverExisting: Boolean(currentJiraPublication()),
+    onCheck: file => setPublishProgress({ step: "prepare", percent: 12, status: `Сверяем содержимое «${file.filename}»…` }),
     loadSource: async source => window.QaReportAttachments.dataUrl(await jiraRequest("/api/jira/import-attachment", {
       ...settings, commentUrl: source.issueUrl, attachmentId: source.id,
     }, { binary: true, signal })),
@@ -4932,7 +4935,7 @@ async function uploadPendingImages(settings, issue, options = {}) {
     const limitError = window.QaReportAttachmentLimits.fileError(file, attachmentLimits);
     if (limitError) throw new Error(limitError);
   }
-  summary.textContent = `Уже в Jira: ${plan.reused.length} · Загрузим: ${plan.uploads.length}`; summary.hidden = false;
+  summary.textContent = `Используем повторно: ${plan.reused.length} · Загрузим: ${plan.uploads.length}`; summary.hidden = false;
   const persist = async entries => {
     const changes = reuse.bindings(entries);
     reuse.apply(draft, changes); reuse.applyRoot(elements.introEditor, changes); reuse.applyRoot(elements.sections, changes);

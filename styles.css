@@ -2255,7 +2255,8 @@ body.section-sticky-active .editor-toolbar::after {
 
 .confirm-modal {
   grid-template-rows: auto auto auto;
-  width: min(480px, 94vw);
+  width: min(480px, 100%);
+  min-width: 0;
   height: auto;
 }
 
@@ -2268,6 +2269,7 @@ body.section-sticky-active .editor-toolbar::after {
 
 .confirm-modal .modal-footer {
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -6210,6 +6212,7 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .overall-status-input #overallStatus:not([class*="status-"]) { color: var(--muted); font-weight: 400; border-color: var(--line); background: var(--surface); }
 .overall-status-chevron { position: absolute; top: 50%; right: 12px; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .metadata-grid .field-error { margin: 0; color: var(--red); font-size: 12px; line-height: 1.4; }
+.metadata-grid #issueUrl[aria-invalid="true"],
 .metadata-grid #environment[aria-invalid="true"],
 .metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 

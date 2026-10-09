@@ -89,11 +89,12 @@ async function main() {
   for (const format of ['markup', 'html', 'adf']) assert.doesNotMatch(exported[format], /ТЕСТ —|Проверено на/);
   assert.match(exported.xlsx, /Не указан/);
   await page.evaluate(() => {
-    window.publicationFixture = { ready: 0, scopes: 0, uploads: 0, sent: [], changeDuringScope: false };
+    window.publicationFixture = { ready: 0, scopes: 0, uploads: 0, sent: [], changeDuringScope: false, removeTargetDuringScope: false };
     isJiraReadyToPublish = async () => { publicationFixture.ready++; return true; };
     askPublishScope = async () => {
       publicationFixture.scopes++;
       if (publicationFixture.changeDuringScope) elements.overallStatus.value = '';
+      if (publicationFixture.removeTargetDuringScope) elements.issueUrl.value = '';
       return { sectionIds: null, statuses: null };
     };
     checkBackendCompatibility = async () => {};
@@ -104,6 +105,78 @@ async function main() {
     if (typeof jiraSettings !== 'undefined') jiraSettings = { transport: 'agent', baseUrl: 'https://jira.example', type: 'data-center' };
     if (typeof validateJiraSettings === 'function') validateJiraSettings = () => {};
   });
+  if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
+  // A missing task blocks all publication entry points before connection checks or uploads.
+  await page.click('#publishButton');
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.equal(await page.locator('#confirmModalTitle').innerText(), 'Укажите задачу');
+  assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), 'true');
+  assert.equal(await page.locator('#issueUrlError').innerText(), 'Укажите ссылку на задачу');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'acceptConfirmButton');
+  assert.deepEqual(await page.evaluate(() => [publicationFixture.ready, publicationFixture.scopes, publicationFixture.uploads, publicationFixture.sent.length]), [0, 0, 0, 0]);
+  for (const width of [1600, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    for (const theme of ['light', 'dark', 'graphite']) {
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+      const dialog = page.locator('#confirmModal .confirm-modal');
+      const box = await dialog.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width && box.height <= page.viewportSize().height, JSON.stringify({ width, theme, box }));
+      assert.equal(await page.locator('#issueUrl').evaluate(node => getComputedStyle(node).borderTopColor),
+        await page.locator('#issueUrlError').evaluate(node => getComputedStyle(node).color));
+      if (screenshots) await dialog.screenshot({ animations: 'disabled', path: path.join(screenshots, `${theme}-${width}-missing-task.png`) });
+    }
+  }
+  await page.click('#acceptConfirmButton');
+  await page.waitForFunction(() => !publishInProgress);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
+  // Whitespace, a bare key and a URL without a task key cannot bypass the gate.
+  for (const [value, entry, dismiss] of [
+    ['   ', 'export', 'cancel'],
+    ['QA-1', 'new', 'escape'],
+    ['https://jira.example/browse/', 'main', 'accept'],
+    ['https://jira.example/', 'export', 'accept'],
+    ['', 'focus', 'accept'],
+  ]) {
+    await page.fill('#issueUrl', value);
+    if (entry === 'focus') await page.evaluate(() => setFocusMode(true));
+    if (entry === 'export' || entry === 'focus') {
+      await page.click('#copyMenuButton');
+      await page.click('#publishExportButton');
+    } else if (entry === 'new') {
+      await page.evaluate(() => { void publishToJira('new'); });
+    } else await page.click('#publishButton');
+    await page.waitForSelector('#confirmModal:not([hidden])');
+    assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), 'true');
+    assert.ok(await page.locator('#issueUrlError').innerText());
+    assert.equal(await page.locator('#publishScopeModal').isVisible(), false);
+    if (dismiss === 'escape') await page.keyboard.press('Escape');
+    else await page.click(dismiss === 'cancel' ? '#cancelConfirmButton' : '#acceptConfirmButton');
+    await page.waitForFunction(() => !publishInProgress);
+    assert.deepEqual(await page.evaluate(() => [publicationFixture.ready, publicationFixture.scopes, publicationFixture.uploads, publicationFixture.sent.length]), [0, 0, 0, 0]);
+    if (dismiss === 'accept') {
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
+      assert.equal(await page.locator('#issueUrl').isVisible(), true);
+    }
+  }
+  if (!corporate) {
+    // EVA remains a valid publication target in the version that supports it.
+    await page.evaluate(() => {
+      window.originalEvaPublication = publishToEva;
+      publishToEva = async target => { publicationFixture.evaTarget = target; };
+    });
+    await page.fill('#issueUrl', 'https://eva.example/desk/Task/QA-1');
+    await page.fill('#environment', 'DEV');
+    await page.selectOption('#overallStatus', 'OK');
+    await page.evaluate(() => publishToJira());
+    assert.equal(await page.evaluate(() => publicationFixture.evaTarget.key), 'QA-1');
+    assert.equal(await page.locator('#confirmModal').isVisible(), false);
+    await page.evaluate(() => { publishToEva = originalEvaPublication; });
+    await page.fill('#environment', '');
+    await page.selectOption('#overallStatus', '');
+  }
+  await page.fill('#issueUrl', 'https://jira.example/browse/QA-1');
+  assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), null);
+  assert.equal(await page.locator('#issueUrlError').isVisible(), false);
   await page.click('#copyMenuButton');
   await page.click('#publishExportButton');
   await page.waitForFunction(() => document.querySelector('#environment').getAttribute('aria-invalid') === 'true');
@@ -154,6 +227,19 @@ async function main() {
   assert.match(await page.evaluate(() => publicationFixture.sent[0].body), /ТЕСТ — НЕ ПРОВЕРЕНО/);
   assert.match(await page.evaluate(() => publicationFixture.sent[0].body), /Проверено на DEV/);
   await page.evaluate(() => closePublishProgress());
+  // Removing the task while choosing scope must not upload files or send a comment.
+  await page.evaluate(() => {
+    publicationFixture.removeTargetDuringScope = true;
+    void publishToJira();
+  });
+  await page.waitForSelector('#confirmModal:not([hidden])');
+  assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), 'true');
+  assert.deepEqual(await page.evaluate(() => [publicationFixture.uploads, publicationFixture.sent.length]), [1, 1]);
+  await page.click('#acceptConfirmButton');
+  await page.waitForFunction(() => !publishInProgress);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
+  await page.evaluate(() => { publicationFixture.removeTargetDuringScope = false; });
+  await page.fill('#issueUrl', 'https://jira.example/browse/QA-1');
   // An asynchronous change while choosing the publication scope cannot bypass validation.
   await page.evaluate(() => { publicationFixture.changeDuringScope = true; });
   await page.evaluate(() => publishToJira());
@@ -196,7 +282,7 @@ async function main() {
   assert.equal(await page.locator('#environmentError').isVisible(), false);
   assert.equal(await page.locator('#overallStatusError').isVisible(), false);
   assert.deepEqual(errors, []);
-  console.log('Passed: blank metadata, persistence, unfinished exports, required-field publication gate, correction, explicit unchecked outcome, scope revalidation, themes, mobile arrow spacing and existing reports.');
+  console.log('Passed: blank metadata, persistence, unfinished exports, task-link dialog at every publication entry, task-link scope revalidation, required-field publication gate, correction, explicit unchecked outcome, scope revalidation, themes, mobile arrow spacing and existing reports.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

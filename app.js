@@ -2348,6 +2348,15 @@ function setReportMetadataError(control, message = "") {
 }
 
 function reportMetadataError(control) {
+  if (control === elements.issueUrl) {
+    if (!control.value.trim()) return "Укажите ссылку на задачу";
+    try {
+      parseIssueUrl(control.value);
+      return "";
+    } catch (error) {
+      return error.message;
+    }
+  }
   if (control === elements.environment) {
     return control.value.trim().replace(/^Не указано$/i, "") ? "" : "Укажите окружение";
   }
@@ -2366,6 +2375,27 @@ function validateReportMetadata() {
   firstInvalid.scrollIntoView({ block: "center", behavior: "smooth" });
   firstInvalid.focus({ preventScroll: true });
   showToast("Заполните окружение и итог перед публикацией");
+  return false;
+}
+
+async function validateReportPublication() {
+  const message = reportMetadataError(elements.issueUrl);
+  setReportMetadataError(elements.issueUrl, message);
+  if (!message) return validateReportMetadata();
+  environmentPicker.close();
+  const previousFocus = document.activeElement;
+  const edit = await askConfirmation(
+    "Для публикации отчёта нужна полная ссылка на конкретную задачу. Добавьте её в поле «Ссылка на задачу».",
+    { title: "Укажите задачу", confirmText: "Заполнить ссылку" },
+  );
+  if (edit) {
+    setFocusMode(false);
+    elements.issueUrl.scrollIntoView({ block: "center", behavior: "smooth" });
+    elements.issueUrl.focus({ preventScroll: true });
+  } else {
+    const returnFocus = previousFocus?.getClientRects().length ? previousFocus : elements.copyMenuButton;
+    returnFocus.focus({ preventScroll: true });
+  }
   return false;
 }
 
@@ -2415,6 +2445,7 @@ function flushDraftFromDom() {
 
 function render() {
   elements.issueUrl.value = draft.issueUrl || "";
+  setReportMetadataError(elements.issueUrl);
   elements.environment.value = draft.environment;
   environmentPicker.close();
   renderEnvironmentOptions();
@@ -5221,7 +5252,7 @@ async function publishToJira(mode = "auto") {
   try {
     closeHeaderDropdowns();
     collectDocumentFields();
-    if (!validateReportMetadata()) return;
+    if (!await validateReportPublication()) return;
     const linked = mode === "new" ? null : currentJiraPublication();
     const actionLabel = linked ? "Обновить" : "Опубликовать";
     if (mode === "new" && currentJiraPublication() && !await askConfirmation("В Jira появится новый комментарий. Прежний останется в задаче, а этот отчёт будет связан с новым.", { title: "Опубликовать заново?", confirmText: "Опубликовать заново" })) return;
@@ -5232,7 +5263,7 @@ async function publishToJira(mode = "auto") {
     const scope = await askPublishScope(linked);
     if (!scope) return;
     collectDocumentFields();
-    if (!validateReportMetadata()) return;
+    if (!await validateReportPublication()) return;
     const { sectionIds, statuses } = scope;
     const issue = parseIssueUrl(draft.issueUrl);
     if (linked && !window.QaReportJiraPublication.matching(linked, draft.reportId, issue.issueUrl)) throw new Error("Задача изменилась. Повторите публикацию для выбранной задачи.");

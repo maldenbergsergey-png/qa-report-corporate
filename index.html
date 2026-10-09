@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=139" />
+    <link rel="stylesheet" href="/styles.css?v=140" />
     <link rel="stylesheet" href="/bug-wizard.css?v=23" />
   </head>
   <body>
@@ -239,14 +239,17 @@
           </div>
 
           <div class="metadata-grid">
-            <label class="field issue-field">
-              <span>Ссылка на задачу</span>
+            <div class="field issue-field">
+              <label for="issueUrl"><span>Ссылка на задачу</span></label>
               <input
                 id="issueUrl"
                 type="url"
                 placeholder="https://company.atlassian.net/browse/QA-1234"
+                aria-required="true"
+                aria-describedby="issueUrlError"
               />
-            </label>
+              <p id="issueUrlError" class="field-error" role="alert" hidden></p>
+            </div>
             <div class="field environment-field">
               <label for="environment"><span>Окружение</span></label>
               <div class="environment-input">
@@ -1202,7 +1205,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=78"></script>
+    <script src="/release-notes.js?v=79"></script>
     <script src="/jira-attachment-reuse.js?v=1"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
@@ -1265,7 +1268,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=37"></script>
-    <script src="/app.js?v=144"></script>
+    <script src="/app.js?v=145"></script>
     <script src="/local-import-client.js?v=5"></script>
   </body>
 </html>

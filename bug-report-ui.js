@@ -128,7 +128,7 @@
   function targetControls() {
     if (!state) return;
     if (state.inlineDevices) {
-      const t = target(), device = state.inlineDevices.find(d => t.provider !== "eva" || (d.evaBaseUrls || []).includes(t.baseUrl));
+      const t = target(), device = state.inlineDevices.find(d => (t.provider === "eva" ? d.evaBaseUrls || [] : d.jiraBaseUrls?.length ? d.jiraBaseUrls : [d.jiraBaseUrl]).includes(t.baseUrl));
       const parts = String(device?.version || "0").split(".").map(Number);
       state.inlineReady = Boolean(api.bugStatus || parts[0] > 0 || parts[1] > 6 || parts[1] === 6 && parts[2] >= 16);
     }
@@ -193,7 +193,7 @@
   }
   function mappingKey() { const t = target(); return JSON.stringify([...(t.provider === "eva" ? ["eva"] : []), t.baseUrl, state.meta.projectKey, state.meta.issueTypeId]); }
   async function poll(jobId, current = state) {
-    const deadline = Date.now() + 180000;
+    const deadline = Date.now() + 180000; let interval = 100;
     while (Date.now() < deadline) {
       const value = await api.reportApi(`/api/agent/jobs/${jobId}`);
       if (state !== current) throw new Error("Окно закрыто");
@@ -202,7 +202,7 @@
         const error = new Error(value.job.error || "Connect не завершил действие");
         error.status = value.job.result?.status || 504; error.fieldErrors = value.job.result?.fieldErrors || {}; throw error;
       }
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, interval)); interval = Math.min(800, interval * 2);
     }
     throw new Error("Действие ещё не завершено. Проверьте состояние Connect.");
   }
@@ -253,7 +253,19 @@
     if (!parentConnection(true)) return;
     const current = state; busy(true, "Получаем типы задач…");
     try {
+      // The fields endpoint also validates the target and returns its issue types.
+      // A remembered type avoids a separate Connect job and duplicate Jira lookup.
+      const rememberedId = rememberedType(target().projectKey);
+      if (rememberedId) {
+        selectOptions($("bugIssueType"), [{ id: rememberedId, name: "Загружаем…" }], rememberedId);
+        try {
+          busy(true, "Загружаем тип задачи и поля формы…");
+          const meta = await job("/api/jira/issue-fields", target());
+          await loadFields(meta, true); return;
+        } catch (error) { if (error.status !== 422) throw error; }
+      }
       const result = await job("/api/jira/issue-context", target());
+      if (state !== current) return;
       state.meta = result;
       const types = [...result.types].sort((a, b) => typeScore(b) - typeScore(a));
       const remembered = rememberedType(result.projectKey), unavailable = Boolean(remembered && !types.some(t => t.id === remembered));
@@ -264,9 +276,9 @@
       $("bugParentSummary").hidden = !result.parent;
       $("bugParentSummary").textContent = result.parent ? `${result.parent.key} · ${result.parent.summary} · Проект ${result.projectKey}` : "";
       message(unavailable ? "Сохранённый тип задачи больше недоступен. Выберите другой тип — он будет запомнен для этого проекта." : $("bugIssueType").value ? "Загружаем форму…" : "Выберите тип задачи — поля загрузятся автоматически.");
+      if ($("bugIssueType").value) await loadFields(null, true);
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current) busy(false); }
-    if (state === current && $("bugIssueType").value) await loadFields();
   }
   function mappingUI() {
     const saved = read(MAPPING_KEY, {})[mappingKey()], allowed = state.fields.filter(f => f.id !== "description" && ["text", "textarea"].includes(f.kind));
@@ -506,11 +518,15 @@
       $("bugEditor").querySelectorAll("[data-bug-section]").forEach(control => { control.value = typeof value[control.dataset.bugSection] === "string" ? value[control.dataset.bugSection] : ""; });
     } catch (error) { message(error.message, true); }
   }
-  async function loadFields() {
-    if (!state || state.busy || !target().issueTypeId) return;
+  async function loadFields(metadata = null, continuing = false) {
+    if (!state || state.busy && !continuing || !target().issueTypeId) return;
     const current = state; state.fields = null; $("bugEditor").hidden = true; $("loadBugFields").hidden = true; busy(true, "Получаем поля формы…");
     try {
-      const meta = await job("/api/jira/issue-fields", target());
+      const meta = metadata || await job("/api/jira/issue-fields", target());
+      if (state !== current) return;
+      selectOptions($("bugIssueType"), [...meta.types].sort((a, b) => typeScore(b) - typeScore(a)), meta.issueTypeId);
+      $("bugParentSummary").hidden = !meta.parent;
+      $("bugParentSummary").textContent = meta.parent ? `${meta.parent.key} · ${meta.parent.summary} · Проект ${meta.projectKey}` : "";
       state.meta = meta; state.loadedTarget = JSON.stringify(target()); state.fields = meta.fields.map(field => ({ ...field, name: String(field.name || field.id), allowedValues: (Array.isArray(field.allowedValues) ? field.allowedValues : []).map(option => ({ ...option,
         value: String(option.value ?? option.id ?? option.name ?? option), label: String(option.label ?? option.name ?? option.value ?? option.id ?? option) })) })); mappingUI();
       for (const id of ["bugRequiredFields", "bugOptionalFields", "bugPeopleFields", "bugCommonFields", "bugVersionFields"]) $(id).replaceChildren();
@@ -1063,9 +1079,12 @@
     state.obscured.forEach(([node]) => { node.inert = true; });
     $("bugReportModal").hidden = false; api.modalOverflow(); busy(true, "Подключаемся к QA Report Connect…", "initializing");
     try {
+      const statusRequest = api.bugStatus ? api.bugStatus() : api.reportApi("/api/agent/status");
+      // Observe both independent reads immediately, including a failure of either.
+      const [savedStandalone, status] = await Promise.all([standalone ? standaloneRecord("get") : null, statusRequest]);
+      if (state !== current) return;
       if (standalone) {
-        const saved = await standaloneRecord("get");
-        if (state !== current) return;
+        const saved = savedStandalone;
         state.pending = saved?.pending || null; state.created = saved?.created || null;
         state.extraAssets = saved?.extraAssets || []; state.assets.push(...state.extraAssets);
         state.source.attachments = state.assets.map(a => ({ name: a.name, type: a.type }));
@@ -1074,8 +1093,6 @@
         state.selectedAssets = state.assets.filter(a => (state.pending?.assets || state.created?.attachmentKeys || []).includes(assetKey(a)));
         state.uploadsPending = Boolean(state.created?.attachmentsPending); state.evidencePending = Boolean(state.created?.evidencePending);
       }
-      const status = api.bugStatus ? await api.bugStatus() : await api.reportApi("/api/agent/status");
-      if (state !== current) return;
       const device = status.devices.filter(d => d.online).sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0];
       if (!status.connected || !device) throw new Error(api.bugStatus ? "Подключите Jira в настройках приложения." : "Откройте QA Report Connect и подключите систему задач.");
       const parts = String(device.version).split(".").map(Number);
@@ -1115,7 +1132,7 @@
       if (state.created) {
         steps(true); showCreated();
       }
-      message(state.created ? state.uploadsPending ? "Баг создан. Повторите загрузку вложений или добавьте файлы вручную в задачу." : "Файлы загружены. Осталось добавить ссылки в текст бага." : state.pending ? "Проверим результат предыдущего создания." : "");
+      if (!state.busy) message(state.created ? state.uploadsPending ? "Баг создан. Повторите загрузку вложений или добавьте файлы вручную в задачу." : "Файлы загружены. Осталось добавить ссылки в текст бага." : state.pending ? "Проверим результат предыдущего создания." : "");
       document.querySelector('[name="bugCreationMode"]:checked').focus();
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current && state.activity === "initializing") busy(false); }
@@ -1212,7 +1229,7 @@
       });
     }
     $("bugIssueType").addEventListener("change", () => { state.fields = null; $("bugEditor").hidden = true; $("createBugIssue").hidden = true; loadFields(); });
-    $("loadBugContext").addEventListener("click", () => { if (state?.fields) { steps(2); contextControls(); $("bugContextText").focus(); } }); $("loadBugFields").addEventListener("click", loadFields);
+    $("loadBugContext").addEventListener("click", () => { if (state?.fields) { steps(2); contextControls(); $("bugContextText").focus(); } }); $("loadBugFields").addEventListener("click", () => loadFields());
     $("bugAiAttachments").addEventListener("change", () => { $("bugAiAttachmentSelection").hidden = !$("bugAiAttachments").checked; });
     $("bugVoice").addEventListener("click", dictate);
     $("bugVoiceStop").addEventListener("click", () => state?.voice?.stop());

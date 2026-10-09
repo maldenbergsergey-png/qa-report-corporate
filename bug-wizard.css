@@ -63,9 +63,8 @@
 .bug-preparation-help, .bug-prompt-note { margin: 14px 0 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
 #bugReportModal .bug-ai-panel { margin: 0; padding: 16px 12px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--surface-strong) 35%, transparent); }
 #bugAiHint { margin: 12px 0 16px; font-size: 11px !important; line-height: 1.65; }
-.bug-prompt-card { border: 1px solid #2899ff70; padding: 9px; border-radius: 6px; background: #2899ff09; }
-.bug-prompt-card > span { display: flex; align-items: center; gap: 6px; color: #2899ff; font-size: 12px; margin-bottom: 8px; }
-#bugReportModal #editBugPrompt { width: 100%; padding: 8px; min-height: 34px; font-size: 11px; border-color: #2899ff70; color: #2899ff; justify-content: space-between; }
+.bug-prompt-card { padding: 0; border: 0; background: none; }
+#bugReportModal #editBugPrompt { width: 100%; padding: 10px; min-height: 38px; font-size: 12px; border-color: #2899ff70; color: #2899ff; justify-content: space-between; background: #2899ff09; }
 .bug-draft-ready { display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--green) 30%, var(--line)); background: color-mix(in srgb, var(--green) 9%, var(--surface)); padding: 10px 12px; margin-bottom: 14px; border-radius: 6px; }
 .bug-draft-caption { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .bug-draft-caption > .ui-icon { flex-shrink: 0; width: 24px; height: 24px; color: var(--green); }

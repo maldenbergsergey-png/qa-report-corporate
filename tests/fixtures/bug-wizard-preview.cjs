@@ -17,19 +17,22 @@ const fields = [
 ].map(field => ({ schema: {}, allowedValues: [], ...field }));
 const draft = { summary: "Из ИИ-подборщика невозможно удалить объект из избранного", preconditions: "Объект добавлен в избранное.", steps: ["Открыть ИИ-подборщик", "Добавить объект в избранное", "Попытаться удалить объект из избранного"], expected: "Объект удаляется из избранного, не отображается в списке.", actual: "Объект остаётся в избранном.", missingInformation: [] };
 async function start(root, port = 0, options = {}) {
-  const jobs = new Map(), creates = [], uploads = [], evidence = [], aiRequests = [];
+  const jobs = new Map(), creates = [], uploads = [], evidence = [], aiRequests = [], requests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const json = (value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(value)); };
     if (url.pathname.startsWith("/api/")) {
       let body = ""; for await (const chunk of req) body += chunk;
       let input = {}; try { input = JSON.parse(body || "{}"); } catch {}
-      if (url.pathname === "/api/agent/status") return json({ connected: true, devices: [{ online: true, version: "0.6.16", lastSeenAt: new Date().toISOString(), jiraBaseUrls: [baseUrl] }] });
+      if (url.pathname === "/api/agent/status") return json({ connected: true, devices: options.devices || [{ online: true, version: "0.6.17", lastSeenAt: new Date().toISOString(), jiraBaseUrls: [baseUrl] }] });
       if (url.pathname === "/api/jira/connections") return json({ instances: [{ id: "fixture", baseUrl, name: "Jira", connected: true }] });
       if (url.pathname === "/api/auth/csrf") return json({ csrfToken: "fixture-csrf" });
       if (/^\/api\/agent\/jobs\//.test(url.pathname)) return json({ job: { status: "completed", result: jobs.get(url.pathname.split("/").at(-1)) } });
       let result;
       url.pathname = url.pathname.replace("/api/agent/jira/", "/api/jira/");
+      requests.push({ path: url.pathname, input });
+      if (["/api/jira/issue-context", "/api/jira/issue-fields"].includes(url.pathname) && options.metadataDelay) await new Promise(resolve => setTimeout(resolve, options.metadataDelay));
+      if (url.pathname === "/api/jira/issue-fields" && options.rejectType === input.issueTypeId) return json({ error: "Этот тип задачи недоступен для выбранного режима" }, 422);
       const types = [{ id: "1", name: "Ошибка" }, { id: "2", name: "Подзадача" }];
       const meta = { projectKey: "APP", issueTypeId: input.issueTypeId || "1", fields: options.fallback ? fields.filter(f => !/customfield_(steps|expected|actual)/.test(f.id)) : fields, types, parent: input.mode === "subtask" ? { key: "APP-123", summary: "Родительская задача" } : null };
       switch (url.pathname) {
@@ -63,7 +66,7 @@ async function start(root, port = 0, options = {}) {
     } catch { json({}, 404); }
   });
   await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
-  return { server, creates, uploads, evidence, aiRequests, origin: `http://127.0.0.1:${server.address().port}` };
+  return { server, creates, uploads, evidence, aiRequests, requests, origin: `http://127.0.0.1:${server.address().port}` };
 }
 module.exports = { start };
 if (require.main === module) start(path.resolve(process.argv[2] || path.join(__dirname, "../..")), Number(process.argv[3] || 4191)).then(value => console.log(value.origin));

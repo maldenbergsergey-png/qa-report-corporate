@@ -220,11 +220,15 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       await p.fill('#bugContextText', 'Проверка форматирования и файлов.'); await p.click('#bugManualDraft');
       const field = p.locator('[data-bug-field="description"]'), visual = field.locator('.bug-rich-visual'), source = field.locator('textarea');
       assert.equal(await p.textContent('#bugReportEyebrow'), 'Создание задачи');
-      assert.match(await p.textContent('.bug-prompt-note'), /при каких условиях/);
+      assert.match(await p.textContent('.bug-prompt-note'), /условия предзаполнения/);
+      assert.match(await p.textContent('.bug-prompt-note'), /обязательно.*не хватает/);
+      assert.equal(await p.locator('.bug-prompt-card').evaluate(el => getComputedStyle(el).borderTopWidth), '0px');
+      assert.equal(await field.locator('[data-format="code"]').count(), 0, 'Only one code command');
       assert.equal(await p.locator('.bug-preparation-help').count(), 0);
       await visual.fill('До После'); await field.getByRole('button', { name: 'Разметка', exact: true }).click();
       await source.evaluate(el => el.setSelectionRange(3, 3));
-      const chooserWait = p.waitForEvent('filechooser'); await field.getByRole('button', { name: 'Вставить вложение в описание', exact: true }).click();
+      await field.getByRole('button', { name: 'Вставить вложение в описание', exact: true }).click();
+      const chooserWait = p.waitForEvent('filechooser'); await field.getByRole('button', { name: 'Загрузить новый файл', exact: true }).click();
       const chooser = await chooserWait; await chooser.setFiles({ name: 'Исходное имя.log', mimeType: 'text/plain', buffer: Buffer.from('New attachment evidence') });
       await p.waitForFunction(() => document.querySelector('[data-bug-value="description"]').value.includes('[Вложение: Исходное имя.log]'));
       assert.equal(await source.inputValue(), 'До [Вложение: Исходное имя.log]После');
@@ -241,7 +245,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       await field.getByRole('button', { name: 'Визуально', exact: true }).click();
       await visual.fill('const value = { name: "original" };\nconsole.log(value);'); await visual.press('ControlOrMeta+A');
       await field.getByRole('button', { name: 'Блок кода', exact: true }).click();
-      assert.match((await source.inputValue()).trim(), /^\{code\}\nconst value/);
+      assert.match((await source.inputValue()).trim(), /^\{code(?::javascript)?\}\nconst value/);
       assert.equal(await visual.locator('pre').count(), 1);
       await p.screenshot({ path: path.join(output, `${theme}-formatting-fixed.png`) });
       await field.getByRole('button', { name: 'Разметка', exact: true }).click();
@@ -250,6 +254,32 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       await visual.fill('file_name_x and *literal*'); await field.getByRole('button', { name: 'Разметка', exact: true }).click();
       await field.getByRole('button', { name: 'Визуально', exact: true }).click();
       assert.equal(await visual.innerText(), 'file_name_x and *literal*'); assert.equal(await visual.locator('em, strong').count(), 0);
+      // Mouse selection must be wrapped, while text before and after is retained.
+      await visual.fill('До console.log(value); После');
+      const selectionBox = await visual.evaluate(el => { const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode()) && !node.data.includes('До console.log(value); После')) {} const r = document.createRange(); r.setStart(node, 3); r.setEnd(node, 22); const b = r.getBoundingClientRect(); return { x:b.x, y:b.y, right:b.right, height:b.height }; });
+      await p.mouse.move(selectionBox.x, selectionBox.y + selectionBox.height / 2); await p.mouse.down();
+      await p.mouse.move(selectionBox.right, selectionBox.y + selectionBox.height / 2, {steps:12}); await p.mouse.up();
+      assert.equal(await p.evaluate(() => getSelection().toString()), 'console.log(value);');
+      await field.getByRole('button', { name:'Блок кода', exact:true }).click();
+      assert.equal(await visual.locator('pre').innerText(), 'console.log(value);');
+      assert.match(await source.inputValue(), /^До\s*\n\{code:javascript\}\nconsole\.log\(value\);\n\{code\}\n.*После/s);
+      // Clipboard formats and recognition are shared with the checklist.
+      for (const [text, html, expected] of [
+        ['```js\nconst a = 1;\n```', '', 'const a = 1;'],
+        ['{code:sql}\nSELECT * FROM users;\n{code}', '', 'SELECT * FROM users;'],
+        ['const a = 1;\nconsole.log(a);', '', 'const a = 1;\nconsole.log(a);'],
+        ['print(1)', '<pre class="cell-code-block" data-qa-code-snippet="true" data-language="python"><code>print(1)</code></pre>', 'print(1)']
+      ]) {
+        await visual.fill(''); await visual.evaluate((el, data) => { const transfer = new DataTransfer(); transfer.setData('text/plain', data.text); if (data.html) transfer.setData('text/html', data.html); el.dispatchEvent(new ClipboardEvent('paste', {clipboardData:transfer, bubbles:true, cancelable:true})); }, {text,html});
+        assert.equal(await visual.locator('pre').innerText(), expected);
+        await field.getByRole('button', {name:'Разметка',exact:true}).click(); await field.getByRole('button', {name:'Визуально',exact:true}).click();
+        assert.equal(await visual.locator('pre').innerText(), expected);
+      }
+      await p.screenshot({ path: path.join(output, `${theme}-selection-and-paste.png`) });
+      await visual.locator('pre').click(); await p.keyboard.press('End');
+      await visual.evaluate(el => { const data = new DataTransfer(); data.setData('text/plain', '\nprint(2)'); el.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true})); });
+      assert.equal(await visual.locator('pre').count(), 1, 'Pasting inside a code block does not nest another block');
+      assert.match(await visual.locator('pre').innerText(), /print\(1\)\nprint\(2\)/);
       // Existing checklist attachments remain available even in a standalone bug.
       await p.click('#closeBugReport');
       await p.evaluate(() => { draft.sections[0].rows[0].cells.comment = window.QaReportAttachments.reference({ id: 'library-log', name: 'Ранее загруженный.log', type: 'text/plain', source: { issueUrl: 'https://jira.example.test/browse/APP-1', id: '42', name: 'Ранее загруженный.log', kind: 'file' } }); renderSections(); });
@@ -278,6 +308,34 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
     await retryPage.click('#bugManualDraft'); await retryPage.waitForSelector('#bugEditor:not([hidden])');
     await retryPage.screenshot({ path: path.join(output, 'narrow-draft.png') });
     await retryContext.close();
+    // First-load progress stays visible; a remembered type needs one metadata request.
+    for (const remembered of ['1', '999']) {
+      const startup = await start(root, 0, {metadataDelay:400, rejectType:'999', devices:[
+        {online:true,version:'0.6.3',lastSeenAt:new Date().toISOString(),jiraBaseUrls:['https://other.example.test']},
+        {online:true,version:'0.6.17',lastSeenAt:new Date(Date.now()-1000).toISOString(),jiraBaseUrls:['https://jira.example.test']}
+      ]});
+      const ctx = await browser.newContext({viewport:{width:1280,height:960}, serviceWorkers:'block'});
+      try {
+        await ctx.addInitScript(id => localStorage.setItem('qa-report-bug-target-v1', JSON.stringify({provider:'jira',baseUrl:'https://jira.example.test',projectKey:'APP',mode:'standalone',issueTypeId:id})), remembered);
+        const p = await ctx.newPage(); await p.goto(startup.origin); await p.click('#reportMenuButton'); await p.click('#openStandaloneBugReport');
+        await p.waitForFunction(() => document.getElementById('bugReportMessage').textContent.includes('тип задачи и поля'));
+        assert.equal(await p.locator('#bugReportState').isVisible(), true); assert.equal(await p.locator('#bugSpinner').isVisible(), true);
+        assert.equal(await p.locator('#loadBugContext').isDisabled(), true);
+        await p.screenshot({path:path.join(output, `target-loading-${remembered}.png`)});
+        if (remembered === '1') {
+          await p.waitForFunction(() => !document.getElementById('loadBugContext').disabled);
+          assert.equal(startup.requests.filter(r => r.path === '/api/jira/issue-context').length, 0);
+          assert.equal(startup.requests.filter(r => r.path === '/api/jira/issue-fields').length, 1);
+          await p.click('#loadBugContext'); await p.click('#bugManualDraft');
+          await p.locator('[data-bug-field="description"] [data-attachments]').click();
+          assert.equal(await p.getByRole('button',{name:'Загрузить новый файл',exact:true}).isVisible(), true, 'Attachments use the Connect version for the selected Jira');
+        } else {
+          await p.waitForFunction(() => document.getElementById('bugReportMessage').textContent.includes('больше недоступен'));
+          assert.equal(await p.locator('#bugIssueType').inputValue(), '');
+          await p.selectOption('#bugIssueType','1'); await p.waitForFunction(() => !document.getElementById('loadBugContext').disabled);
+        }
+      } finally { await ctx.close(); await new Promise(resolve => startup.server.close(resolve)); }
+    }
     console.log(`${path.basename(root)}: wizard navigation, geometry, themes, prompt, attachments, fields and create/restart passed`);
   } finally { await browser.close(); await Promise.all([fixture, failedAi].map(value => new Promise(resolve => value.server.close(resolve)))); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

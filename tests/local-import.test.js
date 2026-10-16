@@ -20,7 +20,7 @@ async function fixture(options = {}) {
   await new Promise((resolve,reject) => {server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
   origin = `http://127.0.0.1:${server.address().port}`;
   const context = {sections:[{id:"section",columns:[{id:"actual",title:"ФР"}],rows:[{id:"row",cells:{actual:{text:"",hash:"0".repeat(64)}}}]}]};
-  const create = (headers={}) => fetch(`${origin}/api/local-import/sessions`,{method:"POST",headers:{"X-QA-Import-Request":"1","Content-Type":"application/json",...headers},body:JSON.stringify({reportId:"report",context})});
+  const create = (headers={},reportId="report") => fetch(`${origin}/api/local-import/sessions`,{method:"POST",headers:{"X-QA-Import-Request":"1","Content-Type":"application/json",...headers},body:JSON.stringify({reportId,context})});
   const session = await (await create()).json();
   const agent = (suffix,options={}) => fetch(session.connection.url+suffix,{...options,headers:{"X-QA-Import-Token":session.connection.token,...options.headers}});
   const browser = (suffix,options={}) => fetch(`${origin}/api/local-import/sessions/${session.id}${suffix}`,{...options,headers:{"X-QA-Import-Request":"1","X-QA-Import-Reader":session.consumerToken,...options.headers}});
@@ -28,12 +28,38 @@ async function fixture(options = {}) {
 }
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII=","base64");
 const payload = (id="batch", file="shot") => ({id,kind:"cells",updates:[{sectionId:"section",rowId:"row",columnId:"actual",expectedHash:"0".repeat(64),text:"Проверено",attachmentIds:[file]}]});
-test("default import token remains valid for two hours and expires for both producer and browser at the deadline", async () => {
+test("three report-bound connections stay isolated and stopping one preserves the others", async () => {
+  const f = await fixture();
+  try {
+    const second = await (await f.create({}, "second-report")).json();
+    const third = await (await f.create({}, "third-report")).json();
+    assert.equal((await f.create({}, "fourth-report")).status, 429);
+    assert.notEqual(second.connection.token, f.session.connection.token);
+    const send = (session, suffix, options = {}) => fetch(session.connection.url + suffix, {
+      ...options, headers: { "X-QA-Import-Token": session.connection.token, "Content-Type": "application/json", ...options.headers },
+    });
+    assert.equal((await (await send(second, "/context")).json()).reportId, "second-report");
+    assert.equal((await send(second, "/context", { headers: { "X-QA-Import-Token": f.session.connection.token } })).status, 404);
+    const batch = { id: "independent", kind: "metadata", metadata: { overallStatus: { value: "OK", expectedHash: "0".repeat(64) } } };
+    assert.equal((await send(second, "/batches", { method: "POST", body: JSON.stringify(batch) })).status, 202);
+    assert.equal((await (await f.browser("/next")).json()).batch, null);
+    const readSecond = () => fetch(`${f.origin}/api/local-import/sessions/${second.id}/next`, {
+      headers: { "X-QA-Import-Request": "1", "X-QA-Import-Reader": second.consumerToken },
+    });
+    assert.equal((await (await readSecond()).json()).batch.id, "independent");
+    await f.browser("", { method: "DELETE" });
+    assert.equal((await f.agent("/context")).status, 404);
+    assert.equal((await send(second, "/context")).status, 200);
+    assert.equal((await send(third, "/context")).status, 200);
+    assert.equal((await f.create({}, "replacement-report")).status, 201);
+  } finally { await f.close(); }
+});
+test("default import token remains valid for five hours and expires for both producer and browser at the deadline", async () => {
   let time=1000;const f=await fixture({now:()=>time});
   try {
-    assert.equal(f.session.expiresAt, time + 2 * 60 * 60_000);
+    assert.equal(f.session.expiresAt, time + 5 * 60 * 60_000);
     assert.equal(f.session.connection.expiresAt, f.session.expiresAt);
-    time += 60 * 60_000;
+    time += 3 * 60 * 60_000;
     assert.equal((await f.agent("/context")).status, 200);
     assert.equal((await f.browser("/next")).status, 200);
     time += 30 * 60_000;

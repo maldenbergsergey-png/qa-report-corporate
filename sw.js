@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v117';
+const CACHE_NAME = 'qa-report-corporate-assets-v118';
 const SHELL = [
   "/bug-report.js?v=7", "/bug-rich-editor.js?v=9", "/bug-report-ui.js?v=37", "/tracker-links.js?v=4", "/bug-attachment-analysis.js?v=2",
   "/vendor/jszip/jszip.min.js", "/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs",
@@ -15,13 +15,13 @@ const SHELL = [
   "/import-options.js?v=6", "/import-wizard.js?v=6",
   "/attachment-limits.js?v=1",
   "/jira-attachment-reuse.js?v=3",
-  "/attachment-import.js?v=5", "/local-import-client.js?v=5",
+  "/attachment-import.js?v=5", "/local-import-client.js?v=6",
   "/checklist-table.js?v=2",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/styles.css?v=140', '/app.js?v=151', '/pwa.js?v=5',
+  '/styles.css?v=141', '/app.js?v=152', '/pwa.js?v=5',
   '/jira-markup-import.js?v=13', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=85',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=86',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

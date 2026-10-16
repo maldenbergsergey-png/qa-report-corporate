@@ -79,7 +79,7 @@ function validateBatch(input, files) {
 }
 
 // Bytes only live in this bounded, expiring process-local buffer. No disk or cloud writes.
-function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 100 * MB, maxGlobalBytes = 256 * MB, ttlMs = 2 * 60 * 60_000, now = Date.now } = {}) {
+function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 100 * MB, maxGlobalBytes = 256 * MB, ttlMs = 5 * 60 * 60_000, now = Date.now } = {}) {
   const sessions = new Map(); let allocated = 0;
   function drop(session) { if (sessions.delete(session.id)) { allocated -= session.bytes + session.metadataBytes; session.files.clear(); session.batches.clear(); } }
   function cleanup() { for (const session of sessions.values()) if (session.expiresAt <= now()) drop(session); }

@@ -1167,7 +1167,7 @@ async function getReportMetadata(id) {
   }
 }
 
-async function saveReportSnapshot(reason = "manual", candidate = null) {
+async function saveReportSnapshot(reason = "manual", candidate = null, { expectedDocument, validate } = {}) {
   if (!candidate) flushDraftFromDom();
   const snapshot = candidate || copyDraftValue(draft);
   const now = new Date().toISOString();
@@ -1194,7 +1194,23 @@ async function saveReportSnapshot(reason = "manual", candidate = null) {
     document: snapshot,
     schemaVersion: 3,
   };
-  await dbTransaction("readwrite", (store) => store.put(record));
+  const expected = JSON.stringify(expectedDocument);
+  let conflict;
+  await dbTransaction("readwrite", (store) => {
+    if (expectedDocument === undefined) return store.put(record);
+    const request = store.get(record.id);
+    request.onsuccess = () => {
+      try {
+        validate?.();
+        if (JSON.stringify(request.result?.document) !== expected) {
+          throw Object.assign(new Error("Отчёт изменился во время сохранения. Повторяем приём"), { localImportRetryable: true });
+        }
+        store.put({ ...record, historyComment: request.result?.historyComment || "" });
+      } catch (error) { conflict = error; }
+    };
+    return request;
+  });
+  if (conflict) throw conflict;
   if (suppressNextServerSave) {
     suppressNextServerSave = false;
   } else if (!["before-import", "before-inbound-import"].includes(reason)) {
@@ -7562,13 +7578,13 @@ async function confirmImportReplacement() {
     });
 }
 
-function importedDraftInCurrentReport(imported) {
+function importedDraftInCurrentReport(imported, current = draft) {
   return normalizeDraft({
-    ...draft, ...imported,
-    draftId: draft.draftId, reportId: draft.reportId, publicId: draft.publicId,
-    revision: draft.revision, updatedAt: draft.updatedAt,
-    lastSavedBy: draft.lastSavedBy, lastSavedClientId: draft.lastSavedClientId,
-    issueUrl: imported.issueUrl || draft.issueUrl,
+    ...current, ...imported,
+    draftId: current.draftId, reportId: current.reportId, publicId: current.publicId,
+    revision: current.revision, updatedAt: current.updatedAt,
+    lastSavedBy: current.lastSavedBy, lastSavedClientId: current.lastSavedClientId,
+    issueUrl: imported.issueUrl || current.issueUrl,
   });
 }
 

@@ -5403,7 +5403,7 @@ body.pin-number-columns .section-header-table .number-header::before,
 #localImportModal .modal-actions { flex-wrap: wrap; }
 #localImportStatus { overflow-wrap: anywhere; }
 
-#localImportModal .import-modal { width: min(680px, calc(100vw - 32px)); height: auto; min-height: 0; }
+#localImportModal .import-modal { width: min(680px, calc(100vw - 32px)); height: auto; min-height: 0; max-height: calc(100dvh - 48px); }
 #localImportModal .import-body { display: block; min-height: 0; }
 #localImportModal .import-body p { margin: 0 0 14px; }
 #localImportModal .button { border: 1px solid transparent; }
@@ -6484,3 +6484,20 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 :root[data-theme="light"] .report-publication-buttons > #publishButton:hover:not(:disabled),
 :root[data-theme="light"] .report-publication-buttons .publication-menu-trigger:hover:not(:disabled),
 :root[data-theme="light"] .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+
+/* Reception clocks stay separate from transient batch messages. */
+#localImportModal .import-body { display: block; overflow-y: auto; }
+#localImportModal .import-body > p { margin-bottom: 16px; }
+#localImportModal .modal-actions { flex-wrap: wrap; }
+.local-import-countdown { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin: 18px 0; color: var(--ink); }
+.local-import-countdown strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.local-import-countdown > span { font-size: 13px; color: var(--muted); }
+.local-import-other-reports { margin-top: 20px; }
+.local-import-other-reports h3 { margin: 0 0 10px; font-size: 14px; }
+.local-import-report { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.local-import-report > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.local-import-report strong { font-size: 14px; }
+.local-import-report-time { margin-top: 4px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.local-import-report-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.local-import-countdown[hidden], .local-import-other-reports[hidden] { display: none; }
+@media (max-width: 600px) { .local-import-report { align-items: flex-start; flex-direction: column; } }

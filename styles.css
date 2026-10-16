@@ -1284,6 +1284,11 @@ body.section-sticky-active .editor-toolbar::after {
   scrollbar-width: thin;
 }
 
+/* Keep native drag autoscroll from accelerating the controlled file scroll. */
+.table-scroll.attachment-drag-active {
+  overflow-x: hidden;
+}
+
 .table-scroll::-webkit-scrollbar {
   height: 12px;
 }
@@ -2671,6 +2676,8 @@ body.section-sticky-active .editor-toolbar::after {
   cursor: grabbing;
 }
 
+.editor-cell.attachment-drop-target,
+.intro-editor.attachment-drop-target,
 .cell-editor.code-drop-target,
 .intro-editor.code-drop-target {
   box-shadow: inset 0 0 0 3px var(--primary);

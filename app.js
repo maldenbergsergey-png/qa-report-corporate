@@ -9377,6 +9377,154 @@ document.addEventListener("click", (event) => {
   });
 });
 
+// External files use the same local insertion path as clipboard attachments.
+let attachmentDropTarget = null;
+let attachmentDragScroll = null;
+let attachmentDragScrollElement = null;
+
+function isAttachmentFileDrag(event) {
+  return !draggedCodeBlock && !draggedImageFigure && hasDragType(event, "Files");
+}
+
+function attachmentEditorFromTarget(target) {
+  if (document.querySelector('.modal-backdrop:not([hidden]), #fileViewerDialog[open]')) return null;
+  return target?.closest?.(".cell-editor, .intro-editor") ||
+    target?.closest?.(".editor-cell")?.querySelector(".cell-editor") || null;
+}
+
+function setAttachmentDropTarget(editor) {
+  const target = editor?.closest(".editor-cell") || editor;
+  if (attachmentDropTarget === target) return;
+  attachmentDropTarget?.classList.remove("attachment-drop-target");
+  attachmentDropTarget = target;
+  attachmentDropTarget?.classList.add("attachment-drop-target");
+}
+
+function stopAttachmentDragScroll() {
+  if (!attachmentDragScroll) return;
+  cancelAnimationFrame(attachmentDragScroll.frame);
+  attachmentDragScroll = null;
+}
+
+function setAttachmentDragScrollElement(scroll) {
+  if (attachmentDragScrollElement === scroll) return;
+  attachmentDragScrollElement?.classList.remove("attachment-drag-active");
+  attachmentDragScrollElement = scroll;
+  attachmentDragScrollElement?.classList.add("attachment-drag-active");
+}
+
+function clearAttachmentFileDrag() {
+  stopAttachmentDragScroll();
+  setAttachmentDropTarget(null);
+  setAttachmentDragScrollElement(null);
+}
+
+function attachmentDragScrollSpeed(scroll, x, y) {
+  const rect = scroll.getBoundingClientRect();
+  const left = Math.max(0, rect.left);
+  const right = Math.min(window.innerWidth, rect.right);
+  if (x < left || x > right || y < Math.max(0, rect.top) ||
+      y > Math.min(window.innerHeight, rect.bottom) || right <= left) return 0;
+  const edge = Math.min(64, (right - left) / 3);
+  // Pixels per second, independent of display refresh rate.
+  if (x < left + edge) return -240 * (1 - (x - left) / edge);
+  if (x > right - edge) return 240 * (1 - (right - x) / edge);
+  return 0;
+}
+
+function updateAttachmentDragScroll(scroll, event) {
+  if (!scroll || !attachmentDragScrollSpeed(scroll, event.clientX, event.clientY)) {
+    stopAttachmentDragScroll();
+    return;
+  }
+  if (attachmentDragScroll?.scroll === scroll) {
+    attachmentDragScroll.x = event.clientX;
+    attachmentDragScroll.y = event.clientY;
+    return;
+  }
+  stopAttachmentDragScroll();
+  const state = { scroll, x: event.clientX, y: event.clientY, time: performance.now(), frame: 0 };
+  attachmentDragScroll = state;
+  const tick = (time) => {
+    if (attachmentDragScroll !== state) return;
+    const speed = scroll.isConnected && attachmentDragScrollSpeed(scroll, state.x, state.y);
+    if (!speed) { stopAttachmentDragScroll(); return; }
+    scroll.scrollLeft += speed * Math.min(50, Math.max(0, time - state.time)) / 1000;
+    state.time = time;
+    // The pointer can stay still while different cells pass beneath it.
+    setAttachmentDropTarget(attachmentEditorFromTarget(document.elementFromPoint(state.x, state.y)));
+    if ((speed < 0 && scroll.scrollLeft <= 0) ||
+        (speed > 0 && scroll.scrollLeft >= scroll.scrollWidth - scroll.clientWidth)) {
+      stopAttachmentDragScroll();
+      return;
+    }
+    state.frame = requestAnimationFrame(tick);
+  };
+  state.frame = requestAnimationFrame(tick);
+}
+
+function updateAttachmentFileDrag(event) {
+  if (!isAttachmentFileDrag(event)) return;
+  const editor = attachmentEditorFromTarget(event.target);
+  const scroll = !document.querySelector('.modal-backdrop:not([hidden]), #fileViewerDialog[open]')
+    ? event.target.closest?.(".table-scroll") : null;
+  setAttachmentDragScrollElement(scroll);
+  setAttachmentDropTarget(editor);
+  updateAttachmentDragScroll(scroll, event);
+  if (editor || scroll) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = editor ? "copy" : "none";
+  }
+}
+for (const type of ["dragenter", "dragover"]) {
+  document.addEventListener(type, updateAttachmentFileDrag, true);
+}
+
+document.addEventListener("drop", async (event) => {
+  clearAttachmentFileDrag();
+  if (!isAttachmentFileDrag(event)) return;
+  const editor = attachmentEditorFromTarget(event.target);
+  if (!editor && !event.target.closest?.(".check-section")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const files = [...(event.dataTransfer?.files || [])];
+  if (!editor || !files.length) return;
+  let range = rangeFromPoint(event.clientX, event.clientY, editor);
+  if (!range) {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+  const node = range.startContainer;
+  const object = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)
+    ?.closest(".cell-image, .cell-file, .cell-code-block");
+  if (object && editor.contains(object)) range.setStartAfter(object);
+  range.collapse(true);
+  activeEditor = editor;
+  editor.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+  try {
+    await insertAttachments(files);
+  } catch {
+    showToast("Не удалось прочитать перетаскиваемый файл. Попробуйте ещё раз.");
+  }
+}, true);
+
+document.addEventListener("dragleave", (event) => {
+  if (!event.relatedTarget) clearAttachmentFileDrag();
+}, true);
+document.addEventListener("dragend", clearAttachmentFileDrag, true);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") clearAttachmentFileDrag();
+}, true);
+window.addEventListener("blur", clearAttachmentFileDrag);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearAttachmentFileDrag();
+});
+
 document.addEventListener("dragover", (event) => {
   if (hasDragType(event, "text/row-id")) updateRowDragAutoScroll(event);
   if (!draggedCodeBlock && !draggedImageFigure) return;

@@ -122,13 +122,13 @@ async function main() {
     render(); flushDraftFromDom();
   });
   const beforeCancel = await page.evaluate(() => serializeDraft());
-  await analyze('|9|New check|Blocked|');
+  await analyze('|9|New check|Deferred|');
   assert.equal(await page.locator('[data-focus="destination-section"]').inputValue(), '');
   assert.equal(await page.locator('#applyImportButton').isDisabled(), true);
   await page.locator('[data-focus="destination-section"]').selectOption(original.sections[0].id);
   await page.locator('[data-focus^="source-status-"]').check();
   assert.equal(await page.locator('#applyImportButton').isDisabled(), true);
-  await page.locator('[data-focus="mapping-Blocked"]').selectOption('ТРЕБУЕТ УТОЧНЕНИЯ');
+  await page.locator('[data-focus="mapping-Deferred"]').selectOption('ТРЕБУЕТ УТОЧНЕНИЯ');
   assert.equal(await page.locator('#applyImportButton').isDisabled(), false);
   await page.click('#closeImportButton');
   assert.equal(await page.evaluate(() => serializeDraft()), beforeCancel);

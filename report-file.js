@@ -66,7 +66,7 @@
     if (cursor !== end || nextLocal !== start || !files.has("manifest.json") || !files.has("report.json")) bad();
     return files;
   }
-  const statuses = new Set(["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"]);
+  const statuses = new Set(["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЗАБЛОКИРОВАНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"]);
   function documentFields(value) {
     const bad = () => fail("Некорректная структура отчёта в файле.");
     const string = val => typeof val === "string" ? val : bad();

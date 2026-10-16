@@ -3,7 +3,7 @@
   else root.QaReportImportOptions = factory(root.QaReportJiraImport, () => root.ChecklistNumbering);
 })(typeof globalThis !== "undefined" ? globalThis : this, function (jira, getNumbering) {
   "use strict";
-  const statuses = ["НЕ ОК", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
+  const statuses = ["НЕ ОК", "ЗАБЛОКИРОВАНО", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
   const itemWord = count => count % 100 >= 11 && count % 100 <= 14 ? "пунктов" : count % 10 === 1 ? "пункт" : count % 10 >= 2 && count % 10 <= 4 ? "пункта" : "пунктов";
   const key = (...parts) => JSON.stringify(parts);
   const sourceStatus = row => jira.statusText(row.sourceStatus ?? row.status);

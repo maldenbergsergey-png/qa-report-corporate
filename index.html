@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="graphite">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=143" />
+    <link rel="stylesheet" href="/styles.css?v=144" />
     <link rel="stylesheet" href="/bug-wizard.css?v=23" />
   </head>
   <body>
@@ -268,6 +268,7 @@
                   <option value="НЕ ОК">НЕ ОК</option>
                   <option value="ПОЧТИ ОК">ПОЧТИ ОК</option>
                   <option value="НЕ ПРОВЕРЕНО">НЕ ПРОВЕРЕНО</option>
+                  <option value="ЗАБЛОКИРОВАНО">ЗАБЛОКИРОВАНО</option>
                   <option value="ЧАСТИЧНО ПРОВЕРЕНО">ЧАСТИЧНО ПРОВЕРЕНО</option>
                   <option value="ТРЕБУЕТ УТОЧНЕНИЯ">ТРЕБУЕТ УТОЧНЕНИЯ</option>
                 </select>
@@ -999,7 +1000,7 @@
                 <legend>Нумерация пунктов</legend>
                 <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. В автоматических режимах номера обновляются при изменении порядка разделов и строк.</p>
                 <label class="settings-toggle-card numbering-option">
-                  <input type="radio" name="numberingMode" value="section" checked />
+                  <input type="radio" name="numberingMode" value="section" />
                   <span><strong>В каждом разделе с 1</strong><small>Каждый раздел начинается заново.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 1, 2, 3</span></span>
                 </label>
                 <label class="settings-toggle-card numbering-option">
@@ -1007,7 +1008,7 @@
                   <span><strong>Сквозная по всему чек-листу</strong><small>Нумерация продолжается между разделами.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 4, 5, 6</span></span>
                 </label>
                 <label class="settings-toggle-card numbering-option">
-                  <input type="radio" name="numberingMode" value="hierarchical" />
+                  <input type="radio" name="numberingMode" value="hierarchical" checked />
                   <span><strong>По номеру раздела и пункта</strong><small>Сначала номер раздела, затем номер пункта через точку.</small><span class="numbering-example">Раздел 1: 1.1, 1.2, 1.3 · Раздел 2: 2.1, 2.2, 2.3</span></span>
                 </label>
                 <label class="settings-toggle-card numbering-option">
@@ -1206,18 +1207,18 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=13"></script>
+    <script src="/jira-markup-import.js?v=14"></script>
     <script src="/checklist-selection.js?v=6"></script>
-    <script src="/checklist-table.js?v=2"></script>
+    <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=88"></script>
+    <script src="/release-notes.js?v=89"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
-    <script src="/import-options.js?v=6"></script>
+    <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=4"></script>
+    <script src="/report-file.js?v=5"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
@@ -1273,7 +1274,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=37"></script>
-    <script src="/app.js?v=154"></script>
-    <script src="/local-import-client.js?v=6"></script>
+    <script src="/app.js?v=155"></script>
+    <script src="/local-import-client.js?v=7"></script>
   </body>
 </html>

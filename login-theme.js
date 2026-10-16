@@ -1,13 +1,12 @@
 (() => {
   const supportedThemes = new Set(["light", "dark", "graphite"]);
-  let theme = "light";
+  let theme = "graphite";
 
   try {
     const savedTheme = localStorage.getItem("qa-report-theme");
     if (supportedThemes.has(savedTheme)) theme = savedTheme;
-    else if (matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
   } catch {
-    // The light theme remains a safe fallback when storage is unavailable.
+    // Keep the default theme when storage is unavailable.
   }
 
   document.documentElement.dataset.theme = theme;

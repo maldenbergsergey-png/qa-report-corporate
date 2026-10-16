@@ -193,3 +193,19 @@ test("metadata validates fields, hashes, statuses and URLs before queuing", () =
   }
   assert.throws(() => validateBatch({ id: "bad-combined", kind: "checklist", format: "jira", content: "||Test||", metadata: { overallStatus: field("INVALID") } }, new Map()), { status: 400 });
 });
+
+test("blocked outcomes are accepted for both metadata and row updates", async () => {
+  const f = await fixture();
+  try {
+    const data = { id: "blocked-status", kind: "cells", updates: [{ sectionId: "section", rowId: "row",
+      columnId: "actual", expectedHash: "0".repeat(64), text: "Waiting for dependency", status: "ЗАБЛОКИРОВАНО" }],
+      metadata: { overallStatus: { value: "ЗАБЛОКИРОВАНО", expectedHash: "0".repeat(64) } } };
+    const response = await f.agent("/batches", { method: "POST", body: JSON.stringify(data) });
+    assert.equal(response.status, 202);
+    const { batch } = await (await f.browser("/next")).json();
+    assert.equal(batch.updates[0].status, "ЗАБЛОКИРОВАНО");
+    assert.equal(batch.metadata.overallStatus.value, "ЗАБЛОКИРОВАНО");
+    assert.equal((await f.agent("/batches", { method: "POST", body: JSON.stringify({ ...data, id: "invalid-status",
+      updates: [{ ...data.updates[0], status: "UNKNOWN" }] }) })).status, 400);
+  } finally { await f.close(); }
+});

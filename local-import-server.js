@@ -43,7 +43,7 @@ function validateBatch(input, files) {
       if (!Object.hasOwn(limits, field)) throw problem(400, "Неизвестное поле metadata");
       if (!update || typeof update !== "object" || Array.isArray(update) || typeof update.value !== "string" || update.value.length > limits[field]) throw problem(400, "Некорректное значение metadata");
       if (!/^[a-f0-9]{64}$/.test(update.expectedHash || "")) throw problem(400, "expectedHash должен быть взят из контекста поля");
-      if (field === "overallStatus" && !["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"].includes(update.value)) throw problem(400, "Неизвестный итоговый статус");
+      if (field === "overallStatus" && !["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЗАБЛОКИРОВАНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"].includes(update.value)) throw problem(400, "Неизвестный итоговый статус");
       if (field === "issueUrl" && update.value.trim() && !/^[a-z][a-z0-9_]*-\d+$/i.test(update.value.trim())) {
         let url;
         try { url = new URL(update.value); } catch { throw problem(400, "Укажите HTTP(S)-ссылку или ключ задачи"); }
@@ -67,7 +67,7 @@ function validateBatch(input, files) {
       if (!/^[a-f0-9]{64}$/.test(cell.expectedHash || "")) throw problem(400, "expectedHash должен быть взят из контекста ячейки");
       if (cell.text !== undefined && typeof cell.text !== "string") throw problem(400, "text должен быть строкой");
       if (cell.mode !== undefined && !["append", "replace"].includes(cell.mode)) throw problem(400, "mode: append или replace");
-      if (cell.status !== undefined && !["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"].includes(cell.status)) throw problem(400, "Неизвестный статус");
+      if (cell.status !== undefined && !["OK", "НЕ ОК", "ПОЧТИ ОК", "НЕ ПРОВЕРЕНО", "ЗАБЛОКИРОВАНО", "ЧАСТИЧНО ПРОВЕРЕНО", "ТРЕБУЕТ УТОЧНЕНИЯ"].includes(cell.status)) throw problem(400, "Неизвестный статус");
       if (!Array.isArray(cell.attachmentIds || [])) throw problem(400, "attachmentIds должен быть массивом");
       for (const id of cell.attachmentIds || []) ids.add(id);
     }

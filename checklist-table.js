@@ -1,5 +1,5 @@
 (function (root) {
-  const statuses = ["НЕ ОК", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
+  const statuses = ["НЕ ОК", "ЗАБЛОКИРОВАНО", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
   function visibleRows(section) {
     if (!section.statusSort) return section.rows;
     const rank = status => { const i = statuses.indexOf(status); return i < 0 ? statuses.length : i; };

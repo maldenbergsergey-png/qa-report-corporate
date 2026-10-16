@@ -65,12 +65,12 @@ test('explicit and headerless tables can coexist without losing sections', () =>
 });
 
 test('an unknown last-column status can be explicitly recognized and mapped', () => {
-  const doc = parseRows('|1|Check|Blocked|');
+  const doc = parseRows('|1|Check|On hold|');
   assert.equal(doc.sections[0].headerless.statusColumn, false);
   doc.sections[0] = configureHeaderlessSection(doc.sections[0], { numberColumn: true, statusColumn: true });
   const state = O.create(doc);
   assert.equal(O.summary(doc, state).unresolved, 1);
-  state.mapping.set('Blocked', 'ТРЕБУЕТ УТОЧНЕНИЯ');
+  state.mapping.set('On hold', 'ТРЕБУЕТ УТОЧНЕНИЯ');
   const result = O.build(doc, state);
   assert.equal(result.sections[0].rows[0].status, 'ТРЕБУЕТ УТОЧНЕНИЯ');
   assert.equal(result.sections[0].headerlessRows, undefined, 'raw source is not persisted');

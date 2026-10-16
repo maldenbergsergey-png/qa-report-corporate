@@ -1661,6 +1661,12 @@ body.section-sticky-active .editor-toolbar::after {
   background: #fff0d5;
 }
 
+.status-blocked,
+.overall-status-field #overallStatus.status-blocked {
+  color: #505f79;
+  background: #e9edf2;
+}
+
 .row-actions {
   padding-top: 8px !important;
   text-align: center;
@@ -4494,6 +4500,12 @@ body.resizing-code * {
 :root[data-theme="graphite"] .overall-status-field #overallStatus.status-clarification {
   color: #ffd294;
   background: #5b3410;
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .status-blocked,
+:root:is([data-theme="dark"], [data-theme="graphite"]) .overall-status-field #overallStatus.status-blocked {
+  color: #c1cbd9;
+  background: #303b4b;
 }
 
 :root[data-theme="dark"] .code-editor-input,

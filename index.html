@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=142" />
+    <link rel="stylesheet" href="/styles.css?v=143" />
     <link rel="stylesheet" href="/bug-wizard.css?v=23" />
   </head>
   <body>
@@ -859,9 +859,10 @@
         </header>
         <div class="code-editor-body">
           <div class="code-editor-meta">
-            <span>Содержимое фрагмента</span>
+            <label><input id="codeEditorReadable" type="checkbox" checked aria-describedby="codeEditorReadableHint" /> Читаемый текст</label>
             <strong id="codeEditorLanguage">1 строка</strong>
           </div>
+          <p id="codeEditorReadableHint" class="code-editor-readable-hint">Снимите флажок, чтобы посмотреть исходник. «Сохранить» запишет текущий вариант в отчёт.</p>
           <div class="code-editor-input">
             <pre id="codeEditorLineNumbers" class="code-editor-line-numbers" aria-hidden="true">1</pre>
             <textarea id="codeEditorTextarea" spellcheck="false" aria-label="Код" wrap="off"></textarea>
@@ -1209,13 +1210,13 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=2"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=87"></script>
+    <script src="/release-notes.js?v=88"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=5"></script>
     <script src="/import-options.js?v=6"></script>
     <script src="/import-wizard.js?v=6"></script>
-    <script src="/file-preview.js?v=3"></script>
+    <script src="/file-preview.js?v=4"></script>
     <script src="/report-file.js?v=4"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
@@ -1272,7 +1273,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=37"></script>
-    <script src="/app.js?v=153"></script>
+    <script src="/app.js?v=154"></script>
     <script src="/local-import-client.js?v=6"></script>
   </body>
 </html>

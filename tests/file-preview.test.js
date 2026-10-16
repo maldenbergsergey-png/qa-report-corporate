@@ -135,3 +135,41 @@ test('formatting falls back for excessive depth or output expansion', () => {
   const expanding = '['.repeat(64) + '0,'.repeat(70000) + '0' + ']'.repeat(64);
   assert.equal(preview.formatJson(expanding), expanding);
 });
+
+
+test('readable code fixes Cyrillic escapes and reversible Windows mojibake without changing JSON tokens', () => {
+  const source = String.raw`{"text":"\u041f\u0440\u0438\u0432\u0435\u0442","n":9007199254740993,"n":2.5000,"literal":"\\u0410","control":"\n"}`;
+  const readable = preview.readableCode(source);
+  assert.match(readable, /"text": "Привет"/);
+  assert.match(readable, /9007199254740993/); assert.match(readable, /2\.5000/);
+  assert.equal((readable.match(/"n":/g) || []).length, 2);
+  assert.match(readable, /"literal": "\\\\u0410"/); assert.match(readable, /"control": "\\n"/);
+  assert.deepEqual(JSON.parse(readable), JSON.parse(source));
+  const damaged = new TextDecoder('windows-1251').decode(new TextEncoder().encode('Привет, Москва'));
+  assert.equal(preview.readableCode(`POST /api HTTP/1.1\n\n{"text":"${damaged}"}`), 'POST /api HTTP/1.1\n\n{"text":"Привет, Москва"}');
+  assert.equal(preview.readableCode(readable), readable);
+});
+test('readable code preserves escaped programming syntax, literal escapes and unrecoverable text', () => {
+  for (const source of [String.raw`const name = '\u0027\u0060\u005c'; const re = /\u002e\u005b/;`,
+    String.raw`const text = "\u2028\u2029";`, String.raw`{"literal":"\\u0410","invalid":"\uZZZZ","surrogate":"\uD800"}`,
+    'Привет, мир! Ελληνικά 日本語', 'Р�Р� ??', '<img src=x onerror=alert(1)>']) {
+    assert.equal(preview.readableCode(source), source);
+  }
+});
+test('switching readable and source views preserves edits to both buffers', () => {
+  const source = String.raw`{"text":"\u0410"}`;
+  const views = preview.textViews(source, preview.readableCode);
+  const readable = views.value(true);
+  views.update(true, readable.replace('А', 'Б'));
+  assert.equal(views.hasEdits(), true);
+  assert.equal(views.value(false), source);
+  assert.match(views.value(true), /Б/);
+  views.update(false, source.replace('0410', '0412'));
+  assert.match(views.value(false), /0412/);
+  assert.match(views.value(true), /Б/, 'Source edits must not discard edits in the readable view');
+});
+test('source edits refresh an unedited readable view', () => {
+  const views = preview.textViews(String.raw`{"text":"\u0410"}`, preview.readableCode);
+  views.update(false, String.raw`{"text":"\u0412"}`);
+  assert.match(views.value(true), /В/);
+});

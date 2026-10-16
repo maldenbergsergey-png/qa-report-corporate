@@ -338,6 +338,7 @@ const elements = {
   closeMediaViewerButton: document.querySelector("#closeMediaViewerButton"),
   codeEditorModal: document.querySelector("#codeEditorModal"),
   codeEditorTextarea: document.querySelector("#codeEditorTextarea"),
+  codeEditorReadable: document.querySelector("#codeEditorReadable"),
   codeEditorLineNumbers: document.querySelector("#codeEditorLineNumbers"),
   codeEditorLanguage: document.querySelector("#codeEditorLanguage"),
   codeEditorState: document.querySelector("#codeEditorState"),
@@ -420,6 +421,7 @@ let pointerObjectGesture = null;
 const suppressObjectOpenUntil = new WeakMap();
 let editingCodeBlock = null;
 let codeEditorInitialValue = "";
+let codeEditorTextViews = null;
 let stickyUpdateFrame = 0;
 let pinnedColumns = loadPinnedColumns();
 let selectionMode = false;
@@ -6338,15 +6340,27 @@ function deleteEditorObject(object, message) {
 function openCodeEditor(block) {
   editingCodeBlock = block;
   codeEditorInitialValue = extractCodeText(block);
-  elements.codeEditorTextarea.value = codeEditorInitialValue;
-  updateCodeEditorLineNumbers();
-  elements.codeEditorLanguage.textContent = `${codeEditorInitialValue.split("\n").length} ${pluralizeLines(codeEditorInitialValue.split("\n").length)}`;
-  elements.codeEditorState.textContent = "Изменений нет";
-  elements.saveCodeButton.disabled = true;
+  codeEditorTextViews = window.QaReportFilePreview.textViews(codeEditorInitialValue, readableCodeText);
+  elements.codeEditorReadable.checked = true;
+  elements.codeEditorTextarea.value = codeEditorTextViews.value(true);
   elements.codeEditorModal.hidden = false;
+  updateCodeEditorState();
   setCodeEditorBackgroundInert(true);
   syncBodyModalOverflow();
   requestAnimationFrame(() => elements.codeEditorTextarea.focus());
+}
+
+function readableCodeText(value) {
+  return window.QaReportFilePreview.readableCode(value);
+}
+
+function updateCodeEditorState() {
+  updateCodeEditorLineNumbers();
+  const lineCount = Math.max(1, elements.codeEditorTextarea.value.split("\n").length);
+  elements.codeEditorLanguage.textContent = `${lineCount} ${pluralizeLines(lineCount)}`;
+  const dirty = codeEditorIsDirty();
+  elements.codeEditorState.textContent = dirty ? "Есть несохранённые изменения" : "Изменений нет";
+  elements.saveCodeButton.disabled = !dirty;
 }
 
 function setCodeEditorBackgroundInert(inert) {
@@ -6368,13 +6382,13 @@ function codeEditorIsDirty() {
   return (
     !elements.codeEditorModal.hidden &&
     Boolean(editingCodeBlock) &&
-    elements.codeEditorTextarea.value !== codeEditorInitialValue
+    (elements.codeEditorTextarea.value !== codeEditorInitialValue || codeEditorTextViews?.hasEdits())
   );
 }
 
 function saveCodeChanges() {
   if (!editingCodeBlock?.isConnected) return closeCodeEditor(true);
-  const code = formatCode(elements.codeEditorTextarea.value);
+  const code = elements.codeEditorReadable.checked ? readableCodeText(elements.codeEditorTextarea.value) : elements.codeEditorTextarea.value;
   let codeElement = editingCodeBlock.querySelector(":scope > code");
   if (!codeElement) {
     codeElement = document.createElement("code");
@@ -6401,6 +6415,7 @@ async function closeCodeEditor(force = false) {
   syncBodyModalOverflow();
   editingCodeBlock = null;
   codeEditorInitialValue = "";
+  codeEditorTextViews = null;
   return true;
 }
 
@@ -9606,12 +9621,24 @@ elements.alternativeConfirmButton.addEventListener("click", () => resolveConfirm
 elements.cancelConfirmButton.addEventListener("click", () => resolveConfirmation(false));
 elements.closeConfirmButton.addEventListener("click", () => resolveConfirmation(false));
 elements.codeEditorTextarea.addEventListener("input", () => {
-  updateCodeEditorLineNumbers();
-  const lineCount = Math.max(1, elements.codeEditorTextarea.value.split("\n").length);
-  elements.codeEditorLanguage.textContent = `${lineCount} ${pluralizeLines(lineCount)}`;
-  const dirty = codeEditorIsDirty();
-  elements.codeEditorState.textContent = dirty ? "Есть несохранённые изменения" : "Изменений нет";
-  elements.saveCodeButton.disabled = !dirty;
+  codeEditorTextViews?.update(elements.codeEditorReadable.checked, elements.codeEditorTextarea.value);
+  updateCodeEditorState();
+});
+elements.codeEditorReadable.addEventListener("change", () => {
+  if (!codeEditorTextViews) return;
+  elements.codeEditorTextarea.value = codeEditorTextViews.value(elements.codeEditorReadable.checked);
+  updateCodeEditorState();
+});
+elements.codeEditorTextarea.addEventListener("paste", event => {
+  if (!elements.codeEditorReadable.checked) return;
+  const source = event.clipboardData?.getData("text/plain");
+  if (!source) return;
+  const readable = readableCodeText(source);
+  if (readable === source) return;
+  event.preventDefault();
+  const editor = elements.codeEditorTextarea;
+  editor.setRangeText(readable, editor.selectionStart, editor.selectionEnd, "end");
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
 });
 elements.codeEditorTextarea.addEventListener("scroll", () => {
   elements.codeEditorLineNumbers.scrollTop = elements.codeEditorTextarea.scrollTop;

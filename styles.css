@@ -3005,7 +3005,7 @@ body.resizing-image .cell-image.image-selected .image-resize-hint {
 .code-editor-body {
   display: grid;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   padding: 20px 22px;
 }
@@ -3014,6 +3014,18 @@ body.resizing-image .cell-image.image-selected .image-resize-hint {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.code-editor-meta label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-editor-readable-hint {
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
 }

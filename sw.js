@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v122';
+const CACHE_NAME = 'qa-report-corporate-assets-v123';
 const SHELL = [
   "/bug-report.js?v=7", "/bug-rich-editor.js?v=9", "/bug-report-ui.js?v=37", "/tracker-links.js?v=4", "/bug-attachment-analysis.js?v=2",
   "/vendor/jszip/jszip.min.js", "/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs",
@@ -15,7 +15,7 @@ const SHELL = [
   "/import-options.js?v=7", "/import-wizard.js?v=6",
   "/attachment-limits.js?v=1",
   "/jira-attachment-reuse.js?v=3",
-  "/attachment-import.js?v=5", "/local-import-client.js?v=7",
+  "/attachment-import.js?v=6", "/local-import-client.js?v=7",
   "/checklist-table.js?v=3",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",

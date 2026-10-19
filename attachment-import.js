@@ -93,6 +93,15 @@
     }
     return copy;
   }
+  function embeddedReference(attachment, issueUrl) {
+    const text = document.createTextNode(attachment.filename);
+    try {
+      const url = new URL(attachment.content);
+      if (!/^https?:$/.test(url.protocol) || url.origin !== new URL(issueUrl).origin || url.username || url.password) return text;
+      const link = document.createElement("a"); link.href = url.href; link.rel = "noopener noreferrer";
+      link.append(text); return link;
+    } catch { return text; }
+  }
   async function localize(documentValue, { attachments = [], load, include = true, locations = null, policy = null, sourceIssueUrl = "", onProgress = () => {} }) {
     const copy = JSON.parse(JSON.stringify(documentValue));
     const cache = new Map(), failures = new Map(), ids = new Map(); let loaded = 0, totalBytes = 0, completed = 0;
@@ -108,8 +117,9 @@
         const action = mode(part, item, index);
         if (action === "omit") { target.remove(); continue; }
         if (!ids.has(key)) ids.set(key, crypto.randomUUID());
-        const source = sourceIssueUrl && attachment ? { issueUrl: sourceIssueUrl, id: String(attachment.id), name, url: root.QaReportJiraReuse?.sourceUrl(attachment.content, sourceIssueUrl) || "", kind } : undefined;
+        const source = sourceIssueUrl && attachment && !attachment.embedded ? { issueUrl: sourceIssueUrl, id: String(attachment.id), name, url: root.QaReportJiraReuse?.sourceUrl(attachment.content, sourceIssueUrl) || "", kind } : undefined;
         if (action !== "download") {
+          if (attachment?.embedded) { target.replaceWith(embeddedReference(attachment, sourceIssueUrl)); continue; }
           if (source) {
             const replacement = document.createElement("template"); replacement.innerHTML = reference({id:ids.get(key),name,type:attachment.mimeType,source}); target.replaceWith(replacement.content);
           } // Without source metadata, retain the original Jira markup reference.
@@ -130,6 +140,7 @@
         const replacement = document.createElement("template");
         if (file) replacement.innerHTML = render({...file, source:file.source ? {...file.source,kind} : undefined});
         else if (source) replacement.innerHTML = reference({id:ids.get(key),name,type:attachment.mimeType,source});
+        else if (attachment?.embedded) { target.replaceWith(embeddedReference(attachment, sourceIssueUrl)); continue; }
         else continue; // A failed download must not destroy a reusable Jira reference.
         target.replaceWith(replacement.content);
       }

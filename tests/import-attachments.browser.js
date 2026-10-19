@@ -59,6 +59,26 @@
     const result=await A.localize(doc,{policy:p});
     assert(html(result.document)===html(A.removeExcluded(doc,[],p)),'preview differs');
   });
+  await test('embedded assets respect download, reference, omission and failure without a remote attachment identity',async()=>{
+    const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
+    const file={id:'embedded-1',filename:'inline.png',mimeType:'image/png',embedded:true,content:'https://jira.example/browse/QA-1#comment-1'};
+    const doc=window.QaReportJiraImport.parseJiraMarkup('||Проверка||ФР||\n|Image !inline.png!|Text|',[file]);
+    let loads=0;
+    const options={attachments:[file],sourceIssueUrl:'https://jira.example/browse/QA-1',load:async()=>{loads++;return new Blob([Uint8Array.from(atob(image.split(',')[1]),c=>c.charCodeAt(0))],{type:'image/png'});}};
+    const downloaded=await A.localize(doc,{...options,policy:policy('download')});
+    assert(downloaded.loaded===1 && !downloaded.errors.length && loads===1,'embedded download failed');
+    assert(html(downloaded.document).includes(image),'embedded bytes lost');
+    assert(!html(downloaded.document).includes('data-jira-'),'embedded asset gained a false source identity');
+    const linked=await A.localize(doc,{...options,policy:policy('reference')});
+    assert(html(linked.document).includes(file.content) && !html(linked.document).includes('data:image'),'reference did not point to source comment');
+    assert(!html(linked.document).includes('data-jira-') && loads===1,'reference tried to fetch a nonexistent remote attachment');
+    const omitted=await A.localize(doc,{...options,policy:policy('download',false)});
+    assert(!html(omitted.document).includes('inline.png') && loads===1,'images-off retained embedded asset');
+    const failed=await A.localize(doc,{...options,policy:policy('download'),load:()=>{throw Error('fixture');}});
+    assert(failed.errors.length===1 && html(failed.document).includes(file.content),'failure lost the source comment');
+    const foreign=await A.localize(doc,{...options,attachments:[{...file,content:'javascript:alert(1)'}],policy:policy('reference')});
+    assert(!html(foreign.document).includes('href='),'unsafe embedded source link');
+  });
   output.textContent=results.join('\n')+`\n${results.filter(x=>x.startsWith('PASS')).length}/${results.length} passed`;
   document.title=results.some(x=>x.startsWith('FAIL'))?'FAIL Import regression':'PASS Import regression';
 })();

@@ -10250,7 +10250,15 @@ document.getElementById("dictationConnectPair").addEventListener("click", async 
 document.getElementById("dictationConnectCheck").addEventListener("click", refreshDictationConnect);
 
 // The shared wizard uses corporate Jira directly and Connect only for AI/speech.
-async function changeBugReport(reportId, apply) {
+const bugReportWrites = new Map();
+function changeBugReport(reportId, apply) {
+  const previous = bugReportWrites.get(reportId) || Promise.resolve();
+  const next = previous.catch(() => {}).then(() => writeBugReport(reportId, apply));
+  bugReportWrites.set(reportId, next);
+  const cleanup = () => { if (bugReportWrites.get(reportId) === next) bugReportWrites.delete(reportId); };
+  next.then(cleanup, cleanup); return next;
+}
+async function writeBugReport(reportId, apply) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (draft.reportId === reportId) {
       flushDraftFromDom(); if (apply(draft)) renderSections();

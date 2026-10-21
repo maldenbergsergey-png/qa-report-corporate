@@ -18,7 +18,7 @@ const draft = { summary: "Из ИИ-подборщика невозможно у
 async function start(root, port = 0, options = {}) {
   const baseUrl = options.provider === "eva" ? "https://eva.example.test/team" : "https://jira.example.test";
   let failedUploads = 0;
-  const uploadOperations = new Map();
+  const uploadOperations = new Map(), issueOperations = new Map(), failedIssues = new Set();
   const jobs = new Map(), creates = [], uploads = [], evidence = [], aiRequests = [], requests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -49,14 +49,20 @@ async function start(root, port = 0, options = {}) {
         case "/api/ai/profiles": result = { profiles: options.noAi ? [] : [{ id: "fixture-ai", label: "ChatGPT", model: "Тестовая модель" }], speech: { mode: "browser", available: true } }; break;
         case "/api/ai/bug-draft": aiRequests.push(input); if (options.aiDelay) await new Promise(resolve => setTimeout(resolve, options.aiDelay)); if (options.aiFailure) return json({ error: "ИИ не ответил. Повторите генерацию." }, 503); result = { draft }; break;
         case "/api/jira/issue-options": result = { options: [{ value: "fixture-user", label: "Тестовый пользователь" }] }; break;
-        case "/api/jira/create-issue": creates.push(input); result = { key: "APP-1234", issueUrl: `${baseUrl}/${options.provider === "eva" ? "desk/Task" : "browse"}/APP-1234`, operationId: input.operationId }; break;
+        case "/api/jira/create-issue": {
+          if (!issueOperations.has(input.operationId)) {
+            creates.push(input); const key = `APP-${options.uniqueIssues ? 1233 + creates.length : 1234}`;
+            issueOperations.set(input.operationId, { key, issueUrl: `${baseUrl}/${options.provider === "eva" ? "desk/Task" : "browse"}/${key}`, operationId: input.operationId });
+          }
+          result = issueOperations.get(input.operationId); if (options.createDelay && result.key === "APP-1235") await new Promise(resolve => setTimeout(resolve, options.createDelay)); break;
+        }
         case "/api/jira/issue-evidence": if (options.evidenceDelay) await new Promise(resolve => setTimeout(resolve, options.evidenceDelay)); evidence.push(input); result = { ok: true }; break;
         case "/api/jira/import-attachment": {
           if (path.basename(root) === "qa-report") return json({ file: { type: "text/plain", dataBase64: Buffer.from("remote fixture log").toString("base64") } });
           res.writeHead(200, { "Content-Type": "text/plain" }); return res.end("remote fixture log");
         }
-        case "/api/jira/attachment-manifest": return resultJson({ attachments: uploads, attachmentLimits: { fileBytes: 52428800, totalBytes: 78643200 } });
-        case "/api/jira/attachments": { if (options.uploadDelay) await new Promise(resolve => setTimeout(resolve, options.uploadDelay)); if (failedUploads++ < (options.failUploads || 0)) return json({ error: "Тестовая ошибка загрузки" }, 400); if (uploadOperations.has(input.operationId)) return resultJson({ attachments: [uploadOperations.get(input.operationId)] }); const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8 }; uploads.push(file); uploadOperations.set(input.operationId, file); return resultJson({ attachments: [file] }); }
+        case "/api/jira/attachment-manifest": return resultJson({ attachments: options.uniqueIssues ? uploads.filter(file => file.issueUrl === input.issueUrl) : uploads, attachmentLimits: { fileBytes: 52428800, totalBytes: 78643200 } });
+        case "/api/jira/attachments": { if (options.uploadDelay) await new Promise(resolve => setTimeout(resolve, options.uploadDelay)); const failIssue = options.failIssueKeys?.find(key => input.issueUrl?.endsWith("/" + key)); if (failIssue && !failedIssues.has(failIssue)) { failedIssues.add(failIssue); return json({ error: "Тестовая ошибка отдельного бага" }, 400); } if (failedUploads++ < (options.failUploads || 0)) return json({ error: "Тестовая ошибка загрузки" }, 400); if (uploadOperations.has(input.operationId)) return resultJson({ attachments: [uploadOperations.get(input.operationId)] }); const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8, ...(options.uniqueIssues ? { issueUrl: input.issueUrl, operationId: input.operationId } : {}) }; uploads.push(file); uploadOperations.set(input.operationId, file); return resultJson({ attachments: [file] }); }
         default: return json({ ok: true, reports: [], projects: [], downloads: [], session: null });
       }
       if (url.pathname.startsWith("/api/ai/") || path.basename(root) === "qa-report") { const jobId = crypto.randomUUID(); jobs.set(jobId, result); return json({ jobId }); }

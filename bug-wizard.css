@@ -264,10 +264,14 @@
 #bugReportModal .bug-rich-toolbar [data-format="codeblock"] { font-family: ui-monospace, monospace; font-weight: 600; }
 @media (max-width: 720px) { #bugReportModal .bug-steps li > span { flex-basis: 30px; width: 30px; height: 30px; font-size: 13px; } }
 
-/* A single resumable wizard, kept out of the editor's way. */
+/* A compact stack of independent bug operations. */
 .bug-window-actions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 #minimizeBugReport .ui-icon { width: 18px; height: 18px; }
-.bug-report-dock { --primary: #ff193d; position: fixed; z-index: 46; left: 20px; bottom: 20px; width: min(300px, calc(100vw - 96px)); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 28px #0003; overflow: hidden; }
+.bug-dock-stack { position: fixed; z-index: 46; left: 20px; bottom: 20px; width: min(300px, calc(100vw - 96px)); max-height: min(440px, calc(100dvh - 160px)); overflow-y: auto; display: grid; gap: 8px; overscroll-behavior: contain; }
+.bug-dock-stack[hidden] { display: none; }
+#bugUploadDockList { display: grid; gap: 8px; }
+#bugUploadDockList:empty { display: none; }
+.bug-report-dock { --primary: #ff193d; position: relative; width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 28px #0003; overflow: hidden; }
 .bug-report-dock[hidden] { display: none; }
 .bug-dock-restore { display: grid; gap: 9px; width: 100%; padding: 12px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; font: inherit; }
 .bug-dock-restore:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
@@ -276,16 +280,16 @@
 .bug-dock-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2899ff; }
 .bug-dock-heading .bug-dock-expand { margin-left: auto; width: 14px; height: 14px; }
 .bug-dock-status { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.4; color: var(--muted); }
-#bugDockStatus { min-width: 0; overflow-wrap: anywhere; }
-#bugDockCount { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-#bugDockProgress { display: block; appearance: none; width: 100%; height: 4px; border: 0; border-radius: 3px; overflow: hidden; color: var(--primary); background: var(--line); }
-#bugDockProgress[hidden] { display: none; }
-#bugDockProgress::-webkit-progress-bar { background: var(--line); }
-#bugDockProgress::-webkit-progress-value { background: var(--primary); border-radius: 3px; }
-#bugDockProgress::-moz-progress-bar { background: var(--primary); border-radius: 3px; }
+[data-bug-dock-status] { min-width: 0; overflow-wrap: anywhere; }
+[data-bug-dock-count] { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.bug-dock-progress { display: block; appearance: none; width: 100%; height: 4px; border: 0; border-radius: 3px; overflow: hidden; color: var(--primary); background: var(--line); }
+.bug-dock-progress[hidden] { display: none; }
+.bug-dock-progress::-webkit-progress-bar { background: var(--line); }
+.bug-dock-progress::-webkit-progress-value { background: var(--primary); border-radius: 3px; }
+.bug-dock-progress::-moz-progress-bar { background: var(--primary); border-radius: 3px; }
 .bug-report-dock[data-phase="complete"] { --primary: var(--green); }
-.bug-report-dock[data-phase="complete"] #bugDockStatus { color: var(--green); }
-.bug-report-dock:is([data-phase="error"], [data-phase="stopped"]) #bugDockStatus { color: var(--red); }
+.bug-report-dock[data-phase="complete"] [data-bug-dock-status] { color: var(--green); }
+.bug-report-dock:is([data-phase="error"], [data-phase="stopped"]) [data-bug-dock-status] { color: var(--red); }
 .bug-dock-close { position: absolute; top: 6px; right: 5px; width: 30px; height: 30px; }
 .bug-dock-close .ui-icon { width: 16px; height: 16px; }
 .bug-report-dock button:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
@@ -295,5 +299,16 @@
 .bug-upload-confirm p { margin: 0 0 22px; font-size: 14px; line-height: 1.6; color: var(--muted); }
 .bug-upload-confirm .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .bug-upload-confirm .button { min-height: 40px; font-size: 13px; padding: 9px 12px; }
-:root[data-theme="dark"] :is(.bug-report-dock, #bugUploadConfirm) { --surface: #131f2b; --line: #304253; --green: #2bd566; --muted: #b1bfce; }
-@media (max-width: 480px) { .bug-report-dock { left: 12px; bottom: 12px; } .bug-upload-confirm { padding: 20px; } .bug-upload-confirm .button { width: 100%; } }
+:root[data-theme="dark"] :is(.bug-report-dock, #bugUploadConfirm, #bugBackgroundModal) { --surface: #131f2b; --line: #304253; --green: #2bd566; --muted: #b1bfce; }
+@media (max-width: 480px) { .bug-dock-stack { left: 12px; bottom: 12px; } .bug-upload-confirm { padding: 20px; } .bug-upload-confirm .button { width: 100%; } }
+
+#bugBackgroundModal { --primary: #ff193d; --primary-hover: #e81032; background: #060e19b8; backdrop-filter: blur(7px); }
+.bug-background-window { position: relative; width: min(480px, 100%); padding: 28px; max-height: calc(100dvh - 40px); overflow: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; }
+.bug-background-header { position: absolute; top: 10px; right: 10px; }
+.bug-background-header .ui-icon { width: 18px; height: 18px; }
+#bugBackgroundModal .bug-created-result { display: grid; justify-items: center; gap: 16px; margin-top: 8px; text-align: center; }
+#bugBackgroundModal h3 { font-size: 20px; margin: 4px 0 0; }
+#bugBackgroundModal .bug-created-result p { font-size: 13px; margin: 0; color: var(--muted); }
+#bugBackgroundModal .bug-created-result .bug-success-error { color: var(--primary); text-align: left; width: 100%; }
+#bugBackgroundModal .bug-success-actions { flex-wrap: wrap; }
+#bugBackgroundModal .bug-success-actions .button { min-height: 42px; padding: 10px 12px; font-size: 12px; }

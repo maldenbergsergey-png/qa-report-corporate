@@ -9,7 +9,9 @@
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"); icon.classList.add("ui-icon"); icon.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use"); use.setAttribute("href", `#icon-${name}`); icon.append(use); return icon;
   }
-  let api, state = null, contextDockFrame = 0;
+  let api, state = null, contextDockFrame = 0, activeResult = null, dismissal = null, workspaceObscured = null;
+  const operations = new Map();
+  let recovery = Promise.resolve();
   function read(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
   const assetKey = asset => JSON.stringify([asset.attachmentId, asset.source.issueUrl, asset.source.id]);
   const ATTACHMENT_DRAG = "application/x-qa-bug-attachment";
@@ -62,7 +64,7 @@
   function prompt() { const value = read(PROMPT_KEY, Bugs.DEFAULT_PROMPT); return typeof value === "string" && ![Bugs.LEGACY_DEFAULT_PROMPT, Bugs.PREVIOUS_DEFAULT_PROMPT, Bugs.CHECKLIST_DEFAULT_PROMPT, Bugs.TRACKER_DEFAULT_PROMPT].includes(value) && value.trim() && value.length <= 16000 ? value : Bugs.DEFAULT_PROMPT; }
   function sourceReport() { return api.getDraft().reportId === state.reportId ? api.getDraft() : state.sourceReport; }
   function row() { return sourceReport().sections.find(s => s.id === state.sectionId)?.rows.find(r => r.id === state.rowId); }
-  // Keep unfinished standalone operations separate from checklist documents.
+  // The journal also holds row-based background uploads, independently of the open report.
   async function standaloneRecord(action, value) {
     const db = await new Promise((resolve, reject) => {
       const request = indexedDB.open("qa-report-standalone-bug-v1", 1);
@@ -71,20 +73,37 @@
     });
     try {
       return await new Promise((resolve, reject) => {
-        const tx = db.transaction("operations", action === "get" ? "readonly" : "readwrite"), store = tx.objectStore("operations");
-        const request = action === "get" ? store.getAll() : action === "save" ? store.put({ ...value, updatedAt: Date.now() }, value.pending?.id || value.created.operationId) : store.delete(value);
-        tx.oncomplete = () => resolve(action === "get" ? request.result.sort((a, b) => a.updatedAt - b.updatedAt)[0] : request.result);
+        const reading = action === "get" || action === "list";
+        const tx = db.transaction("operations", reading ? "readonly" : "readwrite"), store = tx.objectStore("operations");
+        const request = reading ? store.getAll() : action === "save" ? store.put({ ...value, updatedAt: Date.now() }, value.pending?.id || value.created.operationId) : store.delete(value);
+        tx.oncomplete = () => {
+          if (!reading) return resolve(request.result);
+          const records = request.result.sort((a, b) => a.updatedAt - b.updatedAt);
+          resolve(action === "list" ? records : records.find(record => {
+            const operation = operations.get(record.created?.operationId || record.pending?.id);
+            return record.standalone !== false && (!operation || operation.recovered);
+          }));
+        };
         tx.onerror = tx.onabort = () => reject(tx.error || new Error("Не удалось сохранить создание бага в браузере."));
       });
     } finally { db.close(); }
   }
-  async function persist() {
-    if (!state.standalone) {
-      const current = state, pending = structuredClone(current.pending), created = structuredClone(current.created);
+  function operationRecord(current) {
+    const created = current.created, uploaded = new Set(created?.uploads || []);
+    return { pending: created ? null : current.pending, created, standalone: current.standalone,
+      reportId: current.reportId, sectionId: current.sectionId, rowId: current.rowId,
+      contextText: current.contextText || "", extraAssets: current.pending?.extraAssets || created?.extraAssets || [],
+      assets: created ? current.selectedAssets.filter(asset => !uploaded.has(assetKey(asset))) : [] };
+  }
+  async function persist(current = state) {
+    const created = structuredClone(current.created), pending = structuredClone(current.pending);
+    current.operationId = created?.operationId || pending?.id || current.operationId;
+    if (current.created && unfinished(current) || current.standalone && !created) await standaloneRecord("save", operationRecord(current));
+    if (!current.standalone) {
       await api.changeReport(current.reportId, report => {
         const section = report.sections.find(s => s.id === current.sectionId), source = section?.rows.find(r => r.id === current.rowId);
         if (!source) throw new Error("Исходный пункт удалён. Ссылка на созданный баг остаётся в этом окне.");
-        if (pending) source.pendingBug = pending; else delete source.pendingBug;
+        if (pending) source.pendingBug = pending; else if (source.pendingBug?.id === current.operationId) delete source.pendingBug;
         if (created) {
           source.bugs ||= [];
           const index = source.bugs.findIndex(bug => bug.operationId === created.operationId);
@@ -92,12 +111,18 @@
           return addBugComment(source, created, report, current.sectionId);
         }
       });
-      return;
     }
-    const created = state.created;
-    if (created && !created.attachmentsPending && !created.evidencePending) await standaloneRecord("clear", created.operationId);
-    else await standaloneRecord("save", { pending: created ? null : state.pending, created,
-      contextText: $("bugContextText").value, extraAssets: state.pending?.extraAssets || created?.extraAssets || [] });
+    if (created && !unfinished(current)) await standaloneRecord("clear", created.operationId);
+  }
+  async function recoverOperations() {
+    for (const saved of await standaloneRecord("list")) {
+      if (!saved.created || saved.created.uploadsStopped || operations.has(saved.created.operationId)) continue;
+      const current = { ...saved, standalone: saved.standalone !== false, selectedAssets: saved.assets || saved.extraAssets || [],
+        recovered: true, minimized: true, pending: null, busy: false, creating: false,
+        uploadsPending: Boolean(saved.created.attachmentsPending), evidencePending: Boolean(saved.created.evidencePending) };
+      operations.set(current.created.operationId, current);
+    }
+    renderDock();
   }
   const needsContext = () => state.standalone && !$("bugContextText").value.trim();
   function message(text, error = false) {
@@ -220,12 +245,12 @@
     return suitable ? words.length === 1 ? 2 : 1 : 0;
   }
   function mappingKey() { const t = target(); return JSON.stringify([...(t.provider === "eva" ? ["eva"] : []), t.baseUrl, state.meta.projectKey, state.meta.issueTypeId]); }
-  async function poll(jobId, current = state, signal) {
+  async function poll(jobId, current = state, signal, background = false) {
     const deadline = Date.now() + 180000; let interval = 100;
     while (Date.now() < deadline) {
       signal?.throwIfAborted();
       const value = await api.reportApi(`/api/agent/jobs/${jobId}`, { signal });
-      if (state !== current) throw new Error("Окно закрыто");
+      if (background ? current.closed : state !== current) throw new Error("Окно закрыто");
       if (value.job.status === "completed") return value.job.result;
       if (["failed", "expired"].includes(value.job.status)) {
         const error = new Error(value.job.error || "Connect не завершил действие");
@@ -235,19 +260,19 @@
     }
     throw new Error("Действие ещё не завершено. Проверьте состояние Connect.");
   }
-  async function job(path, payload, { signal } = {}) {
+  async function job(path, payload, { signal, operation } = {}) {
     if (path.startsWith("/api/jira/") && (payload.provider || state?.created?.provider || state?.pending?.payload.provider || target().provider) === "eva") path = path.replace("/api/jira/", "/api/eva/");
-    const current = state;
+    const current = operation || state;
     signal?.throwIfAborted();
     if (api.bugRequest && path.startsWith("/api/jira/")) {
       const result = await api.bugRequest(path, payload);
       signal?.throwIfAborted();
-      if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
+      if (operation ? current.closed : state !== current) throw new DOMException("Окно закрыто", "AbortError");
       return result;
     }
     const queued = await api.reportApi(path, { method: "POST", body: JSON.stringify(payload), signal });
-    if (state !== current) throw new Error("Окно закрыто");
-    return poll(queued.jobId, current, signal);
+    if (operation ? current.closed : state !== current) throw new Error("Окно закрыто");
+    return poll(queued.jobId, current, signal, Boolean(operation));
   }
   function selectOptions(select, list, selected = "", emptyLabel = "Выберите…") {
     select.replaceChildren(new Option(emptyLabel, ""));
@@ -917,6 +942,7 @@
     const identity = window.QaReportTrackerLinks.parse(result.issueUrl, state.pending?.payload.provider || target().provider);
     if (!identity || identity.baseUrl !== expected.href.replace(/\/$/, "") || identity.key !== result.key) throw new Error("Connect вернул некорректную ссылку задачи");
     state.created = { provider: identity.provider, baseUrl: identity.baseUrl, key: result.key, issueUrl: result.issueUrl, createdAt: new Date().toISOString(), operationId: result.operationId, summary: state.createdSummary, uploads: [], extraAssets: state.pending?.extraAssets || [], inlineAttachments: state.pending?.inlineAttachments || [], attachmentRefs: {}, evidenceField: state.evidenceField || "", attachmentKeys: state.selectedAssets.map(assetKey), attachmentsPending: state.selectedAssets.length > 0, evidencePending: Boolean(state.selectedAssets.length && state.evidenceField) };
+    state.contextText = $("bugContextText").value; operations.set(state.created.operationId, state);
     showCreated();
     $("bugEditor").querySelectorAll("input, textarea, select, button").forEach(el => { el.disabled = true; });
   }
@@ -940,183 +966,191 @@
   function showCreated() {
     steps(4);
     $("bugReportState").hidden = true; $("bugReportMessage").textContent = "";
-    const result = $("bugCreatedResult");
-    if (result.dataset.operationId !== state.created.operationId || !result.firstChild) {
-      result.dataset.operationId = state.created.operationId;
+    renderCreated(state, $("bugCreatedResult"), "bug"); renderDock();
+  }
+  function renderCreated(current, result, prefix) {
+    const id = name => prefix + name, pending = unfinished(current), created = current.created;
+    if (result.bugOperation !== current) {
+      result.bugOperation = current; result.dataset.operationId = created.operationId;
       const success = document.createElement("div"); success.className = "bug-success-check"; success.append(uiIcon("check"));
-      const title = document.createElement("h3"); title.id = "bugCreatedTitle"; title.textContent = "Баг-репорт создан";
+      const title = document.createElement("h3"); title.id = id("CreatedTitle"); title.textContent = "Баг-репорт создан";
       const card = document.createElement("div"); card.className = "bug-success-issue";
-      const link = document.createElement("a"); link.href = window.QaReportTrackerLinks.identity(state.created.issueUrl) || state.created.issueUrl;
+      const link = document.createElement("a"); link.href = window.QaReportTrackerLinks.identity(created.issueUrl) || created.issueUrl;
       link.target = "_blank"; link.rel = "noopener noreferrer"; link.className = "bug-success-link";
-      const key = document.createElement("strong"); key.textContent = state.created.key; link.append(key, uiIcon("external"));
-      const summary = document.createElement("span"); summary.textContent = state.created.summary || state.createdSummary || ""; card.append(link, summary);
-      const status = document.createElement("div"); status.id = "bugCreatedAttachments"; status.className = "bug-success-attachments";
+      const key = document.createElement("strong"); key.textContent = created.key; link.append(key, uiIcon("external"));
+      const summary = document.createElement("span"); summary.textContent = created.summary || current.createdSummary || ""; card.append(link, summary);
+      const status = document.createElement("div"); status.id = id("CreatedAttachments"); status.className = "bug-success-attachments";
       status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-      const error = document.createElement("p"); error.id = "bugCreatedError"; error.className = "bug-success-error"; error.setAttribute("role", "alert");
+      const error = document.createElement("p"); error.id = id("CreatedError"); error.className = "bug-success-error"; error.setAttribute("role", "alert");
       const actions = document.createElement("div"); actions.className = "bug-success-actions";
-      const retry = document.createElement("button"); retry.id = "bugRetryAttachments"; retry.type = "button"; retry.className = "button button-secondary";
-      retry.addEventListener("click", create);
-      const again = document.createElement("button"); again.id = "bugCreateAnother"; again.type = "button"; again.className = "button button-secondary"; again.textContent = "Создать ещё один";
-      again.addEventListener("click", () => requestDismiss("another"));
+      const retry = document.createElement("button"); retry.id = id("RetryAttachments"); retry.type = "button"; retry.className = "button button-secondary";
+      retry.addEventListener("click", () => create(current));
+      const again = document.createElement("button"); again.id = id("CreateAnother"); again.type = "button"; again.className = "button button-secondary"; again.textContent = "Создать ещё один";
+      again.addEventListener("click", () => startAnother(current));
       actions.append(retry, again); result.replaceChildren(success, title, card, status, error, actions);
     }
-    const count = state.created.attachmentKeys?.length || 0, uploaded = state.created.uploads?.length || 0;
-    const pending = state.created.attachmentsPending || state.created.evidencePending, status = $("bugCreatedAttachments");
-    status.hidden = !count; status.dataset.phase = pending ? state.busy ? "loading" : state.created.uploadsStopped ? "stopped" : "pending" : "complete";
-    const indicator = pending && state.busy ? document.createElement("span") : uiIcon(pending ? "paperclip" : "check");
-    if (pending && state.busy) { indicator.className = "bug-spinner"; indicator.setAttribute("aria-hidden", "true"); }
-    const text = document.createElement("span"); text.textContent = (pending && state.created.uploadsStopped ? "Загрузка прервана: " : "Вложения: ") + uploaded + " из " + count + " загружено";
+    const count = created.attachmentKeys?.length || 0, uploaded = created.uploads?.length || 0, status = $(id("CreatedAttachments"));
+    status.hidden = !count; status.dataset.phase = operationPhase(current);
+    const indicator = pending && current.busy ? document.createElement("span") : uiIcon(pending ? "paperclip" : "check");
+    if (pending && current.busy) { indicator.className = "bug-spinner"; indicator.setAttribute("aria-hidden", "true"); }
+    const text = document.createElement("span"); text.textContent = (pending && created.uploadsStopped ? "Загрузка прервана: " : "Вложения: ") + uploaded + " из " + count + " загружено";
     status.replaceChildren(indicator, text);
-    $("bugCreatedError").textContent = state.createdError || ""; $("bugCreatedError").hidden = !state.createdError;
-    $("bugCreateAnother").disabled = Boolean(state.dismiss?.working);
-    $("bugRetryAttachments").hidden = state.busy || !pending;
-    $("bugRetryAttachments").textContent = state.created.attachmentsPending ? state.created.uploadsStopped ? "Продолжить загрузку" : "Повторить загрузку" : "Добавить ссылки";
-    renderDock();
+    $(id("CreatedError")).textContent = current.createdError || ""; $(id("CreatedError")).hidden = !current.createdError;
+    $(id("CreateAnother")).disabled = Boolean(dismissal?.current === current && dismissal.working);
+    $(id("RetryAttachments")).hidden = current.busy || !pending;
+    $(id("RetryAttachments")).textContent = created.attachmentsPending ? created.uploadsStopped ? "Продолжить загрузку" : "Повторить загрузку" : "Добавить ссылки";
+  }
+  function notifyOperation(current) {
+    if (state === current) showCreated(); else renderDock();
+    if (activeResult === current) renderCreated(current, $("backgroundBugCreatedResult"), "backgroundBug");
   }
   function openBugAgain(previous) {
-    // A new flow must not reopen the paused operation it just left.
     const sameReport = api.getDraft().reportId === previous.reportId && (previous.standalone || api.getDraft().sections.find(section => section.id === previous.sectionId)?.rows.some(row => row.id === previous.rowId));
     open(sameReport ? previous.sectionId : null, sameReport ? previous.rowId : null, previous.anchor, { fresh: true });
   }
-  async function persistCreated() {
-    state.created.extraAssets = (state.created.extraAssets || []).filter(a => !(state.created.uploads || []).includes(assetKey(a)));
-    const stored = row()?.bugs?.find(b => b.operationId === state.created.operationId);
-    if (stored) Object.assign(stored, state.created);
-    const current = state; await persist(); if (state === current) showCreated();
+  function startAnother(current) {
+    if (!current?.created || dismissal) return;
+    current.minimized = true; current.recovered = false;
+    if (activeResult === current) hideResult();
+    if (state === current) { state = null; $("bugReportModal").hidden = true; $("bugPromptDialog").hidden = true; }
+    syncBugWindows(); renderDock();
+    if (state) { if (state.minimized) restore(); } else openBugAgain(current);
   }
-  async function retry(operation) {
-    const current = state;
+  async function persistCreated(current) {
+    current.created.extraAssets = (current.created.extraAssets || []).filter(a => !(current.created.uploads || []).includes(assetKey(a)));
+    await persist(current); notifyOperation(current);
+  }
+  async function retry(operation, current) {
     for (let attempt = 0; ; attempt++) {
       current.transferController?.signal.throwIfAborted();
-      if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
+      if (current.closed) throw new DOMException("Окно закрыто", "AbortError");
       try {
-        const result = await operation();
-        current.transferController?.signal.throwIfAborted();
-        if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
-        return result;
-      }
-      catch (error) {
-        if (current.transferController?.signal.aborted || state !== current || attempt >= 2 || !([404, 408, 429].includes(error.status) || error.status >= 500 || error instanceof TypeError)) throw error;
+        const result = await operation(); current.transferController?.signal.throwIfAborted(); return result;
+      } catch (error) {
+        if (current.transferController?.signal.aborted || current.closed || attempt >= 2 || !([404, 408, 429].includes(error.status) || error.status >= 500 || error instanceof TypeError)) throw error;
         await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
       }
     }
   }
-  async function upload() {
-    const signal = state.transferController.signal;
-    const completed = new Set(state.created.uploads || []);
-    const assets = state.selectedAssets.filter(asset => !completed.has(assetKey(asset)));
+  async function upload(current) {
+    const signal = current.transferController.signal;
+    const completed = new Set(current.created.uploads || []);
+    const assets = current.selectedAssets.filter(asset => !completed.has(assetKey(asset)));
     const originalKeys = new Map(assets.map(asset => [JSON.stringify([asset.attachmentId, asset.dataUrl, asset.source.issueUrl, asset.source.id]), assetKey(asset)]));
-    const missing = (state.created.attachmentKeys || []).filter(key => !completed.has(key) && !assets.some(asset => assetKey(asset) === key));
+    const missing = (current.created.attachmentKeys || []).filter(key => !completed.has(key) && !assets.some(asset => assetKey(asset) === key));
     if (missing.length) throw new Error(`Исходное вложение удалено из пункта. Добавьте его вручную в созданную задачу.`);
-    if (!assets.length) { state.uploadsPending = false; state.created.attachmentsPending = false; await persistCreated(); return; }
-    const settings = { ...api.jiraSettings(), provider: state.created.provider || "jira", transport: "agent", baseUrl: state.created.baseUrl || new URL(state.created.issueUrl).href.split("/browse/")[0] };
-    const issue = { issueUrl: state.created.issueUrl };
-    const manifest = await retry(() => api.jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal }));
-    const plan = await window.QaReportJiraReuse.plan(assets, { issueUrl: state.created.issueUrl, attachments: manifest.attachments, signal,
+    if (!assets.length) { current.uploadsPending = false; current.created.attachmentsPending = false; await persistCreated(current); return; }
+    const settings = { ...api.jiraSettings(), provider: current.created.provider || "jira", transport: "agent", baseUrl: current.created.baseUrl || new URL(current.created.issueUrl).href.split("/browse/")[0] };
+    const issue = { issueUrl: current.created.issueUrl };
+    const manifest = await retry(() => api.jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal }), current);
+    const plan = await window.QaReportJiraReuse.plan(assets, { issueUrl: current.created.issueUrl, attachments: manifest.attachments, signal,
       loadSource: async source => {
-        const result = await retry(() => api.jiraRequest("/api/jira/import-attachment", { ...settings, commentUrl: source.issueUrl, attachmentId: source.id }, { signal }));
+        const result = await retry(() => api.jiraRequest("/api/jira/import-attachment", { ...settings, commentUrl: source.issueUrl, attachmentId: source.id }, { signal }), current);
         return `data:${result.file.type};base64,${result.file.dataBase64}`;
       } });
     signal.throwIfAborted();
-    state.created.attachmentRefs ||= {};
+    current.created.attachmentRefs ||= {};
     const remember = (file, originals) => originals.forEach(original => {
       const key = originalKeys.get(original.key); completed.add(key);
-      state.created.attachmentRefs[key] = { id: String(file.id), filename: file.filename || file.name, content: file.content || "" };
+      current.created.attachmentRefs[key] = { id: String(file.id), filename: file.filename || file.name, content: file.content || "" };
     });
     for (const reused of plan.reused) remember(reused, reused.originals);
-    if (plan.reused.length) { state.created.uploads = [...completed]; await persistCreated(); }
+    if (plan.reused.length) { current.created.uploads = [...completed]; await persistCreated(current); }
     for (let i = 0; i < plan.uploads.length; i++) {
       signal.throwIfAborted();
-      const file = plan.uploads[i]; showCreated();
+      const file = plan.uploads[i]; notifyOperation(current);
       const problem = window.QaReportAttachmentLimits?.fileError(file, manifest.attachmentLimits);
       if (problem) throw new Error(problem);
-      state.created.uploadOperations ||= {};
+      current.created.uploadOperations ||= {};
       const uploadKey = file.originals.map(original => originalKeys.get(original.key)).sort().join("|");
-      state.created.uploadOperations[uploadKey] ||= crypto.randomUUID();
-      state.created.uploadNames ||= {}; state.created.uploadNames[uploadKey] ||= file.name;
-      const storedBefore = row()?.bugs?.find(b => b.operationId === state.created.operationId); if (storedBefore) { storedBefore.uploadOperations = state.created.uploadOperations; storedBefore.uploadNames = state.created.uploadNames; }
-      await persist();
-      const payload = { ...settings, ...issue, operationId: state.created.uploadOperations[uploadKey], files: [{ attachmentId: state.created.uploadOperations[uploadKey], name: state.created.uploadNames[uploadKey], type: file.type, dataBase64: file.dataBase64 }] };
+      current.created.uploadOperations[uploadKey] ||= crypto.randomUUID();
+      current.created.uploadNames ||= {}; current.created.uploadNames[uploadKey] ||= file.name;
+
+      await persist(current);
+      const payload = { ...settings, ...issue, operationId: current.created.uploadOperations[uploadKey], files: [{ attachmentId: current.created.uploadOperations[uploadKey], name: current.created.uploadNames[uploadKey], type: file.type, dataBase64: file.dataBase64 }] };
       // Retry the same UUID: Connect replays confirmed uploads and blocks an uncertain POST.
-      const result = await retry(() => api.jiraRequest("/api/jira/attachments", payload, { retries: 0, signal }));
+      const result = await retry(() => api.jiraRequest("/api/jira/attachments", payload, { retries: 0, signal }), current);
       if (!result.attachments?.[0]?.id) throw new Error("Сервер не подтвердил загрузку вложения");
       remember(result.attachments[0], file.originals);
-      state.created.uploads = [...completed];
-      await persistCreated();
+      current.created.uploads = [...completed];
+      await persistCreated(current);
     }
-    state.created.uploads = [...completed]; state.uploadsPending = false; state.created.attachmentsPending = false; await persistCreated();
+    current.created.uploads = [...completed]; current.uploadsPending = false; current.created.attachmentsPending = false; await persistCreated(current);
   }
-  async function evidence() {
-    const signal = state.transferController.signal; signal.throwIfAborted();
-    state.evidencePending = Boolean(state.created.evidencePending);
-    if (!state.evidencePending) return;
-    showCreated();
-    await retry(() => job("/api/jira/issue-evidence", { provider: state.created.provider || "jira", baseUrl: state.created.baseUrl || new URL(state.created.issueUrl).href.split("/browse/")[0], operationId: state.created.operationId,
-      issueKey: state.created.key, fieldId: state.created.evidenceField, attachmentIds: [...new Set(Object.values(state.created.attachmentRefs || {}).map(ref => ref.id))],
-      placements: (state.created.inlineAttachments || []).filter(item => state.created.attachmentRefs?.[item.assetKey]).map(item => ({ placeholder: item.placeholder, attachmentId: state.created.attachmentRefs[item.assetKey].id })) }, { signal }));
-    state.created.evidencePending = state.evidencePending = false; await persistCreated();
+  async function evidence(current) {
+    const signal = current.transferController.signal; signal.throwIfAborted();
+    current.evidencePending = Boolean(current.created.evidencePending);
+    if (!current.evidencePending) return;
+    notifyOperation(current);
+    await retry(() => job("/api/jira/issue-evidence", { provider: current.created.provider || "jira", baseUrl: current.created.baseUrl || new URL(current.created.issueUrl).href.split("/browse/")[0], operationId: current.created.operationId,
+      issueKey: current.created.key, fieldId: current.created.evidenceField, attachmentIds: [...new Set(Object.values(current.created.attachmentRefs || {}).map(ref => ref.id))],
+      placements: (current.created.inlineAttachments || []).filter(item => current.created.attachmentRefs?.[item.assetKey]).map(item => ({ placeholder: item.placeholder, attachmentId: current.created.attachmentRefs[item.assetKey].id })) }, { signal, operation: current }), current);
+    current.created.evidencePending = current.evidencePending = false; await persistCreated(current);
   }
-  async function create() {
-    if (!state || state.busy || voiceActive() || state.filesLoading) return;
-    const current = state; state.creating = true; state.stopRequested = false;
+  async function create(current = state) {
+    if (!current || current.busy || current === state && (voiceActive() || current.filesLoading)) return;
+    current.creating = true; current.stopRequested = false; current.recovered = false;
+    if (current === state) current.contextText = $("bugContextText").value;
     let finish;
     current.finished = new Promise(resolve => { finish = resolve; });
     let savingNewOperation = false;
     try {
-      if (!state.created) {
-        if (!state.pending) {
+      if (!current.created) {
+        if (!current.pending) {
           const fields = values();
-          state.selectedAssets = [...$("bugAttachmentList").querySelectorAll("input:checked")].map(el => state.assets[Number(el.dataset.bugAttachment)]);
+          current.selectedAssets = [...$("bugAttachmentList").querySelectorAll("input:checked")].map(el => current.assets[Number(el.dataset.bugAttachment)]);
           // Keep the established Connect wire format; the editor shows Jira references.
-          const inlineAttachments = state.selectedAssets.filter(asset => state.inlineAssets[assetKey(asset)] && String(fields.description || "").includes(state.inlineAssets[assetKey(asset)])).map(asset => {
-            const token = state.inlineAssets[assetKey(asset)], placeholder = token.startsWith("[Вложение: ") ? token : `[Вложение: ${token.startsWith("!") ? token.slice(1, -11) : token.slice(2, -1)}]`;
+          const inlineAttachments = current.selectedAssets.filter(asset => current.inlineAssets[assetKey(asset)] && String(fields.description || "").includes(current.inlineAssets[assetKey(asset)])).map(asset => {
+            const token = current.inlineAssets[assetKey(asset)], placeholder = token.startsWith("[Вложение: ") ? token : `[Вложение: ${token.startsWith("!") ? token.slice(1, -11) : token.slice(2, -1)}]`;
             fields.description = fields.description.split(token).join(placeholder);
             return { assetKey: assetKey(asset), placeholder };
           });
-          state.pending = { id: crypto.randomUUID(), payload: { ...target(), fields }, assets: state.selectedAssets.map(a => assetKey(a)), evidenceField: state.evidenceField, extraAssets: state.extraAssets.filter(a => state.selectedAssets.includes(a)),
+          current.pending = { id: crypto.randomUUID(), payload: { ...target(), fields }, assets: current.selectedAssets.map(a => assetKey(a)), evidenceField: current.evidenceField, extraAssets: current.extraAssets.filter(a => current.selectedAssets.includes(a)),
             inlineAttachments };
-          state.pending.payload.operationId = state.pending.id;
+          current.pending.payload.operationId = current.pending.id;
           busy(true, "Создаём задачу…");
-          if (!state.standalone) row().pendingBug = state.pending;
-          savingNewOperation = state.standalone;
-          await persist();
+          if (!current.standalone) row().pendingBug = current.pending;
+          savingNewOperation = current.standalone;
+          await persist(current);
           savingNewOperation = false;
-          const result = await job("/api/jira/create-issue", state.pending.payload); link(result);
+          const result = await job("/api/jira/create-issue", current.pending.payload); link(result);
         } else {
           busy(true, "Проверяем результат создания…");
           // Reposting the same operation safely recovers an interrupted enqueue response.
-          const result = await job("/api/jira/create-issue", state.pending.payload); link(result);
+          const result = await job("/api/jira/create-issue", current.pending.payload); link(result);
         }
-        state.pending = null;
-        await persist();
+        current.pending = null;
+        await persist(current);
       }
-      state.transferController = new AbortController(); if (state.stopRequested) state.transferController.abort(); state.created.uploadsStopped = false; state.createdError = "";
-      state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); busy(true, state.uploadsPending ? "Баг создан. Загружаем вложения…" : "Завершаем создание…");
-      await upload();
-      await evidence();
-      message("");
+      current.transferController = new AbortController(); if (current.stopRequested) current.transferController.abort(); current.created.uploadsStopped = false; current.createdError = "";
+      current.uploadsPending = Boolean(current.created.attachmentsPending); current.evidencePending = Boolean(current.created.evidencePending); current.busy = true;
+      if (state === current) busy(true, current.uploadsPending ? "Баг создан. Загружаем вложения…" : "Завершаем создание…"); else notifyOperation(current);
+      await upload(current);
+      await evidence(current);
+      current.createdError = ""; notifyOperation(current);
     } catch (error) {
-      if (state !== current || current.transferController?.signal.aborted) return;
-      if (state.created) { state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); message(`${state.uploadsPending ? "Не все вложения загружены." : "Не удалось добавить ссылки на вложения."} ${error.message}`, true); }
+      if (current.closed || current.transferController?.signal.aborted) return;
+      if (current.created) { current.uploadsPending = Boolean(current.created.attachmentsPending); current.evidencePending = Boolean(current.created.evidencePending); current.createdError = `${current.uploadsPending ? "Не все вложения загружены." : "Не удалось добавить ссылки на вложения."} ${error.message}`; notifyOperation(current); }
       else {
-        if (savingNewOperation) state.pending = null;
+        if (savingNewOperation) current.pending = null;
         if (error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status)) {
-          const operationId = state.pending?.id;
-          delete row()?.pendingBug; state.pending = null;
-          if (state.standalone && operationId) await standaloneRecord("clear", operationId); else if (!state.standalone) await persist();
+          const operationId = current.pending?.id;
+          if (row()?.pendingBug?.id === operationId) delete row().pendingBug; current.pending = null;
+          if (current.standalone && operationId) await standaloneRecord("clear", operationId); else if (!current.standalone) await persist(current);
         }
         Object.entries(error.fieldErrors || {}).forEach(([id, text]) => markError(id, text));
         message(error.message, true);
       }
     } finally {
-      if (state === current) {
-        state.creating = false; busy(false);
-        if (state.dismiss && !state.dismiss.working && !unfinished()) completeDismiss();
-      }
+      current.creating = false; current.busy = false;
+      if (state === current) busy(false); else notifyOperation(current);
+      if (dismissal?.current === current && !dismissal.working && !unfinished(current)) completeDismiss(current);
       finish();
     }
   }
   async function open(sectionId, rowId, anchor, { fresh = false } = {}) {
+    await recovery;
+    if (activeResult) hideResult();
     if (state) { if (state.minimized) restore(); return; }
     api.flush();
     const report = api.getDraft(), section = report.sections.find(s => s.id === sectionId), sourceRow = section?.rows.find(r => r.id === rowId);
@@ -1129,7 +1163,7 @@
       source: standalone ? { attachments: [] } : { report: { issueUrl: report.issueUrl, environment: report.environment, context: htmlText(report.intro).slice(0, 16000) }, section: section.title, status: sourceRow.status,
         cells: section.columns.map(c => ({ id: c.id, name: c.title, text: htmlText(sourceRow.cells[c.id]).slice(0, 12000) })), attachments: assets.map(a => ({ name: a.name, type: a.type })) } };
     const current = state;
-    state.created = fresh ? null : sourceRow?.bugs?.find(b => b.attachmentsPending || b.evidencePending) || null;
+    state.created = fresh ? null : sourceRow?.bugs?.find(b => (b.attachmentsPending || b.evidencePending) && !operations.has(b.operationId)) || null;
     document.querySelectorAll('[name="bugCreationMode"]').forEach(input => { input.checked = false; });
     state.extraAssets = state.pending?.extraAssets || state.created?.extraAssets || [];
     state.assets.push(...state.extraAssets); state.source.attachments = state.assets.map(a => ({ name: a.name, type: a.type }));
@@ -1163,7 +1197,7 @@
     steps(false); $("bugFooterHint").textContent = "Выберите место создания и нажмите «Продолжить»."; $("cancelBugReport").textContent = "Отмена";
     $("bugTargetSection").open = true; $("bugTargetSummary").textContent = "Куда создать баг";
     obscureWorkspace();
-    $("bugReportModal").hidden = false; api.modalOverflow(); busy(true, "Подключаемся к QA Report Connect…", "initializing");
+    $("bugReportModal").hidden = false; syncBugWindows(); busy(true, "Подключаемся к QA Report Connect…", "initializing");
     try {
       const statusRequest = api.bugStatus ? api.bugStatus() : api.reportApi("/api/agent/status");
       // Observe both independent reads immediately, including a failure of either.
@@ -1216,6 +1250,7 @@
       if (!state.created && !state.pending && (target().mode === "subtask" ? target().parent : target().projectKey)) loadContext();
       if (state.pending) steps(3);
       if (state.created) {
+        state.contextText = $("bugContextText").value; operations.set(state.created.operationId, state);
         steps(true); showCreated();
       }
       if (!state.busy) message(state.created ? state.uploadsPending ? "Баг создан. Повторите загрузку вложений или добавьте файлы вручную в задачу." : "Файлы загружены. Осталось добавить ссылки в текст бага." : state.pending ? "Проверим результат предыдущего создания." : "");
@@ -1223,103 +1258,136 @@
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current && state.activity === "initializing") busy(false); }
   }
-  function unfinished() { return Boolean(state?.created && (state.created.attachmentsPending || state.created.evidencePending)); }
-  function obscureWorkspace() {
-    state.obscured = [...document.querySelectorAll(".topbar, .workspace, #feedbackButton, #focusExitButton")].map(node => [node, node.inert]);
-    state.obscured.forEach(([node]) => { node.inert = true; });
+  function unfinished(current = state) { return Boolean(current?.created && (current.created.attachmentsPending || current.created.evidencePending)); }
+  function operationPhase(current) {
+    return current.createdError ? "error" : current.created?.uploadsStopped && unfinished(current) ? "stopped" : current.busy ? "loading" : current.created && !unfinished(current) ? "complete" : current.created ? "pending" : "draft";
   }
-  function revealWorkspace() {
-    state?.obscured?.forEach(([node, inert]) => { node.inert = inert; });
-    if (state) state.obscured = null;
+  function obscureWorkspace() {
+    if (!workspaceObscured) workspaceObscured = [...document.querySelectorAll(".topbar, .workspace, #feedbackButton, #focusExitButton")].map(node => [node, node.inert]);
+    workspaceObscured.forEach(([node]) => { node.inert = true; });
+  }
+  function syncBugWindows() {
+    const visible = ["bugReportModal", "bugBackgroundModal", "bugUploadConfirm"].some(id => !$(id).hidden);
+    if (visible) obscureWorkspace();
+    else { workspaceObscured?.forEach(([node, inert]) => { node.inert = inert; }); workspaceObscured = null; }
+    $("bugDockStack").inert = visible; api.modalOverflow();
+  }
+  function cardStatus(current) {
+    if (current.createdError) return current.uploadsPending ? "Не все файлы загружены" : "Не удалось добавить ссылки";
+    if (current.busy) return current.created ? current.uploadsPending ? "Загружаем файлы" : "Добавляем ссылки" : current.creating ? "Создаём баг-репорт…" : current.activity === "generating" ? "Готовим черновик…" : "Подключаемся…";
+    if (current.created) return current.created.uploadsStopped && unfinished(current) ? "Загрузка прервана" : unfinished(current) ? "Нужно завершить загрузку" : current.created.attachmentKeys?.length ? "Файлы загружены" : "Баг-репорт создан";
+    return ["", "Место создания", "Подготовка", "Баг-репорт"][current.step] || "Подготовка";
+  }
+  function updateCard(card, current) {
+    const total = current.created?.attachmentKeys?.length || 0, done = current.created?.uploads?.length || 0;
+    card.querySelector("[data-bug-dock-title]").textContent = current.created?.key || "Черновик баг-репорта";
+    card.querySelector("[data-bug-dock-status]").textContent = cardStatus(current);
+    card.querySelector("[data-bug-dock-count]").textContent = total ? `${done} из ${total}` : "";
+    const progress = card.querySelector("progress"); progress.hidden = !total; progress.max = total || 1; progress.value = done;
+    card.dataset.phase = operationPhase(current);
+    card.querySelector(".bug-dock-close").disabled = Boolean(current.busy && current.creating && !current.created);
+  }
+  function makeCard(current) {
+    const card = document.createElement("section"); card.className = "bug-report-dock"; card.dataset.bugOperation = current.created.operationId; card.bugOperation = current;
+    card.setAttribute("aria-label", `Баг-репорт ${current.created.key}`);
+    const restoreButton = document.createElement("button"); restoreButton.type = "button"; restoreButton.className = "bug-dock-restore";
+    restoreButton.setAttribute("aria-label", `Развернуть баг-репорт ${current.created.key}`); restoreButton.title = "Развернуть баг-репорт";
+    const heading = document.createElement("span"); heading.className = "bug-dock-heading";
+    const title = document.createElement("strong"); title.dataset.bugDockTitle = "";
+    const expand = uiIcon("focus"); expand.classList.add("bug-dock-expand"); heading.append(uiIcon("bug"), title, expand);
+    const status = document.createElement("span"); status.className = "bug-dock-status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+    const text = document.createElement("span"); text.dataset.bugDockStatus = "";
+    const count = document.createElement("span"); count.dataset.bugDockCount = ""; status.append(text, count);
+    const progress = document.createElement("progress"); progress.className = "bug-dock-progress"; progress.setAttribute("aria-label", `Загрузка вложений ${current.created.key}`);
+    restoreButton.append(heading, status, progress); restoreButton.addEventListener("click", () => viewOperation(current));
+    const closeButton = document.createElement("button"); closeButton.type = "button"; closeButton.className = "icon-button bug-dock-close";
+    closeButton.setAttribute("aria-label", `Закрыть баг-репорт ${current.created.key}`); closeButton.title = "Закрыть баг-репорт"; closeButton.append(uiIcon("x"));
+    closeButton.addEventListener("click", () => requestDismiss(current)); card.append(restoreButton, closeButton); return card;
   }
   function renderDock() {
-    const dock = $("bugReportDock"); dock.hidden = !state?.minimized;
-    if (!state) return;
-    const created = state.created, total = created?.attachmentKeys?.length || 0, done = created?.uploads?.length || 0;
-    $("bugDockTitle").textContent = created?.key || "Черновик баг-репорта";
-    let text = ["", "Место создания", "Подготовка", "Баг-репорт"][state.step] || "Подготовка";
-    if (state.busy) text = created ? state.uploadsPending ? "Загружаем файлы" : "Добавляем ссылки" : state.creating ? "Создаём баг-репорт…" : state.activity === "generating" ? "Готовим черновик…" : "Подключаемся…";
-    else if (created) text = created.uploadsStopped && unfinished() ? "Загрузка прервана" : unfinished() ? "Нужно завершить загрузку" : total ? "Файлы загружены" : "Баг-репорт создан";
-    if (state.createdError) text = state.uploadsPending ? "Не все файлы загружены" : "Не удалось добавить ссылки";
-    $("bugDockStatus").textContent = text;
-    $("bugDockCount").textContent = total ? `${done} из ${total}` : "";
-    $("bugDockProgress").hidden = !total;
-    $("bugDockProgress").max = total || 1; $("bugDockProgress").value = done;
-    dock.dataset.phase = state.createdError ? "error" : created?.uploadsStopped && unfinished() ? "stopped" : state.busy ? "loading" : created && !unfinished() ? "complete" : "draft";
-    $("closeBugDock").disabled = Boolean(state.busy && state.creating && !created);
-    if (state.dismiss && !state.dismiss.working) {
+    const dock = $("bugReportDock"), list = $("bugUploadDockList"); dock.hidden = !state?.minimized;
+    if (!dock.hidden) updateCard(dock, state);
+    const visible = [...operations.values()].filter(current => current !== state && current !== activeResult && !current.closed);
+    for (const card of [...list.children]) if (!visible.includes(card.bugOperation)) card.remove();
+    for (const current of visible) {
+      let card = [...list.children].find(card => card.bugOperation === current);
+      if (!card) { card = makeCard(current); list.append(card); }
+      updateCard(card, current);
+    }
+    $("bugDockStack").hidden = dock.hidden && !list.childElementCount;
+    if (dismissal && !dismissal.working) {
+      const created = dismissal.current.created, done = created.uploads?.length || 0, total = created.attachmentKeys?.length || 0;
       $("bugUploadConfirmTitle").textContent = created.attachmentsPending ? "Прервать загрузку файлов?" : "Прервать добавление ссылок?";
       $("keepBugUpload").textContent = created.attachmentsPending ? "Продолжить загрузку" : "Продолжить";
       $("bugUploadConfirmText").textContent = `Баг-репорт ${created.key} уже создан. Загружено файлов: ${done} из ${total}. Загруженные файлы останутся в задаче. Отправленный файл может успеть загрузиться.`;
     }
   }
   function minimize() {
-    if (!state || state.dismiss) return;
+    if (!state || dismissal) return;
     state.returnFocus = document.activeElement; state.minimized = true;
-    // A hidden recorder must not keep listening to the microphone.
     if (voiceActive()) state.voice?.cancel();
-    $("bugVoiceInfo").open = false; closePrompt();
-    $("bugReportModal").hidden = true; revealWorkspace(); api.modalOverflow(); renderDock();
-    $("restoreBugReport").focus();
+    $("bugVoiceInfo").open = false; closePrompt(); $("bugReportModal").hidden = true;
+    syncBugWindows(); renderDock(); $("restoreBugReport").focus();
   }
   function restore() {
-    if (!state?.minimized || state.dismiss) return;
-    state.minimized = false; obscureWorkspace();
-    $("bugReportModal").hidden = false; api.modalOverflow(); renderDock(); scheduleContextDock();
+    if (!state?.minimized || dismissal) return;
+    hideResult(); state.minimized = false; $("bugReportModal").hidden = false;
+    syncBugWindows(); renderDock(); scheduleContextDock();
     const focus = state.returnFocus;
     if (focus?.isConnected && !focus.disabled && focus.getClientRects().length) focus.focus(); else $("minimizeBugReport").focus();
   }
+  function hideResult() { activeResult = null; $("bugBackgroundModal").hidden = true; syncBugWindows(); renderDock(); }
+  function viewOperation(current) {
+    if (dismissal || current.closed) return;
+    if (state === current) { restore(); return; }
+    if (state && !state.minimized) minimize();
+    activeResult = current; $("bugBackgroundModal").hidden = false;
+    renderCreated(current, $("backgroundBugCreatedResult"), "backgroundBug"); syncBugWindows(); renderDock(); $("minimizeBackgroundBug").focus();
+  }
   function hideDismiss() {
-    $("bugUploadConfirm").hidden = true;
-    $("bugReportModal").querySelector(".bug-report-modal").inert = false; $("bugReportDock").inert = false;
-    if (state?.minimized) revealWorkspace();
-    api.modalOverflow();
+    $("bugUploadConfirm").hidden = true; dismissal = null;
+    $("bugReportModal").querySelector(".bug-report-modal").inert = false;
+    $("bugBackgroundModal").querySelector("[role=dialog]").inert = false; syncBugWindows();
   }
   function cancelDismiss() {
-    if (!state?.dismiss || state.dismiss.working) return;
-    const focus = state.dismiss.focus; state.dismiss = null; hideDismiss();
-    if (focus?.isConnected && !focus.disabled) focus.focus();
+    if (!dismissal || dismissal.working) return;
+    const focus = dismissal.focus; hideDismiss(); if (focus?.isConnected && !focus.disabled) focus.focus();
   }
-  function completeDismiss() {
-    const previous = state, action = state.dismiss?.action || "close";
-    hideDismiss(); close();
-    if (action === "another") openBugAgain(previous);
+  function completeDismiss(current) {
+    if (dismissal?.current === current) hideDismiss();
+    if (current.created) { operations.delete(current.created.operationId); current.closed = true; }
+    if (activeResult === current) hideResult();
+    if (state === current) close();
+    syncBugWindows(); renderDock();
   }
-  function requestDismiss(action = "close") {
-    if (!state || state.dismiss || state.busy && state.creating && !state.created) return;
-    if (!unfinished() || state.created.uploadsStopped) {
-      state.dismiss = { action }; completeDismiss(); return;
-    }
-    state.dismiss = { action, focus: document.activeElement };
-    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false;
-    $("confirmBugUploadStop").textContent = action === "another" ? "Прервать и создать новый" : "Прервать и закрыть";
-    if (state.minimized) obscureWorkspace();
-    $("bugReportModal").querySelector(".bug-report-modal").inert = true; $("bugReportDock").inert = true;
-    $("bugUploadConfirm").hidden = false; renderDock(); api.modalOverflow(); $("keepBugUpload").focus();
+  function requestDismiss(current = state) {
+    if (!current || dismissal || current.busy && current.creating && !current.created) return;
+    if (!unfinished(current) || current.created.uploadsStopped) { completeDismiss(current); return; }
+    dismissal = { current, focus: document.activeElement };
+    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false; $("confirmBugUploadStop").textContent = "Прервать и закрыть";
+    $("bugReportModal").querySelector(".bug-report-modal").inert = true;
+    $("bugBackgroundModal").querySelector("[role=dialog]").inert = true;
+    $("bugUploadConfirm").hidden = false; renderDock(); syncBugWindows(); $("keepBugUpload").focus();
   }
   async function confirmStop() {
-    if (!state?.dismiss || state.dismiss.working) return;
-    const current = state; current.dismiss.working = true;
-    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = true;
-    $("confirmBugUploadStop").textContent = "Останавливаем…";
-    current.stopRequested = true; current.transferController?.abort();
-    await current.finished;
-    if (state !== current) return;
+    if (!dismissal || dismissal.working) return;
+    const pending = dismissal, current = pending.current; pending.working = true;
+    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = true; $("confirmBugUploadStop").textContent = "Останавливаем…";
+    current.stopRequested = true; current.transferController?.abort(); await current.finished;
+    if (dismissal !== pending) return;
     try {
-      if (unfinished()) { current.created.uploadsStopped = true; current.createdError = ""; await persistCreated(); }
-      completeDismiss();
+      if (unfinished(current)) { current.created.uploadsStopped = true; current.createdError = ""; await persistCreated(current); }
+      completeDismiss(current);
     } catch (error) {
-      current.dismiss.working = false;
-      $("bugUploadConfirmText").textContent = `Не удалось сохранить остановку: ${error.message}`;
-      $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false;
-      $("confirmBugUploadStop").textContent = "Повторить остановку";
+      pending.working = false; $("bugUploadConfirmText").textContent = `Не удалось сохранить остановку: ${error.message}`;
+      $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false; $("confirmBugUploadStop").textContent = "Повторить остановку";
     }
   }
   function close() {
-    if (state?.creating && state.busy) return;
-    state?.voice?.cancel();
-    revealWorkspace();
-    const anchor = state?.anchor; state = null; renderDock(); $("bugPromptDialog").hidden = true; $("bugReportModal").hidden = true; api.modalOverflow(); if (anchor?.isConnected) anchor.focus();
+    if (state?.creating && state.busy && !state.created) return;
+    state?.voice?.cancel(); const anchor = state?.anchor; state = null;
+    $("bugPromptDialog").hidden = true; $("bugReportModal").hidden = true; syncBugWindows(); renderDock();
+    if (anchor?.isConnected) anchor.focus();
   }
   function fillSettings() { $("bugSystemPrompt").value = prompt(); $("bugRememberIssueType").checked = rememberTypes(); }
   function saveSettings() {
@@ -1329,6 +1397,7 @@
   }
   function init(adapter) {
     api = adapter;
+    recovery = recoverOperations().catch(() => {});
     const columns = $("bugEditor").querySelector(".bug-draft-columns"), divider = $("bugDraftResize");
     let draftRatio = read(LAYOUT_KEY, 65), drag = null;
     if (typeof draftRatio !== "number" || !Number.isFinite(draftRatio)) draftRatio = 65;
@@ -1371,6 +1440,8 @@
     $("closeBugReport").setAttribute("aria-label", "Закрыть баг-репорт");
     $("minimizeBugReport").addEventListener("click", minimize);
     $("restoreBugReport").addEventListener("click", restore);
+    $("minimizeBackgroundBug").addEventListener("click", hideResult);
+    $("closeBackgroundBug").addEventListener("click", () => requestDismiss(activeResult));
     $("closeBugDock").addEventListener("click", () => requestDismiss());
     $("keepBugUpload").addEventListener("click", cancelDismiss);
     $("confirmBugUploadStop").addEventListener("click", confirmStop);
@@ -1395,6 +1466,16 @@
           const controls = [...$("bugUploadConfirm").querySelectorAll("button:not(:disabled)")];
           if (!controls.length) event.preventDefault();
           else if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
+          else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (activeResult) {
+        if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); requestDismiss(activeResult); }
+        if (event.key === "Tab") {
+          const controls = [...$("bugBackgroundModal").querySelectorAll("button:not(:disabled), a[href]")].filter(el => el.getClientRects().length);
+          if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
           else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
           event.stopImmediatePropagation();
         }
@@ -1465,7 +1546,7 @@
     $("bugEditor").addEventListener("dragleave", event => { event.target.closest?.(".bug-file-drop")?.classList.remove("bug-file-drop"); });
     $("bugEditor").addEventListener("drop", descriptionFiles);
     $("bugEditor").addEventListener("paste", descriptionFiles);
-    $("generateBugDraft").addEventListener("click", generate); $("createBugIssue").addEventListener("click", create);
+    $("generateBugDraft").addEventListener("click", generate); $("createBugIssue").addEventListener("click", () => create());
   }
   window.QaReportBugUI = { init, open, openStandalone: anchor => open(null, null, anchor), fillSettings, saveSettings };
 })();

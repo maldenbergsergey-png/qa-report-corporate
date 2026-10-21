@@ -11,7 +11,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=144" />
-    <link rel="stylesheet" href="/bug-wizard.css?v=24" />
+    <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -1211,7 +1211,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=91"></script>
+    <script src="/release-notes.js?v=92"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
@@ -1223,14 +1223,23 @@
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
     <script src="/jira-publication.js?v=3"></script>
+    <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
       <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
-        <span class="bug-dock-heading"><svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg><strong id="bugDockTitle">Черновик баг-репорта</strong><svg class="ui-icon bug-dock-expand" aria-hidden="true"><use href="#icon-focus"></use></svg></span>
-        <span class="bug-dock-status" role="status" aria-live="polite"><span id="bugDockStatus">Подготовка</span><span id="bugDockCount"></span></span>
-        <progress id="bugDockProgress" max="1" value="0" aria-label="Загрузка вложений" hidden></progress>
+        <span class="bug-dock-heading"><svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg><strong id="bugDockTitle" data-bug-dock-title>Черновик баг-репорта</strong><svg class="ui-icon bug-dock-expand" aria-hidden="true"><use href="#icon-focus"></use></svg></span>
+        <span class="bug-dock-status" role="status" aria-live="polite"><span id="bugDockStatus" data-bug-dock-status>Подготовка</span><span id="bugDockCount" data-bug-dock-count></span></span>
+        <progress id="bugDockProgress" class="bug-dock-progress" max="1" value="0" aria-label="Загрузка вложений" hidden></progress>
       </button>
       <button class="icon-button bug-dock-close" id="closeBugDock" type="button" aria-label="Закрыть баг-репорт" title="Закрыть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
     </section>
+      <div id="bugUploadDockList"></div>
+    </div>
+    <div class="modal-backdrop" id="bugBackgroundModal" hidden>
+      <section class="bug-background-window" role="dialog" aria-modal="true" aria-labelledby="backgroundBugCreatedTitle">
+        <header class="bug-background-header"><span class="bug-window-actions"><button id="minimizeBackgroundBug" class="icon-button" type="button" aria-label="Свернуть баг-репорт" title="Свернуть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button><button id="closeBackgroundBug" class="icon-button" type="button" aria-label="Закрыть баг-репорт" title="Закрыть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></span></header>
+        <div id="backgroundBugCreatedResult" class="bug-created-result"></div>
+      </section>
+    </div>
     <div class="modal-backdrop" id="bugUploadConfirm" hidden>
       <section class="bug-upload-confirm" role="alertdialog" aria-modal="true" aria-labelledby="bugUploadConfirmTitle" aria-describedby="bugUploadConfirmText">
         <h2 id="bugUploadConfirmTitle">Прервать загрузку файлов?</h2>
@@ -1288,8 +1297,8 @@
     <script src="/bug-attachment-analysis.js?v=2"></script>
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
-    <script src="/bug-report-ui.js?v=38"></script>
-    <script src="/app.js?v=156"></script>
+    <script src="/bug-report-ui.js?v=39"></script>
+    <script src="/app.js?v=157"></script>
     <script src="/local-import-client.js?v=7"></script>
   </body>
 </html>

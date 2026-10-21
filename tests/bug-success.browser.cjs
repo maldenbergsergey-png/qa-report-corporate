@@ -64,15 +64,15 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
         };
         await checkMinimal();
         assert.equal(await p.locator("#bugCreatedAttachments .bug-spinner").count(), 1);
-        assert.equal(await p.locator("#bugCreateAnother").isDisabled(), true);
-        assert.equal(await p.locator("#closeBugReport").isDisabled(), true);
+        assert.equal(await p.locator("#bugCreateAnother").isDisabled(), false);
+        assert.equal(await p.locator("#closeBugReport").isDisabled(), false);
         await p.screenshot({ path: path.join(output, `${theme}-${provider}-success-uploading.png`) });
         if (failUploads) {
           await p.waitForFunction(() => document.getElementById("bugRetryAttachments") && !document.getElementById("bugRetryAttachments").hidden);
           assert.match(await p.textContent("#bugCreatedError"), /не все вложения/i);
           assert.equal(fixture.creates.length, 1);
           await p.screenshot({ path: path.join(output, `${theme}-${provider}-success-retry.png`) });
-          await p.click("#closeBugReport"); await p.reload(); await p.click("#reportMenuButton"); await p.click("#openStandaloneBugReport");
+          await p.click("#closeBugReport"); await p.click("#confirmBugUploadStop"); await p.waitForSelector("#bugReportModal[hidden]", { state: "attached" }); await p.reload(); await p.click("#reportMenuButton"); await p.click("#openStandaloneBugReport");
           await p.waitForFunction(() => document.getElementById("bugRetryAttachments") && !document.getElementById("bugRetryAttachments").hidden);
           assert.equal(await p.locator('[name="bugCreationMode"][value="standalone"]').isChecked(), true, "An unfinished operation keeps its mode");
           assert.equal(await p.locator('[name="bugCreationMode"][value="standalone"]').isDisabled(), true);

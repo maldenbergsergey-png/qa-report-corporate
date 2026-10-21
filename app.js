@@ -10250,9 +10250,35 @@ document.getElementById("dictationConnectPair").addEventListener("click", async 
 document.getElementById("dictationConnectCheck").addEventListener("click", refreshDictationConnect);
 
 // The shared wizard uses corporate Jira directly and Connect only for AI/speech.
+async function changeBugReport(reportId, apply) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (draft.reportId === reportId) {
+      flushDraftFromDom(); if (apply(draft)) renderSections();
+      hasUnsavedLocalChanges = true; clearTimeout(saveTimer); forceLocalDraftSave = true;
+      if (!await saveDraft({ collect: false })) throw new Error("Не удалось сохранить состояние баг-репорта.");
+      scheduleHistoryCommit(); return;
+    }
+    // A minimized wizard may finish after the user opens another checklist.
+    // Patch only its source document, with the usual concurrent-write check.
+    const record = await getReportRecord(reportId);
+    if (draft.reportId === reportId) continue;
+    if (!record?.document) throw new Error("Исходный отчёт недоступен в истории. Ссылка на баг остаётся в окне.");
+    const document = clone(record.document); apply(document);
+    document.revision = (Number(document.revision) || 0) + 1;
+    document.updatedAt = new Date().toISOString(); document.lastSavedBy = tabId; document.lastSavedClientId = reportClientId;
+    try {
+      await saveReportSnapshot("bug-report-progress", document, { expectedDocument: record.document, validate: () => {
+        if (draft.reportId === reportId) throw Object.assign(new Error("Исходный отчёт снова открыт"), { localImportRetryable: true });
+      } });
+      return;
+    } catch (error) { if (!error.localImportRetryable || attempt === 2) throw error; }
+  }
+  throw new Error("Отчёт изменился. Повторите сохранение баг-репорта.");
+}
+
 window.QaReportBugUI.init({
   getDraft: () => draft, flush: flushDraftFromDom,
-  changed: () => { renderSections(); saveLocalMutationNow(); },
+  changeReport: changeBugReport,
   reportApi: dictationConnectApi,
   jiraRequest: async (path, body, options = {}) => {
     if (path !== "/api/jira/import-attachment") return jiraRequest(path, body, options);

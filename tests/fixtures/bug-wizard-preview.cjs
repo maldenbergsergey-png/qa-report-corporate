@@ -18,6 +18,7 @@ const draft = { summary: "Из ИИ-подборщика невозможно у
 async function start(root, port = 0, options = {}) {
   const baseUrl = options.provider === "eva" ? "https://eva.example.test/team" : "https://jira.example.test";
   let failedUploads = 0;
+  const uploadOperations = new Map();
   const jobs = new Map(), creates = [], uploads = [], evidence = [], aiRequests = [], requests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -55,7 +56,7 @@ async function start(root, port = 0, options = {}) {
           res.writeHead(200, { "Content-Type": "text/plain" }); return res.end("remote fixture log");
         }
         case "/api/jira/attachment-manifest": return resultJson({ attachments: uploads, attachmentLimits: { fileBytes: 52428800, totalBytes: 78643200 } });
-        case "/api/jira/attachments": { if (options.uploadDelay) await new Promise(resolve => setTimeout(resolve, options.uploadDelay)); if (failedUploads++ < (options.failUploads || 0)) return json({ error: "Тестовая ошибка загрузки" }, 400); const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8 }; uploads.push(file); return resultJson({ attachments: [file] }); }
+        case "/api/jira/attachments": { if (options.uploadDelay) await new Promise(resolve => setTimeout(resolve, options.uploadDelay)); if (failedUploads++ < (options.failUploads || 0)) return json({ error: "Тестовая ошибка загрузки" }, 400); if (uploadOperations.has(input.operationId)) return resultJson({ attachments: [uploadOperations.get(input.operationId)] }); const file = { id: String(uploads.length + 1), filename: input.files?.[0]?.name || "fixture.txt", content: `${baseUrl}/attachment/1`, size: 8 }; uploads.push(file); uploadOperations.set(input.operationId, file); return resultJson({ attachments: [file] }); }
         default: return json({ ok: true, reports: [], projects: [], downloads: [], session: null });
       }
       if (url.pathname.startsWith("/api/ai/") || path.basename(root) === "qa-report") { const jobId = crypto.randomUUID(); jobs.set(jobId, result); return json({ jobId }); }

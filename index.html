@@ -11,7 +11,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=144" />
-    <link rel="stylesheet" href="/bug-wizard.css?v=23" />
+    <link rel="stylesheet" href="/bug-wizard.css?v=24" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -1211,7 +1211,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=90"></script>
+    <script src="/release-notes.js?v=91"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
@@ -1223,9 +1223,24 @@
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
     <script src="/jira-publication.js?v=3"></script>
+    <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
+      <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
+        <span class="bug-dock-heading"><svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg><strong id="bugDockTitle">Черновик баг-репорта</strong><svg class="ui-icon bug-dock-expand" aria-hidden="true"><use href="#icon-focus"></use></svg></span>
+        <span class="bug-dock-status" role="status" aria-live="polite"><span id="bugDockStatus">Подготовка</span><span id="bugDockCount"></span></span>
+        <progress id="bugDockProgress" max="1" value="0" aria-label="Загрузка вложений" hidden></progress>
+      </button>
+      <button class="icon-button bug-dock-close" id="closeBugDock" type="button" aria-label="Закрыть баг-репорт" title="Закрыть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+    </section>
+    <div class="modal-backdrop" id="bugUploadConfirm" hidden>
+      <section class="bug-upload-confirm" role="alertdialog" aria-modal="true" aria-labelledby="bugUploadConfirmTitle" aria-describedby="bugUploadConfirmText">
+        <h2 id="bugUploadConfirmTitle">Прервать загрузку файлов?</h2>
+        <p id="bugUploadConfirmText"></p>
+        <div class="modal-actions"><button id="keepBugUpload" class="button button-secondary" type="button">Продолжить загрузку</button><button id="confirmBugUploadStop" class="button button-primary" type="button">Прервать и закрыть</button></div>
+      </section>
+    </div>
     <div class="modal-backdrop" id="bugReportModal" hidden>
       <section class="modal bug-report-modal" role="dialog" aria-modal="true" aria-labelledby="bugReportTitle" data-step="1">
-        <header class="modal-header bug-wizard-header"><div><div class="eyebrow" id="bugReportEyebrow">Создание задачи</div><h2 id="bugReportTitle">Завести баг-репорт</h2></div><button id="closeBugReport" class="icon-button" type="button" aria-label="Закрыть окно баг-репорта">×</button></header>
+        <header class="modal-header bug-wizard-header"><div><div class="eyebrow" id="bugReportEyebrow">Создание задачи</div><h2 id="bugReportTitle">Завести баг-репорт</h2></div><span class="bug-window-actions"><button id="minimizeBugReport" class="icon-button" type="button" aria-label="Свернуть баг-репорт" title="Свернуть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button><button id="closeBugReport" class="icon-button" type="button" aria-label="Закрыть окно баг-репорта">×</button></span></header>
         <ol class="bug-steps" aria-label="Создание баг-репорта"><li id="bugStepTarget" aria-current="step"><span>1</span>Место создания</li><li id="bugStepPrepare"><span>2</span>Подготовка</li><li id="bugStepDraft"><span>3</span>Баг-репорт</li></ol>
         <div class="modal-body bug-report-body">
           <div id="bugReportState" class="bug-state" role="status" aria-live="polite" hidden><span id="bugSpinner" class="bug-spinner" aria-hidden="true" hidden></span><span id="bugReportMessage"></span></div>
@@ -1273,8 +1288,8 @@
     <script src="/bug-attachment-analysis.js?v=2"></script>
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
-    <script src="/bug-report-ui.js?v=37"></script>
-    <script src="/app.js?v=155"></script>
+    <script src="/bug-report-ui.js?v=38"></script>
+    <script src="/app.js?v=156"></script>
     <script src="/local-import-client.js?v=7"></script>
   </body>
 </html>

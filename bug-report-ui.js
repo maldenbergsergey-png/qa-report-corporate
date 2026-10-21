@@ -60,7 +60,8 @@
     mirror.remove(); return node === text ? Math.min(control.value.length, offset) : control.selectionStart;
   }
   function prompt() { const value = read(PROMPT_KEY, Bugs.DEFAULT_PROMPT); return typeof value === "string" && ![Bugs.LEGACY_DEFAULT_PROMPT, Bugs.PREVIOUS_DEFAULT_PROMPT, Bugs.CHECKLIST_DEFAULT_PROMPT, Bugs.TRACKER_DEFAULT_PROMPT].includes(value) && value.trim() && value.length <= 16000 ? value : Bugs.DEFAULT_PROMPT; }
-  function row() { return api.getDraft().sections.find(s => s.id === state.sectionId)?.rows.find(r => r.id === state.rowId); }
+  function sourceReport() { return api.getDraft().reportId === state.reportId ? api.getDraft() : state.sourceReport; }
+  function row() { return sourceReport().sections.find(s => s.id === state.sectionId)?.rows.find(r => r.id === state.rowId); }
   // Keep unfinished standalone operations separate from checklist documents.
   async function standaloneRecord(action, value) {
     const db = await new Promise((resolve, reject) => {
@@ -78,7 +79,21 @@
     } finally { db.close(); }
   }
   async function persist() {
-    if (!state.standalone) { api.changed(); return; }
+    if (!state.standalone) {
+      const current = state, pending = structuredClone(current.pending), created = structuredClone(current.created);
+      await api.changeReport(current.reportId, report => {
+        const section = report.sections.find(s => s.id === current.sectionId), source = section?.rows.find(r => r.id === current.rowId);
+        if (!source) throw new Error("Исходный пункт удалён. Ссылка на созданный баг остаётся в этом окне.");
+        if (pending) source.pendingBug = pending; else delete source.pendingBug;
+        if (created) {
+          source.bugs ||= [];
+          const index = source.bugs.findIndex(bug => bug.operationId === created.operationId);
+          if (index < 0) source.bugs.push(created); else source.bugs[index] = created;
+          return addBugComment(source, created, report, current.sectionId);
+        }
+      });
+      return;
+    }
     const created = state.created;
     if (created && !created.attachmentsPending && !created.evidencePending) await standaloneRecord("clear", created.operationId);
     else await standaloneRecord("save", { pending: created ? null : state.pending, created,
@@ -132,7 +147,7 @@
     $("cancelBugReport").hidden = true;
     $("bugReportTitle").textContent = state.step === 4 ? "Баг-репорт создан" : "Завести баг-репорт";
     $("bugReportEyebrow").textContent = "Создание задачи";
-    $("bugReportModal").querySelector(".bug-report-body").scrollTop = 0; scheduleContextDock();
+    $("bugReportModal").querySelector(".bug-report-body").scrollTop = 0; scheduleContextDock(); renderDock();
   }
   function targetControls() {
     if (!state) return;
@@ -173,7 +188,8 @@
     if (!(value && activity === "generating")) $("generateBugDraft").prepend(uiIcon("link"));
     $("bugAiProfile").disabled = value || Boolean(state.created || state.pending);
     $("bugAiAttachments").disabled = value || Boolean(state.created || state.pending) || voiceActive() || !state.profiles.length;
-    $("closeBugReport").disabled = $("cancelBugReport").disabled = value && state.creating;
+    $("closeBugReport").disabled = $("cancelBugReport").disabled = value && state.creating && !state.created;
+    $("closeBugDock").disabled = $("closeBugReport").disabled;
     $("cancelBugReport").classList.toggle("button-primary", Boolean(state.created));
     $("cancelBugReport").classList.toggle("button-ghost", !state.created);
     $("createBugIssue").classList.toggle("button-primary", !state.created);
@@ -204,10 +220,11 @@
     return suitable ? words.length === 1 ? 2 : 1 : 0;
   }
   function mappingKey() { const t = target(); return JSON.stringify([...(t.provider === "eva" ? ["eva"] : []), t.baseUrl, state.meta.projectKey, state.meta.issueTypeId]); }
-  async function poll(jobId, current = state) {
+  async function poll(jobId, current = state, signal) {
     const deadline = Date.now() + 180000; let interval = 100;
     while (Date.now() < deadline) {
-      const value = await api.reportApi(`/api/agent/jobs/${jobId}`);
+      signal?.throwIfAborted();
+      const value = await api.reportApi(`/api/agent/jobs/${jobId}`, { signal });
       if (state !== current) throw new Error("Окно закрыто");
       if (value.job.status === "completed") return value.job.result;
       if (["failed", "expired"].includes(value.job.status)) {
@@ -218,13 +235,19 @@
     }
     throw new Error("Действие ещё не завершено. Проверьте состояние Connect.");
   }
-  async function job(path, payload) {
+  async function job(path, payload, { signal } = {}) {
     if (path.startsWith("/api/jira/") && (payload.provider || state?.created?.provider || state?.pending?.payload.provider || target().provider) === "eva") path = path.replace("/api/jira/", "/api/eva/");
     const current = state;
-    if (api.bugRequest && path.startsWith("/api/jira/")) return api.bugRequest(path, payload);
-    const queued = await api.reportApi(path, { method: "POST", body: JSON.stringify(payload) });
+    signal?.throwIfAborted();
+    if (api.bugRequest && path.startsWith("/api/jira/")) {
+      const result = await api.bugRequest(path, payload);
+      signal?.throwIfAborted();
+      if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
+      return result;
+    }
+    const queued = await api.reportApi(path, { method: "POST", body: JSON.stringify(payload), signal });
     if (state !== current) throw new Error("Окно закрыто");
-    return poll(queued.jobId, current);
+    return poll(queued.jobId, current, signal);
   }
   function selectOptions(select, list, selected = "", emptyLabel = "Выберите…") {
     select.replaceChildren(new Option(emptyLabel, ""));
@@ -894,23 +917,15 @@
     const identity = window.QaReportTrackerLinks.parse(result.issueUrl, state.pending?.payload.provider || target().provider);
     if (!identity || identity.baseUrl !== expected.href.replace(/\/$/, "") || identity.key !== result.key) throw new Error("Connect вернул некорректную ссылку задачи");
     state.created = { provider: identity.provider, baseUrl: identity.baseUrl, key: result.key, issueUrl: result.issueUrl, createdAt: new Date().toISOString(), operationId: result.operationId, summary: state.createdSummary, uploads: [], extraAssets: state.pending?.extraAssets || [], inlineAttachments: state.pending?.inlineAttachments || [], attachmentRefs: {}, evidenceField: state.evidenceField || "", attachmentKeys: state.selectedAssets.map(assetKey), attachmentsPending: state.selectedAssets.length > 0, evidencePending: Boolean(state.selectedAssets.length && state.evidenceField) };
-    const currentRow = row();
-    if (!state.standalone) {
-      if (!currentRow) throw new Error(`Задача ${result.key} создана, но исходный пункт удалён. Ссылка: ${identity.issueUrl}`);
-      currentRow.bugs ||= []; const previous = currentRow.bugs.find(b => b.operationId === result.operationId);
-      if (previous) state.created = previous; else currentRow.bugs.push(state.created);
-      addBugComment(currentRow, result);
-      delete currentRow.pendingBug;
-    }
     showCreated();
     $("bugEditor").querySelectorAll("input, textarea, select, button").forEach(el => { el.disabled = true; });
   }
-  function addBugComment(currentRow, result) {
+  function addBugComment(currentRow, result, report = sourceReport(), sectionId = state.sectionId) {
     let url;
     try { url = new URL(result.issueUrl); } catch { return false; }
     const identity = window.QaReportTrackerLinks.parse(result.issueUrl, result.provider || "");
     if (!identity || identity.key !== result.key) return false;
-    const section = api.getDraft().sections.find(s => s.id === state.sectionId);
+    const section = report.sections.find(s => s.id === sectionId);
     let column = section.columns.find(c => c.id === "comment" || /^(?:комментарий|комментарии|comments?)$/i.test(String(c.title || "").trim()));
     if (!column) {
       column = { id: "comment", title: "Комментарий" }; section.columns.push(column);
@@ -942,39 +957,52 @@
       const retry = document.createElement("button"); retry.id = "bugRetryAttachments"; retry.type = "button"; retry.className = "button button-secondary";
       retry.addEventListener("click", create);
       const again = document.createElement("button"); again.id = "bugCreateAnother"; again.type = "button"; again.className = "button button-secondary"; again.textContent = "Создать ещё один";
-      again.addEventListener("click", () => { const previous = state; close(); openBugAgain(previous); });
+      again.addEventListener("click", () => requestDismiss("another"));
       actions.append(retry, again); result.replaceChildren(success, title, card, status, error, actions);
     }
     const count = state.created.attachmentKeys?.length || 0, uploaded = state.created.uploads?.length || 0;
     const pending = state.created.attachmentsPending || state.created.evidencePending, status = $("bugCreatedAttachments");
-    status.hidden = !count; status.dataset.phase = pending ? state.busy ? "loading" : "pending" : "complete";
+    status.hidden = !count; status.dataset.phase = pending ? state.busy ? "loading" : state.created.uploadsStopped ? "stopped" : "pending" : "complete";
     const indicator = pending && state.busy ? document.createElement("span") : uiIcon(pending ? "paperclip" : "check");
     if (pending && state.busy) { indicator.className = "bug-spinner"; indicator.setAttribute("aria-hidden", "true"); }
-    const text = document.createElement("span"); text.textContent = "Вложения: " + uploaded + " из " + count + " загружено";
+    const text = document.createElement("span"); text.textContent = (pending && state.created.uploadsStopped ? "Загрузка прервана: " : "Вложения: ") + uploaded + " из " + count + " загружено";
     status.replaceChildren(indicator, text);
     $("bugCreatedError").textContent = state.createdError || ""; $("bugCreatedError").hidden = !state.createdError;
-    $("bugCreateAnother").disabled = state.busy || pending;
+    $("bugCreateAnother").disabled = Boolean(state.dismiss?.working);
     $("bugRetryAttachments").hidden = state.busy || !pending;
-    $("bugRetryAttachments").textContent = state.created.attachmentsPending ? "Повторить загрузку" : "Добавить ссылки";
+    $("bugRetryAttachments").textContent = state.created.attachmentsPending ? state.created.uploadsStopped ? "Продолжить загрузку" : "Повторить загрузку" : "Добавить ссылки";
+    renderDock();
   }
-  function openBugAgain(previous) { open(previous.sectionId, previous.rowId, previous.anchor); }
+  function openBugAgain(previous) {
+    // A new flow must not reopen the paused operation it just left.
+    const sameReport = api.getDraft().reportId === previous.reportId && (previous.standalone || api.getDraft().sections.find(section => section.id === previous.sectionId)?.rows.some(row => row.id === previous.rowId));
+    open(sameReport ? previous.sectionId : null, sameReport ? previous.rowId : null, previous.anchor, { fresh: true });
+  }
   async function persistCreated() {
     state.created.extraAssets = (state.created.extraAssets || []).filter(a => !(state.created.uploads || []).includes(assetKey(a)));
     const stored = row()?.bugs?.find(b => b.operationId === state.created.operationId);
     if (stored) Object.assign(stored, state.created);
-    await persist(); showCreated();
+    const current = state; await persist(); if (state === current) showCreated();
   }
   async function retry(operation) {
     const current = state;
     for (let attempt = 0; ; attempt++) {
-      try { return await operation(); }
+      current.transferController?.signal.throwIfAborted();
+      if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
+      try {
+        const result = await operation();
+        current.transferController?.signal.throwIfAborted();
+        if (state !== current) throw new DOMException("Окно закрыто", "AbortError");
+        return result;
+      }
       catch (error) {
-        if (state !== current || attempt >= 2 || !([404, 408, 429].includes(error.status) || error.status >= 500 || error instanceof TypeError)) throw error;
+        if (current.transferController?.signal.aborted || state !== current || attempt >= 2 || !([404, 408, 429].includes(error.status) || error.status >= 500 || error instanceof TypeError)) throw error;
         await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
       }
     }
   }
   async function upload() {
+    const signal = state.transferController.signal;
     const completed = new Set(state.created.uploads || []);
     const assets = state.selectedAssets.filter(asset => !completed.has(assetKey(asset)));
     const originalKeys = new Map(assets.map(asset => [JSON.stringify([asset.attachmentId, asset.dataUrl, asset.source.issueUrl, asset.source.id]), assetKey(asset)]));
@@ -983,12 +1011,13 @@
     if (!assets.length) { state.uploadsPending = false; state.created.attachmentsPending = false; await persistCreated(); return; }
     const settings = { ...api.jiraSettings(), provider: state.created.provider || "jira", transport: "agent", baseUrl: state.created.baseUrl || new URL(state.created.issueUrl).href.split("/browse/")[0] };
     const issue = { issueUrl: state.created.issueUrl };
-    const manifest = await retry(() => api.jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }));
-    const plan = await window.QaReportJiraReuse.plan(assets, { issueUrl: state.created.issueUrl, attachments: manifest.attachments,
+    const manifest = await retry(() => api.jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal }));
+    const plan = await window.QaReportJiraReuse.plan(assets, { issueUrl: state.created.issueUrl, attachments: manifest.attachments, signal,
       loadSource: async source => {
-        const result = await retry(() => api.jiraRequest("/api/jira/import-attachment", { ...settings, commentUrl: source.issueUrl, attachmentId: source.id }));
+        const result = await retry(() => api.jiraRequest("/api/jira/import-attachment", { ...settings, commentUrl: source.issueUrl, attachmentId: source.id }, { signal }));
         return `data:${result.file.type};base64,${result.file.dataBase64}`;
       } });
+    signal.throwIfAborted();
     state.created.attachmentRefs ||= {};
     const remember = (file, originals) => originals.forEach(original => {
       const key = originalKeys.get(original.key); completed.add(key);
@@ -997,6 +1026,7 @@
     for (const reused of plan.reused) remember(reused, reused.originals);
     if (plan.reused.length) { state.created.uploads = [...completed]; await persistCreated(); }
     for (let i = 0; i < plan.uploads.length; i++) {
+      signal.throwIfAborted();
       const file = plan.uploads[i]; showCreated();
       const problem = window.QaReportAttachmentLimits?.fileError(file, manifest.attachmentLimits);
       if (problem) throw new Error(problem);
@@ -1008,7 +1038,7 @@
       await persist();
       const payload = { ...settings, ...issue, operationId: state.created.uploadOperations[uploadKey], files: [{ attachmentId: state.created.uploadOperations[uploadKey], name: state.created.uploadNames[uploadKey], type: file.type, dataBase64: file.dataBase64 }] };
       // Retry the same UUID: Connect replays confirmed uploads and blocks an uncertain POST.
-      const result = await retry(() => api.jiraRequest("/api/jira/attachments", payload, { retries: 0 }));
+      const result = await retry(() => api.jiraRequest("/api/jira/attachments", payload, { retries: 0, signal }));
       if (!result.attachments?.[0]?.id) throw new Error("Сервер не подтвердил загрузку вложения");
       remember(result.attachments[0], file.originals);
       state.created.uploads = [...completed];
@@ -1017,17 +1047,20 @@
     state.created.uploads = [...completed]; state.uploadsPending = false; state.created.attachmentsPending = false; await persistCreated();
   }
   async function evidence() {
+    const signal = state.transferController.signal; signal.throwIfAborted();
     state.evidencePending = Boolean(state.created.evidencePending);
     if (!state.evidencePending) return;
     showCreated();
     await retry(() => job("/api/jira/issue-evidence", { provider: state.created.provider || "jira", baseUrl: state.created.baseUrl || new URL(state.created.issueUrl).href.split("/browse/")[0], operationId: state.created.operationId,
       issueKey: state.created.key, fieldId: state.created.evidenceField, attachmentIds: [...new Set(Object.values(state.created.attachmentRefs || {}).map(ref => ref.id))],
-      placements: (state.created.inlineAttachments || []).filter(item => state.created.attachmentRefs?.[item.assetKey]).map(item => ({ placeholder: item.placeholder, attachmentId: state.created.attachmentRefs[item.assetKey].id })) }));
+      placements: (state.created.inlineAttachments || []).filter(item => state.created.attachmentRefs?.[item.assetKey]).map(item => ({ placeholder: item.placeholder, attachmentId: state.created.attachmentRefs[item.assetKey].id })) }, { signal }));
     state.created.evidencePending = state.evidencePending = false; await persistCreated();
   }
   async function create() {
     if (!state || state.busy || voiceActive() || state.filesLoading) return;
-    const current = state; state.creating = true;
+    const current = state; state.creating = true; state.stopRequested = false;
+    let finish;
+    current.finished = new Promise(resolve => { finish = resolve; });
     let savingNewOperation = false;
     try {
       if (!state.created) {
@@ -1057,39 +1090,46 @@
         state.pending = null;
         await persist();
       }
+      state.transferController = new AbortController(); if (state.stopRequested) state.transferController.abort(); state.created.uploadsStopped = false; state.createdError = "";
       state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); busy(true, state.uploadsPending ? "Баг создан. Загружаем вложения…" : "Завершаем создание…");
       await upload();
       await evidence();
       message("");
     } catch (error) {
-      if (state !== current) return;
+      if (state !== current || current.transferController?.signal.aborted) return;
       if (state.created) { state.uploadsPending = Boolean(state.created.attachmentsPending); state.evidencePending = Boolean(state.created.evidencePending); message(`${state.uploadsPending ? "Не все вложения загружены." : "Не удалось добавить ссылки на вложения."} ${error.message}`, true); }
       else {
         if (savingNewOperation) state.pending = null;
         if (error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status)) {
           const operationId = state.pending?.id;
           delete row()?.pendingBug; state.pending = null;
-          if (state.standalone && operationId) await standaloneRecord("clear", operationId); else if (!state.standalone) api.changed();
+          if (state.standalone && operationId) await standaloneRecord("clear", operationId); else if (!state.standalone) await persist();
         }
         Object.entries(error.fieldErrors || {}).forEach(([id, text]) => markError(id, text));
         message(error.message, true);
       }
-    } finally { if (state === current) { state.creating = false; busy(false); } }
+    } finally {
+      if (state === current) {
+        state.creating = false; busy(false);
+        if (state.dismiss && !state.dismiss.working && !unfinished()) completeDismiss();
+      }
+      finish();
+    }
   }
-  async function open(sectionId, rowId, anchor) {
-    if (state) return;
+  async function open(sectionId, rowId, anchor, { fresh = false } = {}) {
+    if (state) { if (state.minimized) restore(); return; }
     api.flush();
     const report = api.getDraft(), section = report.sections.find(s => s.id === sectionId), sourceRow = section?.rows.find(r => r.id === rowId);
     const standalone = sectionId === null && rowId === null;
     if (!sourceRow && !standalone) return;
     const htmlText = html => { const div = document.createElement("div"); div.innerHTML = html || ""; div.querySelectorAll("[data-editor-ui], .cell-file, img").forEach(n => n.remove()); return div.innerText || div.textContent || ""; };
     const assets = sourceRow ? window.QaReportJiraReuse.collect({ sections: [{ rows: [sourceRow] }] }) : [];
-    state = { sectionId, rowId, anchor, standalone, profiles: [], assets, availableAssets: window.QaReportJiraReuse.collect(report), fields: null, meta: null, pending: sourceRow?.pendingBug || null, selectedAssets: [], ready: false,
+    state = { sectionId, rowId, anchor, standalone, reportId: report.reportId, sourceReport: report, profiles: [], assets, availableAssets: window.QaReportJiraReuse.collect(report), fields: null, meta: null, pending: fresh ? null : sourceRow?.pendingBug || null, selectedAssets: [], ready: false,
       extraAssets: [], inlineAssets: {}, inlineReady: false, speech: { mode: "browser", available: true, label: "Диктовка браузера" }, voicePhase: "idle", voiceAttempt: 0, speechReady: false,
       source: standalone ? { attachments: [] } : { report: { issueUrl: report.issueUrl, environment: report.environment, context: htmlText(report.intro).slice(0, 16000) }, section: section.title, status: sourceRow.status,
         cells: section.columns.map(c => ({ id: c.id, name: c.title, text: htmlText(sourceRow.cells[c.id]).slice(0, 12000) })), attachments: assets.map(a => ({ name: a.name, type: a.type })) } };
     const current = state;
-    state.created = sourceRow?.bugs?.find(b => b.attachmentsPending || b.evidencePending) || null;
+    state.created = fresh ? null : sourceRow?.bugs?.find(b => b.attachmentsPending || b.evidencePending) || null;
     document.querySelectorAll('[name="bugCreationMode"]').forEach(input => { input.checked = false; });
     state.extraAssets = state.pending?.extraAssets || state.created?.extraAssets || [];
     state.assets.push(...state.extraAssets); state.source.attachments = state.assets.map(a => ({ name: a.name, type: a.type }));
@@ -1113,7 +1153,7 @@
     }, onMeter: value => { if (state === current) voiceMeter(value); }, onState: value => { if (state === current) { const focused = $("bugVoicePanel").contains(document.activeElement); state.voicePhase = value.phase; $("bugVoiceHint").textContent = value.text; $("bugVoiceHint").dataset.state = value.phase; contextControls(); if (focused && !voiceActive()) $("bugVoice").focus(); } }, transcribe: (audio, selection) => job("/api/ai/transcribe", { audio, selection }), transform: async (text, selection) => (await job("/api/ai/refine", { text, selection })).text });
     let commentsChanged = false;
     (sourceRow?.bugs || []).forEach(bug => { commentsChanged = addBugComment(sourceRow, bug) || commentsChanged; });
-    if (commentsChanged) api.changed();
+    if (commentsChanged) await api.changeReport(report.reportId, value => { for (const bug of sourceRow.bugs) { const source = value.sections.find(s => s.id === sectionId)?.rows.find(r => r.id === rowId); if (source) addBugComment(source, bug, value, sectionId); } return true; });
     state.uploadsPending = Boolean(state.created?.attachmentsPending); state.evidencePending = Boolean(state.created?.evidencePending);
     state.evidenceField = state.pending?.evidenceField || state.created?.evidenceField || "";
     state.selectedAssets = assets.filter(a => (state.pending?.assets || state.created?.attachmentKeys || []).includes(assetKey(a)));
@@ -1122,13 +1162,12 @@
     $("loadBugFields").hidden = true; $("bugIssueType").replaceChildren(); $("bugProjectOptions").replaceChildren();
     steps(false); $("bugFooterHint").textContent = "Выберите место создания и нажмите «Продолжить»."; $("cancelBugReport").textContent = "Отмена";
     $("bugTargetSection").open = true; $("bugTargetSummary").textContent = "Куда создать баг";
-    state.obscured = [...document.querySelectorAll(".topbar, .workspace, #feedbackButton, #focusExitButton")].map(node => [node, node.inert]);
-    state.obscured.forEach(([node]) => { node.inert = true; });
+    obscureWorkspace();
     $("bugReportModal").hidden = false; api.modalOverflow(); busy(true, "Подключаемся к QA Report Connect…", "initializing");
     try {
       const statusRequest = api.bugStatus ? api.bugStatus() : api.reportApi("/api/agent/status");
       // Observe both independent reads immediately, including a failure of either.
-      const [savedStandalone, status] = await Promise.all([standalone ? standaloneRecord("get") : null, statusRequest]);
+      const [savedStandalone, status] = await Promise.all([standalone && !fresh ? standaloneRecord("get") : null, statusRequest]);
       if (state !== current) return;
       if (standalone) {
         const saved = savedStandalone;
@@ -1184,11 +1223,103 @@
     } catch (error) { if (state === current) message(error.message, true); }
     finally { if (state === current && state.activity === "initializing") busy(false); }
   }
+  function unfinished() { return Boolean(state?.created && (state.created.attachmentsPending || state.created.evidencePending)); }
+  function obscureWorkspace() {
+    state.obscured = [...document.querySelectorAll(".topbar, .workspace, #feedbackButton, #focusExitButton")].map(node => [node, node.inert]);
+    state.obscured.forEach(([node]) => { node.inert = true; });
+  }
+  function revealWorkspace() {
+    state?.obscured?.forEach(([node, inert]) => { node.inert = inert; });
+    if (state) state.obscured = null;
+  }
+  function renderDock() {
+    const dock = $("bugReportDock"); dock.hidden = !state?.minimized;
+    if (!state) return;
+    const created = state.created, total = created?.attachmentKeys?.length || 0, done = created?.uploads?.length || 0;
+    $("bugDockTitle").textContent = created?.key || "Черновик баг-репорта";
+    let text = ["", "Место создания", "Подготовка", "Баг-репорт"][state.step] || "Подготовка";
+    if (state.busy) text = created ? state.uploadsPending ? "Загружаем файлы" : "Добавляем ссылки" : state.creating ? "Создаём баг-репорт…" : state.activity === "generating" ? "Готовим черновик…" : "Подключаемся…";
+    else if (created) text = created.uploadsStopped && unfinished() ? "Загрузка прервана" : unfinished() ? "Нужно завершить загрузку" : total ? "Файлы загружены" : "Баг-репорт создан";
+    if (state.createdError) text = state.uploadsPending ? "Не все файлы загружены" : "Не удалось добавить ссылки";
+    $("bugDockStatus").textContent = text;
+    $("bugDockCount").textContent = total ? `${done} из ${total}` : "";
+    $("bugDockProgress").hidden = !total;
+    $("bugDockProgress").max = total || 1; $("bugDockProgress").value = done;
+    dock.dataset.phase = state.createdError ? "error" : created?.uploadsStopped && unfinished() ? "stopped" : state.busy ? "loading" : created && !unfinished() ? "complete" : "draft";
+    $("closeBugDock").disabled = Boolean(state.busy && state.creating && !created);
+    if (state.dismiss && !state.dismiss.working) {
+      $("bugUploadConfirmTitle").textContent = created.attachmentsPending ? "Прервать загрузку файлов?" : "Прервать добавление ссылок?";
+      $("keepBugUpload").textContent = created.attachmentsPending ? "Продолжить загрузку" : "Продолжить";
+      $("bugUploadConfirmText").textContent = `Баг-репорт ${created.key} уже создан. Загружено файлов: ${done} из ${total}. Загруженные файлы останутся в задаче. Отправленный файл может успеть загрузиться.`;
+    }
+  }
+  function minimize() {
+    if (!state || state.dismiss) return;
+    state.returnFocus = document.activeElement; state.minimized = true;
+    // A hidden recorder must not keep listening to the microphone.
+    if (voiceActive()) state.voice?.cancel();
+    $("bugVoiceInfo").open = false; closePrompt();
+    $("bugReportModal").hidden = true; revealWorkspace(); api.modalOverflow(); renderDock();
+    $("restoreBugReport").focus();
+  }
+  function restore() {
+    if (!state?.minimized || state.dismiss) return;
+    state.minimized = false; obscureWorkspace();
+    $("bugReportModal").hidden = false; api.modalOverflow(); renderDock(); scheduleContextDock();
+    const focus = state.returnFocus;
+    if (focus?.isConnected && !focus.disabled && focus.getClientRects().length) focus.focus(); else $("minimizeBugReport").focus();
+  }
+  function hideDismiss() {
+    $("bugUploadConfirm").hidden = true;
+    $("bugReportModal").querySelector(".bug-report-modal").inert = false; $("bugReportDock").inert = false;
+    if (state?.minimized) revealWorkspace();
+    api.modalOverflow();
+  }
+  function cancelDismiss() {
+    if (!state?.dismiss || state.dismiss.working) return;
+    const focus = state.dismiss.focus; state.dismiss = null; hideDismiss();
+    if (focus?.isConnected && !focus.disabled) focus.focus();
+  }
+  function completeDismiss() {
+    const previous = state, action = state.dismiss?.action || "close";
+    hideDismiss(); close();
+    if (action === "another") openBugAgain(previous);
+  }
+  function requestDismiss(action = "close") {
+    if (!state || state.dismiss || state.busy && state.creating && !state.created) return;
+    if (!unfinished() || state.created.uploadsStopped) {
+      state.dismiss = { action }; completeDismiss(); return;
+    }
+    state.dismiss = { action, focus: document.activeElement };
+    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false;
+    $("confirmBugUploadStop").textContent = action === "another" ? "Прервать и создать новый" : "Прервать и закрыть";
+    if (state.minimized) obscureWorkspace();
+    $("bugReportModal").querySelector(".bug-report-modal").inert = true; $("bugReportDock").inert = true;
+    $("bugUploadConfirm").hidden = false; renderDock(); api.modalOverflow(); $("keepBugUpload").focus();
+  }
+  async function confirmStop() {
+    if (!state?.dismiss || state.dismiss.working) return;
+    const current = state; current.dismiss.working = true;
+    $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = true;
+    $("confirmBugUploadStop").textContent = "Останавливаем…";
+    current.stopRequested = true; current.transferController?.abort();
+    await current.finished;
+    if (state !== current) return;
+    try {
+      if (unfinished()) { current.created.uploadsStopped = true; current.createdError = ""; await persistCreated(); }
+      completeDismiss();
+    } catch (error) {
+      current.dismiss.working = false;
+      $("bugUploadConfirmText").textContent = `Не удалось сохранить остановку: ${error.message}`;
+      $("confirmBugUploadStop").disabled = $("keepBugUpload").disabled = false;
+      $("confirmBugUploadStop").textContent = "Повторить остановку";
+    }
+  }
   function close() {
     if (state?.creating && state.busy) return;
     state?.voice?.cancel();
-    state?.obscured?.forEach(([node, inert]) => { node.inert = inert; });
-    const anchor = state?.anchor; state = null; $("bugPromptDialog").hidden = true; $("bugReportModal").hidden = true; api.modalOverflow(); if (anchor?.isConnected) anchor.focus();
+    revealWorkspace();
+    const anchor = state?.anchor; state = null; renderDock(); $("bugPromptDialog").hidden = true; $("bugReportModal").hidden = true; api.modalOverflow(); if (anchor?.isConnected) anchor.focus();
   }
   function fillSettings() { $("bugSystemPrompt").value = prompt(); $("bugRememberIssueType").checked = rememberTypes(); }
   function saveSettings() {
@@ -1238,7 +1369,12 @@
     $("bugSystemPrompt")?.addEventListener("input", api.settingsDirty);
     $("bugRememberIssueType")?.addEventListener("change", api.settingsDirty);
     $("closeBugReport").setAttribute("aria-label", "Закрыть баг-репорт");
-    $("closeBugReport").addEventListener("click", close); $("cancelBugReport").addEventListener("click", close);
+    $("minimizeBugReport").addEventListener("click", minimize);
+    $("restoreBugReport").addEventListener("click", restore);
+    $("closeBugDock").addEventListener("click", () => requestDismiss());
+    $("keepBugUpload").addEventListener("click", cancelDismiss);
+    $("confirmBugUploadStop").addEventListener("click", confirmStop);
+    $("closeBugReport").addEventListener("click", () => requestDismiss()); $("cancelBugReport").addEventListener("click", () => requestDismiss());
     $("bugReportModal").addEventListener("click", event => { if (!$("bugVoiceInfo").contains(event.target)) $("bugVoiceInfo").open = false; });
     // Editing history belongs to the focused field, not the checklist below the modal.
     $("bugReportModal").addEventListener("keydown", event => {
@@ -1253,6 +1389,17 @@
     $("bugReportModal").addEventListener("pointerdown", event => { if (event.target === $("bugReportModal")) event.preventDefault(); event.stopPropagation(); });
     $("bugReportModal").addEventListener("click", event => { if (event.target === $("bugReportModal")) event.preventDefault(); event.stopPropagation(); });
     document.addEventListener("keydown", event => {
+      if (!$("bugUploadConfirm").hidden) {
+        if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); cancelDismiss(); }
+        if (event.key === "Tab") {
+          const controls = [...$("bugUploadConfirm").querySelectorAll("button:not(:disabled)")];
+          if (!controls.length) event.preventDefault();
+          else if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
+          else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
       if ($("bugReportModal").hidden) return;
       if (!$("bugPromptDialog").hidden) {
         if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); closePrompt(); }
@@ -1263,7 +1410,7 @@
         }
         return;
       }
-      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); if ($("bugVoiceInfo").open) { $("bugVoiceInfo").open = false; $("bugVoiceInfo").querySelector("summary").focus(); } else close(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); if ($("bugVoiceInfo").open) { $("bugVoiceInfo").open = false; $("bugVoiceInfo").querySelector("summary").focus(); } else requestDismiss(); }
       if (event.key === "Tab") {
         const controls = [...$("bugReportModal").querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [contenteditable], [role=separator]")].filter(el => el.tabIndex >= 0 && el.getClientRects().length);
         if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }

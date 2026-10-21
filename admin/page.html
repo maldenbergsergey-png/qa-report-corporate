@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>QA Report · Администрирование</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./ui.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">QA REPORT / ADMIN</p><h1>Статистика посещений</h1></div><button id="logout" hidden>Выйти</button></header>
+    <p id="message" role="status" aria-live="polite"></p>
+    <section id="login-panel" class="login panel" hidden>
+      <h2>Вход администратора</h2><p class="muted">Используйте отдельную учётную запись администратора.</p>
+      <form id="login-form">
+        <label>Логин<input id="username" name="username" autocomplete="username" maxlength="80" required></label>
+        <label>Пароль<input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+        <button class="primary" id="login-submit">Войти</button>
+      </form>
+    </section>
+    <div id="dashboard" hidden>
+      <form id="filters" class="panel filters">
+        <label>С даты<input id="from" type="date" required></label><label>По дату<input id="to" type="date" required></label>
+        <button class="primary">Показать</button><button id="refresh" type="button">Обновить</button>
+      </form>
+      <p class="muted" id="period-note"></p>
+      <div class="cards" id="summary"></div>
+      <section class="panel"><h2>Посещения по дням</h2><div class="table-scroll"><table><thead><tr><th>Дата</th><th>Уникальные посетители</th><th>Визиты</th></tr></thead><tbody id="daily"></tbody></table></div><p id="daily-empty" class="muted" hidden>За этот период посещений пока нет.</p></section>
+      <section class="panel">
+        <div class="section-head"><h2>Посетители и устройства</h2><form id="search-form" class="search"><label class="sr-only" for="search">Поиск по ID или IP</label><input id="search" type="search" placeholder="ID посетителя или IP" maxlength="100"><button>Найти</button></form></div>
+        <div class="table-scroll"><table class="visitor-table"><thead><tr><th>ID браузера</th><th>Визиты</th><th>Первое / последнее посещение за период</th><th>Устройства, режим и IP</th></tr></thead><tbody id="visitors"></tbody></table></div>
+        <p id="visitors-empty" class="muted" hidden>Посетители не найдены.</p>
+        <div class="pagination"><button id="previous">← Назад</button><span id="page-info"></span><button id="next">Далее →</button></div>
+      </section>
+      <aside class="panel muted"><h2>Как читать статистику</h2><p>Посетитель — браузер со случайным ID в cookie. Очистка cookie, другой браузер или устройство создают новый ID. Один IP может принадлежать нескольким людям; смена IP не меняет ID.</p><p>Новый визит учитывается после 30 минут без активности или с началом нового дня. Браузер и PWA считаются отдельно и могут иметь общий ID. Отдельные режимы нельзя складывать для подсчёта людей. Определение устройства и браузера приблизительное.</p><p>Учитываются активные окна редактора при наличии сети. Вход в админку, фоновые окна и работа без сети в статистику не входят. Данные старше 90 дней удаляются автоматически.</p></aside>
+    </div>
+  </main>
+</body>
+</html>

@@ -27,6 +27,8 @@ const {
 const AttachmentLimits = require("./attachment-limits");
 const JiraPublication = require("./jira-publication");
 
+const { createAdminService } = require("./admin/server");
+
 const ROOT = __dirname;
 
 function loadLocalEnv() {
@@ -75,6 +77,7 @@ const localImportService = createLocalImportService({ maxFileBytes: MAX_ATTACHME
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
 const API_REVISION = 9;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
+const adminService = createAdminService({ root: ROOT, reportsPath: REPORTS_DB_PATH });
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
 const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1").trim();
@@ -1709,6 +1712,9 @@ function serveStatic(request, response) {
   const isReportRoute = /^\/report\/[a-f0-9]{7,8}$/i.test(requestPath);
   const relative = requestPath === "/login" ? "login.html" : requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
   const filePath = path.resolve(ROOT, relative);
+  if (adminService.isPrivateFile(filePath)) {
+    response.writeHead(404, { "Cache-Control": "no-store" }); response.end("Not found"); return;
+  }
   const pathFromRoot = path.relative(ROOT, filePath);
   const privateOperations = path.join(path.dirname(REPORTS_DB_PATH), "issue-operations");
   if (filePath === privateOperations || filePath.startsWith(privateOperations + path.sep)) {
@@ -1749,6 +1755,7 @@ const server = http.createServer(async (request, response) => {
     requestId(request, response);
     enforceSameOrigin(request);
     enforceApiRateLimit(request, requestPath);
+    if (await adminService.handle(request, response)) return;
     if (request.method === "GET" && requestPath === "/api/health") {
       sendJson(response, 200, {
         ok: true,
@@ -1794,6 +1801,7 @@ const server = http.createServer(async (request, response) => {
       }
       return;
     }
+    if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
     if (request.user && requestPath === "/login") {
       response.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
       response.end();

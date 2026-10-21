@@ -12,6 +12,9 @@ services:
       HOST: 0.0.0.0
       PORT: 4173
       REPORTS_DB_PATH: /app/reports-data/qa-report.sqlite
+      QA_ADMIN_CONFIG_FILE: /app/admin-config/admin.json
+      QA_ADMIN_TIMEZONE: ${QA_ADMIN_TIMEZONE:-Europe/Moscow}
+      QA_REPORT_PUBLIC_URL: ${QA_REPORT_PUBLIC_URL:-}
       AUTH_SECRET_FILE: /run/secrets/auth_secret
       LDAP_URL: ${LDAP_URL:?LDAP_URL must use ldaps://}
       LDAP_BIND_DN: ${LDAP_BIND_DN:?LDAP_BIND_DN is required}
@@ -37,6 +40,7 @@ services:
       QA_STORAGE_SECRET_KEY_FILE: /run/secrets/storage_secret_key
     volumes:
       - reports_data:/app/reports-data
+      - admin_config:/app/admin-config:ro
     secrets:
       - auth_secret
       - ldap_bind_password
@@ -52,7 +56,22 @@ services:
       retries: 3
       start_period: 5s
 
+  admin-setup:
+    profiles: [admin]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: none
+    stdin_open: true
+    tty: true
+    environment:
+      QA_ADMIN_CONFIG_FILE: /app/admin-config/admin.json
+    volumes:
+      - admin_config:/app/admin-config
+    command: [node, scripts/setup-admin.cjs]
+
 volumes:
+  admin_config:
   reports_data:
 
 secrets:

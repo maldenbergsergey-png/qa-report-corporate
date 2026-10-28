@@ -34,6 +34,11 @@
     return Number.isFinite(time) ? new Date(time).toISOString() : "";
   }
 
+  function attachmentOptions(value = {}) {
+    const enabled = value?.includeAttachments !== false;
+    return { includeImages: enabled && value?.includeImages !== false, includeFiles: enabled && value?.includeFiles !== false };
+  }
+
   // Persist only publication metadata, never credentials or a caller-supplied URL.
   function normalize(value, reportId) {
     if (!value || value.reportId !== reportId || !Array.isArray(value.parts) || value.parts.length > 1000) return null;
@@ -48,6 +53,7 @@
     return { reportId, ...issue, format: value.format, split: Boolean(value.split), parts, updateIncomplete: Boolean(value.updateIncomplete),
       sectionIds: Array.isArray(value.sectionIds) ? value.sectionIds.filter(id => typeof id === "string") : [],
       statuses: Array.isArray(value.statuses) ? value.statuses.filter(status => typeof status === "string") : [],
+      ...attachmentOptions(value),
       firstPublishedAt: date(value.firstPublishedAt), lastPublishedAt: date(value.lastPublishedAt) };
   }
 
@@ -121,5 +127,5 @@
       commentUrl: commentUrl(String(issue.issueUrl), id) };
   }
 
-  return { textForPublication, target, commentUrl, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
+  return { textForPublication, target, commentUrl, attachmentOptions, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
 });

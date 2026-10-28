@@ -81,3 +81,18 @@ test("a stale missing-comment response cannot clear a new publication or a diffe
   assert.equal(api.sameComments({ ...link, issueUrl: "https://jira.example/browse/QA-2" }, link), false);
   assert.equal(api.sameComments(null, link), false);
 });
+
+
+test("publication remembers image and file choices independently and enables both for older reports", () => {
+  const original = { reportId: "report", issueUrl: "https://jira.example/browse/QA-1", format: "wiki", parts: [{ commentId: "123" }] };
+  for (const includeImages of [false, true]) for (const includeFiles of [false, true]) {
+    const saved = api.normalize({ ...original, includeImages, includeFiles }, "report");
+    const restored = api.normalize(JSON.parse(JSON.stringify(saved)), "report");
+    assert.equal(restored.includeImages, includeImages);
+    assert.equal(restored.includeFiles, includeFiles);
+    assert.equal(api.matching(restored, "report", original.issueUrl).includeImages, includeImages);
+  }
+  assert.deepEqual(api.attachmentOptions(api.normalize(original, "report")), { includeImages: true, includeFiles: true });
+  assert.deepEqual(api.attachmentOptions(null), { includeImages: true, includeFiles: true });
+  assert.deepEqual(api.attachmentOptions({ includeAttachments: false }), { includeImages: false, includeFiles: false });
+});

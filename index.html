@@ -595,10 +595,14 @@
           <div class="publish-scope-list" id="publishScopeList"></div>
           <h3 class="publish-scope-heading">Экспорт вложений</h3>
           <label class="publish-scope-option">
-            <input id="publishIncludeAttachments" type="checkbox" aria-describedby="publishAttachmentsHint" />
-            <span>Включить вложения</span>
+            <input id="publishIncludeImages" type="checkbox" checked aria-describedby="publishAttachmentsHint" />
+            <span>Изображения</span>
           </label>
-          <p id="publishAttachmentsHint" class="publish-scope-hint">По умолчанию отправляется только текст — без изображений, файлов и ссылок на них. Вложения в чек-листе сохраняются.</p>
+          <label class="publish-scope-option">
+            <input id="publishIncludeFiles" type="checkbox" checked aria-describedby="publishAttachmentsHint" />
+            <span>Остальные файлы</span>
+          </label>
+          <p id="publishAttachmentsHint" class="publish-scope-hint">Отключённые вложения не отправляются, включая ссылки на них. В чек-листе они сохраняются. При обновлении используется выбор предыдущей публикации.</p>
         </div>
         <footer class="modal-footer">
           <span id="publishScopeSummary" aria-live="polite"></span>
@@ -1236,8 +1240,8 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=96"></script>
-    <script src="/jira-attachment-reuse.js?v=3"></script>
+    <script src="/release-notes.js?v=97"></script>
+    <script src="/jira-attachment-reuse.js?v=4"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
     <script src="/import-options.js?v=7"></script>
@@ -1247,7 +1251,7 @@
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
-    <script src="/jira-publication.js?v=3"></script>
+    <script src="/jira-publication.js?v=4"></script>
     <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
       <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
@@ -1323,7 +1327,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=39"></script>
-    <script src="/app.js?v=160"></script>
+    <script src="/app.js?v=161"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

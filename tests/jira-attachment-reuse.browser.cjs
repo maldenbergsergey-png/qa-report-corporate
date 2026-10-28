@@ -116,35 +116,56 @@ async function main() {
     collectDocumentFields();
     historyCurrent = serializeDraft(); undoStack = []; redoStack = [];
   }, issueUrl);
-  const conversion = await page.evaluate(() => {
-    const html = '<p>Текст <strong>жирный</strong> <a href="https://docs.example.test/help">Справка</a></p>'
+  const conversions = await page.evaluate(() => {
+    let html = '<p>Текст <strong>жирный</strong> <a href="https://docs.example.test/help">Справка</a></p>'
       + '<a href="https://jira.example/attachment/linked.png"><img data-file-name="linked.png">Подпись</a>'
       + '<span class="jira-image-placeholder" data-jira-name="missing-image.png">missing-image.png</span>'
+      + '<span class="jira-file-placeholder" data-jira-name="image-as-file.png">image-as-file.png</span>'
       + '<span class="jira-file-placeholder" data-jira-name="missing-file.txt">missing-file.txt</span>'
       + '<figure class="cell-file jira-attachment-reference" data-jira-id="42"><span>remote-file.txt</span></figure>'
+      + '<figure class="cell-file jira-attachment-reference" data-jira-id="43" data-jira-kind="image"><span>image-card.png</span></figure>'
+      + '<a href="https://jira.example/secure/attachment/44/raw-image.png">raw-image.png</a>'
+      + '<a href="https://jira.example/secure/attachment/45/raw-file.txt">raw-file.txt</a>'
       + createFileCardHtml({ id: 'sample-file', name: 'sample.json', type: 'application/json', dataUrl: 'data:application/json;base64,e30=' })
       + '<pre class="cell-code-block"><code>const result = 1;</code></pre>';
+    const imported = parseJiraMarkup('||Проверка||Статус||\n|[^wiki-as-file.png] !wiki-inline.png|thumbnail! [^wiki-file.log]|OK|');
+    html += Object.values(imported.sections[0].rows[0].cells).join('');
     const before = serializeDraft();
-    const options = { includeAttachments: false, forPublication: true };
-    const result = { wiki: jiraCell(html, options), wikiDefault: jiraCell(html),
-      markup: generateMarkup(options), portable: generatePortableHtml(options),
-      adf: typeof generateAdfDocument === 'function' ? JSON.stringify(generateAdfDocument(options)) : null,
-      adfBlocks: typeof htmlToAdfBlocks === 'function' ? JSON.stringify(htmlToAdfBlocks(html, options)) : null };
-    result.unchanged = before === serializeDraft();
-    return result;
+    return [true, false].flatMap(includeImages => [true, false].map(includeFiles => {
+      const options = { includeImages, includeFiles, forPublication: true };
+      const result = { includeImages, includeFiles, wiki: jiraCell(html, options),
+        markup: generateMarkup(options), portable: generatePortableHtml(options),
+        adf: typeof generateAdfDocument === 'function' ? JSON.stringify(generateAdfDocument(options)) : null,
+        adfBlocks: typeof htmlToAdfBlocks === 'function' ? JSON.stringify(htmlToAdfBlocks(html, options)) : null };
+      result.unchanged = before === serializeDraft();
+      return result;
+    }));
   });
-  assert.equal(conversion.unchanged, true);
-  assert.match(conversion.wiki, /\*жирный\*.*Справка.*https:\/\/docs.example.test\/help/);
-  assert.match(conversion.wiki, /Подпись/);
-  assert.match(conversion.wiki, /const result = 1;/);
-  assert.match(conversion.wikiDefault, /linked\.png|missing-image\.png|sample\.json/);
-  for (const output of [conversion.wiki, conversion.markup, conversion.portable, conversion.adf, conversion.adfBlocks].filter(Boolean)) {
-    assert.doesNotMatch(output, /shot\.png|response\.json|linked\.png|missing-image\.png|missing-file\.txt|remote-file\.txt|sample\.json|<img|cell-file|data:|blob:/);
+  for (const conversion of conversions) {
+    assert.equal(conversion.unchanged, true);
+    assert.match(conversion.wiki, /\*жирный\*.*Справка.*https:\/\/docs.example.test\/help/);
+    assert.match(conversion.wiki, /Подпись/);
+    assert.match(conversion.wiki, /const result = 1;/);
+    const imageNames = /linked\.png|missing-image\.png|image-as-file\.png|image-card\.png|raw-image\.png|wiki-as-file\.png|wiki-inline\.png/;
+    const fileNames = /missing-file\.txt|remote-file\.txt|sample\.json|raw-file\.txt|wiki-file\.log/;
+    for (const output of [conversion.wiki, conversion.adfBlocks].filter(Boolean)) {
+      if (conversion.includeImages) assert.match(output, imageNames); else assert.doesNotMatch(output, imageNames);
+      if (conversion.includeFiles) assert.match(output, fileNames); else assert.doesNotMatch(output, fileNames);
+    }
+    for (const output of [conversion.markup, conversion.portable, conversion.adf].filter(Boolean)) {
+      if (!conversion.includeImages) assert.doesNotMatch(output, /shot\.png|<img/);
+      if (!conversion.includeFiles) assert.doesNotMatch(output, /response\.json|cell-file/);
+    }
   }
-  const publish = async (expectedError = null, includeAttachments = true) => {
+  const publish = async (expectedError = null, selection = { includeImages: true, includeFiles: true }) => {
+    const previous = await page.evaluate(() => QaReportJiraPublication.attachmentOptions(currentJiraPublication()));
     await page.click('#publishButton');
-    assert.equal(await page.locator('#publishIncludeAttachments').isChecked(), false, 'Each publication starts without attachments');
-    if (includeAttachments) await page.check('#publishIncludeAttachments');
+    assert.equal(await page.locator('#publishIncludeImages').isChecked(), previous.includeImages, 'Image choice restores the last publication');
+    assert.equal(await page.locator('#publishIncludeFiles').isChecked(), previous.includeFiles, 'File choice restores the last publication');
+    if (selection) {
+      await page.locator('#publishIncludeImages').setChecked(selection.includeImages);
+      await page.locator('#publishIncludeFiles').setChecked(selection.includeFiles);
+    }
     await page.click('#acceptPublishScopeButton');
     await page.waitForFunction(() => !publishInProgress);
     const message = await page.locator('#publishErrorText').textContent();
@@ -162,9 +183,10 @@ async function main() {
   for (const width of [1440, 390]) for (const theme of ['light', 'graphite', 'dark']) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; void askPublishScope(); }, theme);
-    const option = page.locator('#publishIncludeAttachments');
+    const option = page.locator('#publishIncludeFiles');
     await option.scrollIntoViewIfNeeded();
-    assert.equal(await option.isChecked(), false);
+    assert.equal(await option.isChecked(), true);
+    assert.equal(await page.locator('#publishIncludeImages').isChecked(), true);
     const bounds = await option.boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y > 0);
     assert.equal(await page.locator('#acceptPublishScopeButton').isVisible(), true);
@@ -172,31 +194,48 @@ async function main() {
     await page.click('#cancelPublishScopeButton');
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  // Isolate the content-edit history from the preceding layout and screenshot checks.
+  // Publish only files, then only images: the excluded kind never uploads or leaves a Jira reference.
+  await publish(null, { includeImages: false, includeFiles: true });
+  assert.equal(uploads, 1);
+  assert.equal(inventories.get(issueUrl)[0].filename, 'response.json');
+  assert.match(comments.get('1000'), /response\.json/);
+  assert.doesNotMatch(comments.get('1000'), /shot\.png|thumbnail/);
+  await page.reload(); await page.waitForSelector('.cell-file'); await setup();
+  assert.equal(await page.evaluate(() => currentJiraPublication().includeImages), false);
+  assert.equal(await page.evaluate(() => currentJiraPublication().includeFiles), true);
+  await publish(null, null);
+  assert.equal(uploads, 1, 'Reloaded file-only publication keeps images disabled');
+  await publish(null, { includeImages: true, includeFiles: false });
+  assert.equal(uploads, 2);
+  assert.match(comments.get('1000'), /shot\.png/);
+  assert.doesNotMatch(comments.get('1000'), /response\.json/);
+  await page.reload(); await page.waitForSelector('.cell-file'); await setup();
+  assert.equal(await page.evaluate(() => currentJiraPublication().includeFiles), false);
+  // Both disabled means no metadata, source-download or upload requests, preserving the local files.
+  const beforeTextOnly = { manifests, uploads, downloads };
+  const localBefore = await sources();
+  await publish(null, { includeImages: false, includeFiles: false });
+  assert.deepEqual({ manifests, uploads, downloads }, beforeTextOnly);
+  assert.deepEqual(await sources(), localBefore);
+  assert.match(comments.get('1000'), /Проверка|Проверить ответ/);
+  assert.doesNotMatch(comments.get('1000'), /shot\.png|response\.json|data:|blob:|\[\^|!.*thumbnail/);
+  await publish(null, null);
+  assert.deepEqual({ manifests, uploads, downloads }, beforeTextOnly);
+  assert.equal(inventories.get(issueUrl).length, 2, 'Disabling exports does not delete Jira files');
+  // Cancelling staged changes preserves the last successfully published choices.
+  await page.click('#publishButton'); await page.check('#publishIncludeImages'); await page.check('#publishIncludeFiles');
+  await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);
+  await page.click('#publishButton');
+  assert.equal(await page.locator('#publishIncludeImages').isChecked(), false);
+  assert.equal(await page.locator('#publishIncludeFiles').isChecked(), false);
+  await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);
+  // Isolate the user edit from the preceding preference and screenshot checks.
   await page.evaluate(() => { collectDocumentFields(); historyCurrent = serializeDraft(); undoStack = []; redoStack = []; });
   await page.fill('#environment', 'STAGE2');
   await page.waitForFunction(() => !hasUnsavedLocalChanges && historyCurrent === serializeDraft() && undoStack.length > 0);
-  // Plain text publication must not inspect, download or upload attachments.
-  const beforeTextOnly = { manifests, uploads, downloads };
-  const localBefore = await sources();
-  await publish(null, false);
-  assert.deepEqual({ manifests, uploads, downloads }, beforeTextOnly);
-  assert.deepEqual(await sources(), localBefore, 'Text-only publication leaves local attachments untouched');
-  assert.match(comments.get('1000'), /Проверка|Проверить ответ/);
-  assert.doesNotMatch(comments.get('1000'), /shot\.png|response\.json|data:|blob:|\[\^|!.*thumbnail/);
-  // Cancellation and the next opening reset an explicitly enabled checkbox.
-  await page.click('#publishButton'); await page.check('#publishIncludeAttachments');
-  await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);
+  const writesBeforeReuse = commentWrites;
   await publish();
-  assert.equal(uploads, 2, 'Shared image and file each upload once');
-  assert.match(comments.get('1000'), /shot\.png/);
-  const confirmedSources = await sources();
-  const beforeTextUpdate = { manifests, uploads, downloads };
-  await publish(null, false);
-  assert.deepEqual({ manifests, uploads, downloads }, beforeTextUpdate);
-  assert.deepEqual(await sources(), confirmedSources, 'Removing attachments from a comment preserves their local bindings');
-  assert.doesNotMatch(comments.get('1000'), /shot\.png|response\.json|\[\^|!.*thumbnail/);
-  assert.equal(inventories.get(issueUrl).length, 2, 'Text-only updates do not delete Jira files');
+  assert.equal(uploads, 2, 'Both kinds reuse their earlier uploads');
   assert.equal((await sources()).every(asset => asset.id && asset.hash), true);
   await publish();
   assert.equal(uploads, 2, 'Updating without edits must not upload attachments');
@@ -214,7 +253,7 @@ async function main() {
   await page.reload(); await page.waitForSelector('.cell-file'); await setup();
   await publish();
   assert.equal(uploads, 2, 'Reloaded report must keep attachment bindings');
-  assert.equal(commentWrites, 7);
+  assert.equal(commentWrites, writesBeforeReuse + 5);
 
   // Changed bytes must get a new binding; old bytes in undo keep their own one.
   const originalSources = await sources();
@@ -320,7 +359,7 @@ async function main() {
   await page.evaluate(() => { draft.jiraAttachmentLinks = window.savedAttachmentLinks; delete window.savedAttachmentLinks; });
   await publish(); assert.equal(uploads, 33); assert.equal(downloads, beforeRecovery);
   assert.deepEqual(externalRequests, []); assert.deepEqual(errors, []);
-  console.log('PASS: text-only publication/update, opt-in attachments, checkbox reset, wiki/ADF/HTML conversion, themes/mobile, undo/redo/reload and attachment reuse without duplicate uploads.');
+  console.log('PASS: separate image/file exports, enabled defaults, persisted choices, wiki/ADF/HTML conversion, themes/mobile, undo/redo/reload and attachment reuse without duplicate uploads.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

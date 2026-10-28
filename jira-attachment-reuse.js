@@ -11,12 +11,29 @@
   function sourceUrl(value, issueUrl) {
     try { const url = new URL(value, issueUrl); return value && url.origin === new URL(issueUrl).origin && !url.username && !url.password && ["http:","https:"].includes(url.protocol) ? url.href : ""; } catch { return ""; }
   }
+  function attachmentKind(node) {
+    if (node.matches("img, .cell-image, .jira-image-placeholder")) return "image";
+    const href = node.getAttribute("href") || "";
+    let url;
+    try { url = new URL(href, "https://attachment.invalid"); } catch {}
+    const jiraLink = node.tagName === "A" && /\/(?:secure\/attachment\/|rest\/api\/(?:2|3)\/attachment\/(?:content|thumbnail)\/)/i.test(url?.pathname || "");
+    if (!jiraLink && !node.matches('.cell-file, .jira-file-placeholder, .jira-attachment-reference, video, audio, a[download], a[data-attachment-id], a[data-jira-id], a[data-jira-name], a[data-file-name], a[href^="data:"], a[href^="blob:"]')) return null;
+    const data = node.dataset;
+    const mime = data.mimeType || (data.dataUrl || href).match(/^data:([^;,]+)/i)?.[1] || "";
+    if (/^image\//i.test(mime) || data.jiraKind === "image") return "image";
+    if (mime && !/^application\/octet-stream$/i.test(mime)) return "file";
+    let name = data.fileName || data.jiraName || node.getAttribute("download") || url?.pathname || "";
+    try { name = decodeURIComponent(name); } catch {}
+    if (/\.(?:png|apng|jpe?g|gif|webp|svg|bmp|ico|tiff?|avif|heic|heif)(?:[?#].*)?$/i.test(name)
+      || /\.(?:png|apng|jpe?g|gif|webp|svg|bmp|ico|tiff?|avif|heic|heif)$/i.test(node.textContent.trim())) return "image";
+    return "file";
+  }
   function read(node) {
     const dataUrl = node.tagName === "IMG" ? node.getAttribute("src") || "" : node.dataset.dataUrl || "";
     return { attachmentId:node.dataset.attachmentId, name:node.dataset.fileName || node.dataset.jiraName || node.getAttribute("alt") || "file",
       external: /^https?:/i.test(dataUrl),
       type:node.dataset.mimeType || "application/octet-stream", dataUrl:dataUrl.startsWith("data:") ? dataUrl : "",
-      source:{ issueUrl:issueIdentity(node.dataset.jiraSourceIssue), id:node.dataset.jiraId || "", name:node.dataset.jiraName || "", url:node.dataset.jiraUrl || "", hash:node.dataset.jiraSourceHash || "", kind:node.dataset.jiraKind || (node.tagName === "IMG" ? "image":"file") } };
+      source:{ issueUrl:issueIdentity(node.dataset.jiraSourceIssue), id:node.dataset.jiraId || "", name:node.dataset.jiraName || "", url:node.dataset.jiraUrl || "", hash:node.dataset.jiraSourceHash || "", kind:attachmentKind(node) || "file" } };
   }
   const key = asset => JSON.stringify([asset.attachmentId,asset.dataUrl,asset.source.issueUrl,asset.source.id]);
   function collect(value) {
@@ -145,5 +162,5 @@
     value.intro=html(value.intro);
     for(const section of value.sections || [])for(const row of section.rows || [])for(const column of Object.keys(row.cells || {}))row.cells[column]=html(row.cells[column]);
   }
-  root.QaReportJiraReuse={issueIdentity,sourceUrl,collect,digest,uniqueName,normalizeLinks,remember,plan,bindings,apply,applyRoot};
+  root.QaReportJiraReuse={issueIdentity,sourceUrl,attachmentKind,collect,digest,uniqueName,normalizeLinks,remember,plan,bindings,apply,applyRoot};
 })(typeof window === "undefined" ? globalThis : window);

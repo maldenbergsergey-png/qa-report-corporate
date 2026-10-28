@@ -426,11 +426,14 @@ let codeEditorTextViews = null;
 let stickyUpdateFrame = 0;
 let pinnedColumns = loadPinnedColumns();
 let selectionMode = false;
+let reportStatusFilter = null;
+let previewHasStatusFilter = false;
 let selectedRowIds = new Set();
 let selectionDraftId = null;
 let selectionTransferAction = "copy";
 const selectionUi = Object.fromEntries([
   "Toggle", "Toolbar", "All", "Count", "StatusButton", "StatusMenu", "StatusOptions", "StatusCount", "StatusApply",
+  "FilterButton", "FilterMenu", "FilterOptions", "FilterAll", "FilterApply", "FilterReset",
   "MoveButton", "MoveMenu", "TransferHint", "Search", "Destinations", "NewSection", "CreateForm", "CreateSubmit", "NewTitle", "CopyButton", "Delete", "Exit",
 ].map((name) => [name, document.getElementById(`selection${name}`)]));
 let linkEditorRange = null;
@@ -2483,6 +2486,41 @@ function render() {
   renderPublicationState();
 }
 
+function matchesReportStatusFilter(row) {
+  return reportStatusFilter === null || reportStatusFilter.has(row.status);
+}
+
+function checklistRows(section) {
+  return window.QaReportTable.visibleRows(section).filter(matchesReportStatusFilter);
+}
+
+function updateReportStatusFilterUi() {
+  const rows = draft.sections.flatMap((section) => section.rows);
+  const count = rows.filter(matchesReportStatusFilter).length;
+  const active = reportStatusFilter !== null;
+  document.getElementById("reportStatusFilterBar").hidden = !active;
+  document.getElementById("reportStatusFilterSummary").textContent =
+    `Показано пунктов: ${count} из ${rows.length}. Статусы: ${[...(reportStatusFilter || [])].join(", ") || "не выбраны"}`;
+  document.getElementById("selectionFilterLabel").textContent = active
+    ? `Показывать: ${reportStatusFilter.size} из ${Object.keys(STATUS_META).length}` : "Показывать: все статусы";
+  selectionUi.FilterButton.classList.toggle("filter-active", active);
+}
+
+function updateReportStatusFilterOptions() {
+  const inputs = [...selectionUi.FilterOptions.querySelectorAll("input")];
+  const count = inputs.filter(input => input.checked).length;
+  selectionUi.FilterAll.checked = count === inputs.length;
+  selectionUi.FilterAll.indeterminate = count > 0 && count < inputs.length;
+}
+
+function setReportStatusFilter(statuses) {
+  flushDraftFromDom();
+  reportStatusFilter = statuses === null || statuses.size === Object.keys(STATUS_META).length ? null : new Set(statuses);
+  closeSelectionMenus();
+  renderSections();
+  renderSummary();
+}
+
 function createSelectionCheckbox(label) {
   const input = document.createElement("input");
   input.type = "checkbox";
@@ -2492,7 +2530,7 @@ function createSelectionCheckbox(label) {
 }
 
 function closeSelectionMenus() {
-  for (const name of ["Status", "Move"]) {
+  for (const name of ["Status", "Filter", "Move"]) {
     selectionUi[`${name}Menu`].hidden = true;
     selectionUi[`${name}Button`].setAttribute("aria-expanded", "false");
   }
@@ -2511,7 +2549,7 @@ function setSelectionMode(enabled) {
 }
 
 function updateSelectionUi() {
-  const rows = draft.sections.flatMap((section) => section.rows);
+  const rows = draft.sections.flatMap(checklistRows);
   const currentIds = new Set(rows.map((row) => row.id));
   selectedRowIds = new Set([...selectedRowIds].filter((id) => currentIds.has(id)));
   const count = selectedRowIds.size;
@@ -2530,9 +2568,10 @@ function updateSelectionUi() {
   const sectionsById = new Map(draft.sections.map((section) => [section.id, section]));
   elements.sections.querySelectorAll("[data-selection-section]").forEach((checkbox) => {
     const section = sectionsById.get(checkbox.dataset.selectionSection);
-    const selected = section.rows.filter((row) => selectedRowIds.has(row.id)).length;
-    checkbox.checked = selected > 0 && selected === section.rows.length;
-    checkbox.indeterminate = selected > 0 && selected < section.rows.length;
+    const rows = checklistRows(section);
+    const selected = rows.filter((row) => selectedRowIds.has(row.id)).length;
+    checkbox.checked = selected > 0 && selected === rows.length;
+    checkbox.indeterminate = selected > 0 && selected < rows.length;
   });
   if (!selectionUi.MoveMenu.hidden) updateSelectionTransferAction();
 }
@@ -2551,9 +2590,16 @@ function openSelectionMenu(name) {
     document.querySelector('[name="selectionTransferAction"][value="copy"]').checked = true;
     updateSelectionTransferAction();
     selectionUi.Search.focus();
+  } else if (name === "Filter") {
+    selectionUi.FilterOptions.querySelectorAll("input").forEach(input => {
+      input.checked = reportStatusFilter === null || reportStatusFilter.has(input.value);
+    });
+    updateReportStatusFilterOptions();
+    selectionUi.FilterAll.focus();
   } else {
     selectionUi.StatusOptions.querySelector("input")?.focus();
   }
+  updateSelectionMenuLayout();
   scheduleStickySectionUpdate();
 }
 
@@ -2852,6 +2898,7 @@ function renderSections() {
   const viewport = preserveViewport ? captureChecklistViewport() : null;
   const revision = ++renderSectionsRevision;
   if (selectionDraftId !== draft.draftId) {
+    reportStatusFilter = null;
     selectedRowIds.clear();
     selectionDraftId = draft.draftId;
     closeSelectionMenus();
@@ -2860,6 +2907,7 @@ function renderSections() {
   const sectionNumbers = ChecklistNumbering.sectionNumbers(draft);
   elements.sections.innerHTML = "";
   draft.sections.forEach((section) => {
+    if (reportStatusFilter !== null && !checklistRows(section).length) return;
     const fragment = elements.sectionTemplate.content.cloneNode(true);
     const sectionElement = fragment.querySelector(".check-section");
     sectionElement.dataset.sectionId = section.id;
@@ -2916,6 +2964,13 @@ function renderSections() {
     enhanceImageControls(sectionElement);
     enhanceFileControls(sectionElement);
   });
+  if (reportStatusFilter !== null && !elements.sections.childElementCount) {
+    const empty = document.createElement("p");
+    empty.className = "report-filter-empty";
+    empty.textContent = "Нет пунктов с выбранными статусами. Измените фильтр или нажмите «Сбросить».";
+    elements.sections.append(empty);
+  }
+  updateReportStatusFilterUi();
   updateSelectionUi();
   applyPinnedColumns();
   if (viewport) {
@@ -2946,7 +3001,7 @@ function renderTable(fragment, section, rowNumbers) {
     const checkbox = createSelectionCheckbox(`Выбрать все строки раздела «${section.title}»`);
     checkbox.dataset.selectionSection = section.id;
     checkbox.addEventListener("change", () => {
-      section.rows.forEach((row) => checkbox.checked ? selectedRowIds.add(row.id) : selectedRowIds.delete(row.id));
+      checklistRows(section).forEach((row) => checkbox.checked ? selectedRowIds.add(row.id) : selectedRowIds.delete(row.id));
       updateSelectionUi();
     });
     cell.append(checkbox);
@@ -2980,7 +3035,7 @@ function renderTable(fragment, section, rowNumbers) {
   headerTable.style.minWidth = "100%";
 
   const tbody = fragment.querySelector("tbody");
-  window.QaReportTable.visibleRows(section).forEach((row) => tbody.append(createRowElement(section, row, rowNumbers.get(row.id))));
+  checklistRows(section).forEach((row) => tbody.append(createRowElement(section, row, rowNumbers.get(row.id))));
   tbody.addEventListener("dragover", (event) => {
     if (section.statusSort || !hasDragType(event, "text/row-id")) return;
     event.preventDefault();
@@ -3048,7 +3103,7 @@ function getStickyOffset() {
 }
 
 function updateSelectionMenuLayout() {
-  for (const [menu, list] of [[selectionUi.StatusMenu, selectionUi.StatusOptions], [selectionUi.MoveMenu, selectionUi.Destinations]]) {
+  for (const [menu, list] of [[selectionUi.StatusMenu, selectionUi.StatusOptions], [selectionUi.FilterMenu, selectionUi.FilterOptions], [selectionUi.MoveMenu, selectionUi.Destinations]]) {
     if (menu.hidden) continue;
     const scrollTop = list.scrollTop;
     // Only the options list scrolls. Keep search, the creation form and actions visible.
@@ -3384,7 +3439,7 @@ function createRowElement(section, row, number) {
   statusSelect.addEventListener("change", () => {
     row.status = statusSelect.value;
     setStatusClass(statusSelect, row.status);
-    if (section.statusSort) {
+    if (section.statusSort || reportStatusFilter !== null) {
       flushDraftFromDom(); renderSections(); renderSummary(); saveLocalMutationNow(); return;
     }
     // The captured row may predate autosave. scheduleSave synchronizes the current draft.
@@ -3850,11 +3905,15 @@ function hasRowContent(row) {
 }
 
 function renderSummary() {
-  const rows = draft.sections.flatMap((section) => section.rows).filter(hasRowContent);
+  const rows = draft.sections.flatMap((section) => section.rows).filter(matchesReportStatusFilter).filter(hasRowContent);
+  document.getElementById("summaryNote").textContent = reportStatusFilter !== null
+    ? "Сводка по показанным пунктам. Незаполненные строки не учитываются."
+    : "Статусы пересчитываются автоматически. Незаполненные строки не попадают в сводку.";
   elements.summaryTotal.textContent = rows.length;
   elements.summaryChart.innerHTML = "";
   elements.summaryList.innerHTML = "";
   Object.entries(STATUS_META).forEach(([status, meta]) => {
+    if (reportStatusFilter !== null && !reportStatusFilter.has(status)) return;
     const count = rows.filter((row) => row.status === status).length;
     const segment = document.createElement("div");
     segment.className = "chart-segment";
@@ -5075,6 +5134,7 @@ function updatePublishScopeState() {
 
 function askPublishScope(link = null) {
   if (publishScopeResolver) return Promise.resolve(null);
+  document.getElementById("publishStatusFilterHint").hidden = reportStatusFilter === null;
   elements.publishScopeList.replaceChildren();
   const statusList = document.getElementById("publishStatusList");
   statusList.replaceChildren();
@@ -5083,7 +5143,7 @@ function askPublishScope(link = null) {
     label.className = "publish-scope-option";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = !link || link.statuses.includes(status);
+    checkbox.checked = reportStatusFilter !== null ? reportStatusFilter.has(status) : !link || link.statuses.includes(status);
     checkbox.value = status;
     checkbox.addEventListener("change", updatePublishScopeState);
     const text = document.createElement("span");
@@ -5379,8 +5439,14 @@ async function publishToJira(mode = "auto") {
 }
 
 function openPreview() {
-  elements.markupPreview.value = generateMarkup();
-  elements.visualPreview.innerHTML = generateVisualPreview();
+  const options = { statuses: reportStatusFilter };
+  previewHasStatusFilter = reportStatusFilter !== null;
+  document.getElementById("previewStatusFilterHint").hidden = !previewHasStatusFilter;
+  elements.modalSaveMarkupButton.disabled = previewHasStatusFilter;
+  elements.modalSaveMarkupButton.title = previewHasStatusFilter
+    ? "Сбросьте фильтр, чтобы сохранить отредактированную разметку в отчёт" : "Сохранить результат экспорта";
+  elements.markupPreview.value = generateMarkup(options);
+  elements.visualPreview.innerHTML = generateVisualPreview(draft, null, options);
   elements.previewModal.hidden = false;
   syncBodyModalOverflow();
 }
@@ -7771,8 +7837,8 @@ async function handleInboundChecklistImport() {
 }
 
 async function copyMarkup() {
-  const markup = generateMarkup();
-  if (!draft.sections.some((section) => section.rows.some(hasRowContent))) {
+  const markup = generateMarkup({ statuses: reportStatusFilter });
+  if (!draft.sections.some((section) => section.rows.some(row => matchesReportStatusFilter(row) && hasRowContent(row)))) {
     showToast("Добавьте хотя бы одну заполненную строку");
     return;
   }
@@ -7799,6 +7865,10 @@ async function copyPreviewMarkup() {
 }
 
 async function savePreviewMarkupToDraft() {
+  if (previewHasStatusFilter) {
+    showToast("Сбросьте фильтр и откройте предпросмотр заново, чтобы сохранить разметку в отчёт");
+    return;
+  }
   try {
     const imported = parseJiraMarkup(elements.markupPreview.value, collectCurrentAttachments());
     ChecklistNumbering.configureImport(imported, draft.numberingMode === "manual", draft.numberingMode);
@@ -7860,6 +7930,7 @@ function openHtmlCopyScope(event) {
     showToast("Добавьте хотя бы одну заполненную строку");
     return;
   }
+  document.getElementById("htmlCopyStatusFilterHint").hidden = reportStatusFilter === null;
   htmlCopyScopeSession = { documentId: draft.draftId, busy: false, trigger: event?.currentTarget || elements.copyVisualButton };
   closeHeaderDropdowns();
   const populate = (type, options) => {
@@ -7870,7 +7941,7 @@ function openHtmlCopyScope(event) {
       label.className = "publish-scope-option";
       const input = document.createElement("input");
       input.type = "checkbox";
-      input.checked = true;
+      input.checked = type !== "Status" || reportStatusFilter === null || reportStatusFilter.has(value);
       input.value = value;
       input.addEventListener("change", updateHtmlCopyScopeState);
       const text = document.createElement("span");
@@ -8030,7 +8101,7 @@ function getXlsxStatusStyle(status) {
   return XLSX_STATUS_STYLES[status] || XLSX_STATUS_STYLES["НЕ ПРОВЕРЕНО"];
 }
 
-function buildXlsxWorksheet() {
+function buildXlsxWorksheet(options = {}) {
   collectDocumentFields();
   const sharedStrings = createSharedStringStore();
   const rows = [];
@@ -8091,7 +8162,7 @@ function buildXlsxWorksheet() {
   }
 
   const rowNumbers = ChecklistNumbering.rowNumbers(draft);
-  draft.sections.forEach((section) => {
+  sectionsForPublication(options.sectionIds, draft, options.statuses).forEach((section) => {
     const contentRows = section.rows.filter(hasRowContent);
     if (!contentRows.length) return;
     rowIndex += 2;
@@ -8251,8 +8322,8 @@ function createZip(files) {
   });
 }
 
-function buildChecklistXlsxBlob() {
-  const { sheetXml, sharedStringsXml } = buildXlsxWorksheet();
+function buildChecklistXlsxBlob(options = {}) {
+  const { sheetXml, sharedStringsXml } = buildXlsxWorksheet(options);
   const now = new Date().toISOString();
   return createZip([
     { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>` },
@@ -8465,12 +8536,13 @@ function safeExportFilename() {
 }
 
 function exportChecklistXlsx() {
-  if (!draft.sections.some((section) => section.rows.some(hasRowContent))) {
+  flushDraftFromDom();
+  if (!draft.sections.some((section) => section.rows.some(row => matchesReportStatusFilter(row) && hasRowContent(row)))) {
     showToast("Добавьте хотя бы одну заполненную строку");
     return;
   }
   try {
-    const blob = buildChecklistXlsxBlob();
+    const blob = buildChecklistXlsxBlob({ statuses: reportStatusFilter });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -8596,7 +8668,7 @@ async function resetDraft() {
 selectionUi.Toggle.addEventListener("click", () => setSelectionMode(!selectionMode));
 selectionUi.Exit.addEventListener("click", () => setSelectionMode(false));
 selectionUi.All.addEventListener("change", () => {
-  selectedRowIds = selectionUi.All.checked ? new Set(draft.sections.flatMap((section) => section.rows.map((row) => row.id))) : new Set();
+  selectedRowIds = selectionUi.All.checked ? new Set(draft.sections.flatMap(checklistRows).map((row) => row.id)) : new Set();
   updateSelectionUi();
 });
 for (const status of Object.keys(STATUS_META)) {
@@ -8612,6 +8684,35 @@ function updateSelectionStatusCount() {
   selectionUi.StatusCount.textContent = `Статусов: ${selectionUi.StatusOptions.querySelectorAll("input:checked").length}`;
 }
 updateSelectionStatusCount();
+for (const [status, meta] of Object.entries(STATUS_META)) {
+  const label = document.createElement("label");
+  const checkbox = createSelectionCheckbox(status);
+  checkbox.value = status;
+  const dot = document.createElement("span");
+  dot.className = "summary-color";
+  dot.style.background = meta.color;
+  label.append(checkbox, dot, document.createTextNode(status));
+  selectionUi.FilterOptions.append(label);
+}
+selectionUi.FilterButton.addEventListener("click", () => openSelectionMenu("Filter"));
+selectionUi.FilterOptions.addEventListener("change", updateReportStatusFilterOptions);
+selectionUi.FilterAll.addEventListener("change", () => {
+  selectionUi.FilterOptions.querySelectorAll("input").forEach(input => { input.checked = selectionUi.FilterAll.checked; });
+  updateReportStatusFilterOptions();
+});
+selectionUi.FilterApply.addEventListener("click", () => {
+  setReportStatusFilter(new Set([...selectionUi.FilterOptions.querySelectorAll("input:checked")].map(input => input.value)));
+  selectionUi.FilterButton.focus();
+});
+selectionUi.FilterReset.addEventListener("click", () => { setReportStatusFilter(null); selectionUi.FilterButton.focus(); });
+document.getElementById("resetReportStatusFilter").addEventListener("click", () => {
+  setReportStatusFilter(null);
+  selectionUi.Toggle.focus();
+});
+document.getElementById("editReportStatusFilter").addEventListener("click", () => {
+  if (!selectionMode) setSelectionMode(true);
+  openSelectionMenu("Filter");
+});
 selectionUi.StatusButton.addEventListener("click", () => openSelectionMenu("Status"));
 selectionUi.MoveButton.addEventListener("click", () => openSelectionMenu("Move"));
 selectionUi.StatusApply.addEventListener("click", () => {
@@ -8628,6 +8729,8 @@ function setSelectionCreateExpanded(expanded) {
   selectionUi.CreateForm.hidden = !expanded;
   selectionUi.NewSection.setAttribute("aria-expanded", String(expanded));
   selectionUi.NewSection.textContent = `${expanded ? "−" : "＋"} Создать новый раздел`;
+  // Fit newly shown actions before the next frame can expose clipped controls.
+  updateSelectionMenuLayout();
   scheduleStickySectionUpdate();
 }
 selectionUi.NewSection.addEventListener("click", () => {
@@ -8660,7 +8763,7 @@ document.addEventListener("pointerdown", (event) => {
 selectionUi.Toolbar.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   event.stopPropagation();
-  const openName = ["Status", "Move"].find((name) => !selectionUi[`${name}Menu`].hidden);
+  const openName = ["Status", "Filter", "Move"].find((name) => !selectionUi[`${name}Menu`].hidden);
   if (openName) {
     closeSelectionMenus();
     selectionUi[`${openName}Button`].focus();
@@ -9923,7 +10026,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("scroll", (event) => {
   // Scrolling an options list does not move its anchor or change the sticky stack.
-  if (event.target === selectionUi.Destinations || event.target === selectionUi.StatusOptions) return;
+  if (event.target === selectionUi.Destinations || event.target === selectionUi.StatusOptions || event.target === selectionUi.FilterOptions) return;
   closeFloatingMenu();
   if (!elements.linkPopover.hidden && !elements.linkPopover.contains(event.target)) positionLinkPopover();
   scheduleStickySectionUpdate();

@@ -1,7 +1,7 @@
 window.QaReportReleases = [
   {
     version: "0.27.0", date: "2026-10-28",
-    changes: { new: [], improvements: [], fixes: [] }
+    changes: { new: ["Выбирайте статусы в меню «Показывать» на панели выделения: чек-лист, сводка и экспорт покажут нужные пункты, а публикация учтёт ваш выбор."], improvements: [], fixes: [] }
   },
   {
     version: "0.26.0", date: "2026-10-21",

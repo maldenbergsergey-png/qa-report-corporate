@@ -11,7 +11,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=144" />
+    <link rel="stylesheet" href="/styles.css?v=145" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
   <body>
@@ -361,6 +361,15 @@
               </div>
             </div>
             <div class="selection-menu-wrap">
+              <button id="selectionFilterButton" type="button" aria-expanded="false" aria-controls="selectionFilterMenu"><span id="selectionFilterLabel">Показывать: все статусы</span> <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+              <div id="selectionFilterMenu" class="selection-menu" role="group" aria-labelledby="selectionFilterTitle" hidden>
+                <strong id="selectionFilterTitle">Показывать пункты со статусами</strong>
+                <label class="selection-all"><input id="selectionFilterAll" class="selection-checkbox" type="checkbox" /> Все статусы</label>
+                <div id="selectionFilterOptions"></div>
+                <div class="selection-menu-footer"><button id="selectionFilterReset" type="button">Сбросить</button><button id="selectionFilterApply" type="button" class="button button-primary">Применить</button></div>
+              </div>
+            </div>
+            <div class="selection-menu-wrap">
               <button id="selectionMoveButton" type="button" aria-expanded="false" aria-controls="selectionMoveMenu" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-section-split"></use></svg> Копировать или перенести <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
               <div id="selectionMoveMenu" class="selection-menu selection-move-menu" hidden>
                 <fieldset class="selection-transfer-options" aria-describedby="selectionTransferHint">
@@ -420,6 +429,11 @@
             data-placeholder="Добавьте вводный текст: что проверялось, сборка, важные условия…"
           ></div>
 
+          <div id="reportStatusFilterBar" class="report-status-filter-bar" role="region" aria-label="Фильтр по статусам" hidden>
+            <span id="reportStatusFilterSummary" role="status" aria-live="polite"></span>
+            <button id="editReportStatusFilter" type="button" class="text-button">Изменить</button>
+            <button id="resetReportStatusFilter" type="button" class="text-button">Сбросить</button>
+          </div>
           <div class="sections" id="sections"></div>
 
           <button class="add-section-button" id="addSectionButton" type="button">
@@ -438,7 +452,7 @@
           </div>
           <div class="summary-chart" id="summaryChart"></div>
           <div class="summary-list" id="summaryList"></div>
-          <div class="summary-note">
+          <div class="summary-note" id="summaryNote">
             Статусы пересчитываются автоматически. Незаполненные строки не попадают в сводку.
           </div>
         </aside>
@@ -492,6 +506,7 @@
           <button class="preview-tab" data-preview-tab="markup" type="button">Разметка</button>
         </div>
         <div class="preview-body">
+          <p id="previewStatusFilterHint" class="publish-scope-hint" hidden>Предпросмотр учитывает фильтр статусов. Чтобы сохранить правки разметки в отчёт, сначала сбросьте фильтр.</p>
           <div id="visualPreview" class="jira-preview"></div>
           <textarea id="markupPreview" class="markup-preview" aria-label="Редактируемая Jira-разметка" hidden></textarea>
         </div>
@@ -563,6 +578,7 @@
           <p class="publish-scope-hint">
             В комментарий и вложения попадут строки с выбранными статусами из отмеченных разделов.
           </p>
+          <p id="publishStatusFilterHint" class="publish-scope-hint" hidden>Выбраны статусы из фильтра чек-листа. Перед отправкой их можно изменить.</p>
           <h3 class="publish-scope-heading">Статусы строк</h3>
           <label class="publish-scope-option publish-scope-option-all">
             <input id="publishStatusSelectAll" type="checkbox" checked />
@@ -648,6 +664,7 @@
         </header>
         <div class="publish-scope-body">
           <p class="publish-scope-hint" id="htmlCopyScopeHint">В копию попадут заполненные пункты с выбранными статусами из отмеченных разделов. Номера пунктов сохранятся.</p>
+          <p id="htmlCopyStatusFilterHint" class="publish-scope-hint" hidden>Выбраны статусы из фильтра чек-листа. Перед копированием их можно изменить.</p>
           <h3 class="publish-scope-heading">Статусы строк</h3>
           <label class="publish-scope-option publish-scope-option-all">
             <input id="htmlCopyStatusSelectAll" type="checkbox" checked />
@@ -1212,7 +1229,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=93"></script>
+    <script src="/release-notes.js?v=94"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
@@ -1299,7 +1316,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=39"></script>
-    <script src="/app.js?v=157"></script>
+    <script src="/app.js?v=158"></script>
     <script src="/local-import-client.js?v=7"></script>
   </body>
 </html>

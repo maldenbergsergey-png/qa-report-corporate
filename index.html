@@ -577,7 +577,7 @@
         </header>
         <div class="publish-scope-body">
           <p class="publish-scope-hint">
-            В комментарий и вложения попадут строки с выбранными статусами из отмеченных разделов.
+            В комментарий попадут строки с выбранными статусами из отмеченных разделов.
           </p>
           <p id="publishStatusFilterHint" class="publish-scope-hint" hidden>Выбраны статусы из фильтра чек-листа. Перед отправкой их можно изменить.</p>
           <h3 class="publish-scope-heading">Статусы строк</h3>
@@ -593,6 +593,12 @@
             <span>Все разделы</span>
           </label>
           <div class="publish-scope-list" id="publishScopeList"></div>
+          <h3 class="publish-scope-heading">Экспорт вложений</h3>
+          <label class="publish-scope-option">
+            <input id="publishIncludeAttachments" type="checkbox" aria-describedby="publishAttachmentsHint" />
+            <span>Включить вложения</span>
+          </label>
+          <p id="publishAttachmentsHint" class="publish-scope-hint">По умолчанию отправляется только текст — без изображений, файлов и ссылок на них. Вложения в чек-листе сохраняются.</p>
         </div>
         <footer class="modal-footer">
           <span id="publishScopeSummary" aria-live="polite"></span>
@@ -1230,7 +1236,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=95"></script>
+    <script src="/release-notes.js?v=96"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
@@ -1317,7 +1323,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=39"></script>
-    <script src="/app.js?v=159"></script>
+    <script src="/app.js?v=160"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

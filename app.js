@@ -4046,9 +4046,21 @@ function escapeWikiNotEquals(value, protect = value => value) {
   return value.replace(/!=/g, () => protect("\\!="));
 }
 
-function htmlToWiki(html, {protect = value => value, forPublication = false} = {}) {
+function removeExportAttachments(container) {
+  const imageLinks = new Set();
+  container.querySelectorAll('.cell-image, .cell-file, .jira-image-placeholder, .jira-file-placeholder, img, video, audio, a[download], a[data-attachment-id], a[data-jira-id], a[data-jira-name], a[href^="data:"], a[href^="blob:"]').forEach((node) => {
+    const link = node.closest("a");
+    if (link && link !== node) imageLinks.add(link);
+    node.remove();
+  });
+  // Keep a linked image's caption as text, without leaving an empty attachment link.
+  imageLinks.forEach((link) => link.replaceWith(...link.childNodes));
+}
+
+function htmlToWiki(html, {protect = value => value, forPublication = false, includeAttachments = true} = {}) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
+  if (!includeAttachments) removeExportAttachments(container);
   function childrenToWiki(parent) {
     const parts = [];
     let inline = "";
@@ -4154,12 +4166,12 @@ function normalizeJiraCellWhitespace(value) {
   return lines.join("\n");
 }
 
-function jiraCell(value, {forPublication = false} = {}) {
+function jiraCell(value, {forPublication = false, includeAttachments = true} = {}) {
   const protectedBlocks = [];
   const tokenPrefix = `@@JIRA_CELL_${crypto.randomUUID()}_`;
   // Generate syntax only after escaping text; never run a second escape over it.
   const escapeCellText = text => text.replace(/\\/g, "&#92;").replace(/\|/g, "\\|");
-  let content = htmlToWiki(value, {forPublication, protect: (block, kind) => {
+  let content = htmlToWiki(value, {forPublication, includeAttachments, protect: (block, kind) => {
     const token = `${tokenPrefix}${protectedBlocks.length}@@`;
     protectedBlocks.push(kind === "list" ? escapeCellText(block) : block);
     return token;
@@ -4250,7 +4262,7 @@ function sectionsForPublication(sectionIds = null, sourceDraft = draft, statuses
 }
 
 function generateMarkup(options = {}) {
-  const { sectionIds = null, statuses = null, forPublication = false } = options;
+  const { sectionIds = null, statuses = null, forPublication = false, includeAttachments = true } = options;
   const publicationText = value => forPublication
     ? window.QaReportJiraPublication.textForPublication(value, { wiki: true })
     : value;
@@ -4264,7 +4276,7 @@ function generateMarkup(options = {}) {
     heading.push(`{color:${overallColor}}*ТЕСТ — ${draft.overallStatus}*{color}`);
   }
   if (heading.length) blocks.push(heading.join("\n"));
-  const intro = htmlToWiki(draft.intro, {forPublication});
+  const intro = htmlToWiki(draft.intro, {forPublication, includeAttachments});
   if (intro) blocks.push(intro);
 
   sectionsForPublication(sectionIds, draft, statuses).forEach((section) => {
@@ -4275,7 +4287,7 @@ function generateMarkup(options = {}) {
       `||${["Номер", ...section.columns.map((column) => escapeWikiNotEquals(publicationText(column.title || "Без названия"))), "Статус"].join("||")}||`,
     );
     rows.forEach((row) => {
-      const values = section.columns.map((column) => jiraCell(row.cells[column.id] || "", {forPublication}));
+      const values = section.columns.map((column) => jiraCell(row.cells[column.id] || "", {forPublication, includeAttachments}));
       const status = `{color:${STATUS_META[row.status].jiraColor}}*${row.status}*{color}`;
       lines.push(`|${[jiraCell(escapeHtml(rowNumbers.get(row.id)), {forPublication}), ...values, status].join("|")}|`);
     });
@@ -4387,6 +4399,7 @@ function wrapPortableUrls(container) {
 function generatePortableHtml(options = {}) {
   const container = document.createElement("div");
   container.innerHTML = generateVisualPreview(draft, null, options);
+  if (options.includeAttachments === false) removeExportAttachments(container);
   container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
   container.style.color = "#202124";
   container.style.background = "#ffffff";
@@ -5001,11 +5014,12 @@ function cancelPublishProgress() {
 }
 
 async function uploadPendingImages(settings, issue, options = {}) {
-  const { signal, onProgress = () => {}, sectionIds = null, statuses = null } = options;
+  const { signal, onProgress = () => {}, sectionIds = null, statuses = null, includeAttachments = true } = options;
+  const summary = document.getElementById("publishAttachmentSummary"); summary.hidden = true;
+  if (!includeAttachments) return [];
   const reuse = window.QaReportJiraReuse;
   const publication = { ...draft, sections: sectionsForPublication(sectionIds, draft, statuses) };
   const assets = reuse.collect(publication);
-  const summary = document.getElementById("publishAttachmentSummary"); summary.hidden = true;
   if (!assets.length) return [];
   setPublishProgress({ step: "prepare", percent: 10, status: "Проверяем вложения в Jira…" });
   const manifest = await jiraRequest("/api/jira/attachment-manifest", { ...settings, ...issue }, { signal });
@@ -5134,6 +5148,7 @@ function updatePublishScopeState() {
 
 function askPublishScope(link = null) {
   if (publishScopeResolver) return Promise.resolve(null);
+  document.getElementById("publishIncludeAttachments").checked = false;
   document.getElementById("publishStatusFilterHint").hidden = reportStatusFilter === null;
   elements.publishScopeList.replaceChildren();
   const statusList = document.getElementById("publishStatusList");
@@ -5191,6 +5206,7 @@ function resolvePublishScope(accepted) {
   resolve(accepted ? {
     sectionIds,
     statuses: new Set([...document.querySelectorAll('#publishStatusList input:checked')].map((input) => input.value)),
+    includeAttachments: document.getElementById("publishIncludeAttachments").checked,
   } : null);
 }
 
@@ -5379,9 +5395,8 @@ async function publishToJira(mode = "auto") {
     setPublishProgress({ step: "prepare", percent: 8, status: "Подготовка отчёта" });
     renderPublicationState();
     await uploadPendingImages(settings, issue, {
+      ...scope,
       signal: publishAbortController.signal,
-      sectionIds,
-      statuses,
       onProgress: ({ done, total }) => {
         const percent = total ? 15 + Math.round((done / total) * 45) : 55;
         setPublishProgress({
@@ -5392,7 +5407,7 @@ async function publishToJira(mode = "auto") {
       },
     });
     if (draft.reportId !== publicationReportId) throw new Error("Открыт другой отчёт. Повторите публикацию из нужного отчёта.");
-    const comment = { format: "wiki", body: generateMarkup({ sectionIds, statuses, forPublication: true }) };
+    const comment = { format: "wiki", body: generateMarkup({ ...scope, forPublication: true }) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
       sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],

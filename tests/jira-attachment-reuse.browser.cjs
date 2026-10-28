@@ -116,10 +116,36 @@ async function main() {
     collectDocumentFields();
     historyCurrent = serializeDraft(); undoStack = []; redoStack = [];
   }, issueUrl);
-  await page.fill('#environment', 'STAGE2');
-  await page.waitForFunction(() => !hasUnsavedLocalChanges && historyCurrent === serializeDraft() && undoStack.length > 0);
-  const publish = async (expectedError = null) => {
-    await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  const conversion = await page.evaluate(() => {
+    const html = '<p>Текст <strong>жирный</strong> <a href="https://docs.example.test/help">Справка</a></p>'
+      + '<a href="https://jira.example/attachment/linked.png"><img data-file-name="linked.png">Подпись</a>'
+      + '<span class="jira-image-placeholder" data-jira-name="missing-image.png">missing-image.png</span>'
+      + '<span class="jira-file-placeholder" data-jira-name="missing-file.txt">missing-file.txt</span>'
+      + '<figure class="cell-file jira-attachment-reference" data-jira-id="42"><span>remote-file.txt</span></figure>'
+      + createFileCardHtml({ id: 'sample-file', name: 'sample.json', type: 'application/json', dataUrl: 'data:application/json;base64,e30=' })
+      + '<pre class="cell-code-block"><code>const result = 1;</code></pre>';
+    const before = serializeDraft();
+    const options = { includeAttachments: false, forPublication: true };
+    const result = { wiki: jiraCell(html, options), wikiDefault: jiraCell(html),
+      markup: generateMarkup(options), portable: generatePortableHtml(options),
+      adf: typeof generateAdfDocument === 'function' ? JSON.stringify(generateAdfDocument(options)) : null,
+      adfBlocks: typeof htmlToAdfBlocks === 'function' ? JSON.stringify(htmlToAdfBlocks(html, options)) : null };
+    result.unchanged = before === serializeDraft();
+    return result;
+  });
+  assert.equal(conversion.unchanged, true);
+  assert.match(conversion.wiki, /\*жирный\*.*Справка.*https:\/\/docs.example.test\/help/);
+  assert.match(conversion.wiki, /Подпись/);
+  assert.match(conversion.wiki, /const result = 1;/);
+  assert.match(conversion.wikiDefault, /linked\.png|missing-image\.png|sample\.json/);
+  for (const output of [conversion.wiki, conversion.markup, conversion.portable, conversion.adf, conversion.adfBlocks].filter(Boolean)) {
+    assert.doesNotMatch(output, /shot\.png|response\.json|linked\.png|missing-image\.png|missing-file\.txt|remote-file\.txt|sample\.json|<img|cell-file|data:|blob:/);
+  }
+  const publish = async (expectedError = null, includeAttachments = true) => {
+    await page.click('#publishButton');
+    assert.equal(await page.locator('#publishIncludeAttachments').isChecked(), false, 'Each publication starts without attachments');
+    if (includeAttachments) await page.check('#publishIncludeAttachments');
+    await page.click('#acceptPublishScopeButton');
     await page.waitForFunction(() => !publishInProgress);
     const message = await page.locator('#publishErrorText').textContent();
     assert.equal(await page.locator('#publishErrorText').isVisible(), Boolean(expectedError), message);
@@ -130,8 +156,47 @@ async function main() {
   const sources = async () => page.evaluate(() => QaReportJiraReuse.collect(draft).map(asset => ({
     attachmentId:asset.attachmentId, id:asset.source.id, issueUrl:asset.source.issueUrl, hash:asset.source.hash,
   })));
+  // The final section and confirmation remain reachable in every theme on a narrow screen.
+  const screenshots = process.env.QA_REPORT_SCREENSHOTS;
+  if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
+  for (const width of [1440, 390]) for (const theme of ['light', 'graphite', 'dark']) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; void askPublishScope(); }, theme);
+    const option = page.locator('#publishIncludeAttachments');
+    await option.scrollIntoViewIfNeeded();
+    assert.equal(await option.isChecked(), false);
+    const bounds = await option.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y > 0);
+    assert.equal(await page.locator('#acceptPublishScopeButton').isVisible(), true);
+    if (screenshots) await page.locator('#publishScopeModal .modal').screenshot({ path: path.join(screenshots, `${theme}-${width}.png`) });
+    await page.click('#cancelPublishScopeButton');
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Isolate the content-edit history from the preceding layout and screenshot checks.
+  await page.evaluate(() => { collectDocumentFields(); historyCurrent = serializeDraft(); undoStack = []; redoStack = []; });
+  await page.fill('#environment', 'STAGE2');
+  await page.waitForFunction(() => !hasUnsavedLocalChanges && historyCurrent === serializeDraft() && undoStack.length > 0);
+  // Plain text publication must not inspect, download or upload attachments.
+  const beforeTextOnly = { manifests, uploads, downloads };
+  const localBefore = await sources();
+  await publish(null, false);
+  assert.deepEqual({ manifests, uploads, downloads }, beforeTextOnly);
+  assert.deepEqual(await sources(), localBefore, 'Text-only publication leaves local attachments untouched');
+  assert.match(comments.get('1000'), /Проверка|Проверить ответ/);
+  assert.doesNotMatch(comments.get('1000'), /shot\.png|response\.json|data:|blob:|\[\^|!.*thumbnail/);
+  // Cancellation and the next opening reset an explicitly enabled checkbox.
+  await page.click('#publishButton'); await page.check('#publishIncludeAttachments');
+  await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);
   await publish();
   assert.equal(uploads, 2, 'Shared image and file each upload once');
+  assert.match(comments.get('1000'), /shot\.png/);
+  const confirmedSources = await sources();
+  const beforeTextUpdate = { manifests, uploads, downloads };
+  await publish(null, false);
+  assert.deepEqual({ manifests, uploads, downloads }, beforeTextUpdate);
+  assert.deepEqual(await sources(), confirmedSources, 'Removing attachments from a comment preserves their local bindings');
+  assert.doesNotMatch(comments.get('1000'), /shot\.png|response\.json|\[\^|!.*thumbnail/);
+  assert.equal(inventories.get(issueUrl).length, 2, 'Text-only updates do not delete Jira files');
   assert.equal((await sources()).every(asset => asset.id && asset.hash), true);
   await publish();
   assert.equal(uploads, 2, 'Updating without edits must not upload attachments');
@@ -149,7 +214,7 @@ async function main() {
   await page.reload(); await page.waitForSelector('.cell-file'); await setup();
   await publish();
   assert.equal(uploads, 2, 'Reloaded report must keep attachment bindings');
-  assert.equal(commentWrites, 5);
+  assert.equal(commentWrites, 7);
 
   // Changed bytes must get a new binding; old bytes in undo keep their own one.
   const originalSources = await sources();
@@ -255,7 +320,7 @@ async function main() {
   await page.evaluate(() => { draft.jiraAttachmentLinks = window.savedAttachmentLinks; delete window.savedAttachmentLinks; });
   await publish(); assert.equal(uploads, 33); assert.equal(downloads, beforeRecovery);
   assert.deepEqual(externalRequests, []); assert.deepEqual(errors, []);
-  console.log('PASS: publish/update, shared occurrences, undo/redo/reload, changed bytes, deleted attachments, task changes and recovery of 27 legacy/unbound files keep correct bindings with no remote content downloads or duplicate uploads.');
+  console.log('PASS: text-only publication/update, opt-in attachments, checkbox reset, wiki/ADF/HTML conversion, themes/mobile, undo/redo/reload and attachment reuse without duplicate uploads.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

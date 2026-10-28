@@ -1067,7 +1067,7 @@
       current.created.uploadNames ||= {}; current.created.uploadNames[uploadKey] ||= file.name;
 
       await persist(current);
-      const payload = { ...settings, ...issue, operationId: current.created.uploadOperations[uploadKey], files: [{ attachmentId: current.created.uploadOperations[uploadKey], name: current.created.uploadNames[uploadKey], type: file.type, dataBase64: file.dataBase64 }] };
+      const payload = { ...settings, ...issue, uploadSession: manifest.uploadSession, operationId: current.created.uploadOperations[uploadKey], files: [{ attachmentId: current.created.uploadOperations[uploadKey], name: current.created.uploadNames[uploadKey], type: file.type, dataBase64: file.dataBase64 }] };
       // Retry the same UUID: Connect replays confirmed uploads and blocks an uncertain POST.
       const result = await retry(() => api.jiraRequest("/api/jira/attachments", payload, { retries: 0, signal }), current);
       if (!result.attachments?.[0]?.id) throw new Error("Сервер не подтвердил загрузку вложения");

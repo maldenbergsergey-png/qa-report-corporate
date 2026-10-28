@@ -25,6 +25,9 @@ const {
 } = require("./auth");
 
 const AttachmentLimits = require("./attachment-limits");
+const UploadRuntime = require("./jira-upload-runtime");
+const { createUploadStore } = require("./jira-upload-store");
+const uploadStore = createUploadStore(getReportsDb);
 const JiraPublication = require("./jira-publication");
 
 const { createAdminService } = require("./admin/server");
@@ -725,7 +728,7 @@ async function jiraFetch(connection, pathname, options = {}) {
   const method = String(fetchOptions.method || "GET").toUpperCase();
   let response;
   try {
-    response = await fetch(targetUrl, {
+    response = await UploadRuntime.request(fetch, targetUrl, {
       ...fetchOptions,
       redirect: "manual",
       headers: {
@@ -736,6 +739,7 @@ async function jiraFetch(connection, pathname, options = {}) {
       },
     });
   } catch (fetchError) {
+    if (fetchError.code === "JIRA_TRANSPORT_TIMEOUT" || fetchError.code === "JIRA_NETWORK_ERROR") throw fetchError;
     const reason = fetchError.cause?.message || fetchError.message || "неизвестная ошибка сети";
     const error = new Error(
       `Не удалось подключиться к Jira ${connection.baseUrl}: ${reason}. ` +
@@ -752,6 +756,8 @@ async function jiraFetch(connection, pathname, options = {}) {
     throw Object.assign(new Error("Jira или её прокси отклонили загрузку по размеру (HTTP 413). Проверьте лимит вложений Jira и её прокси."),
       { status: 413, code: "JIRA_PAYLOAD_TOO_LARGE", pathname });
   }
+  const upstreamError = UploadRuntime.httpError(response, pathname);
+  if (upstreamError) throw upstreamError;
   const contentType = response.headers.get("content-type") || "";
   const looksLikeHtml =
     /text\/html/i.test(contentType) ||
@@ -1263,10 +1269,21 @@ async function handleJiraAttachmentManifest(request, response) {
   const body = await readJson(request);
   const connection = jiraConnection(request, body);
   const { issueKey } = parseIssueReference(connection, body.issueUrl);
-  const attachmentLimits = { ...ATTACHMENT_LIMITS, ...await AttachmentLimits.fromJira(connection, jiraFetch) };
-  const attachments = body.limitsOnly ? [] : await listJiraAttachments({ connection, issueKey, jiraFetch });
-  sendJson(response, 200, { ok: true, attachmentReuse: true, attachmentLimits,
-    issueUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}`, attachments });
+  const execute = async () => {
+    UploadRuntime.stage("inventory");
+    const [attachmentLimits, attachments] = await Promise.all([
+      AttachmentLimits.fromJira(connection, jiraFetch).then(limits => ({ ...ATTACHMENT_LIMITS, ...limits })),
+      body.limitsOnly ? [] : listJiraAttachments({ connection, issueKey, jiraFetch }),
+    ]);
+    const uploadSession = body.limitsOnly ? undefined : UploadRuntime.createSession(connection, issueKey, attachmentLimits, attachments);
+    return { ok: true, attachmentReuse: true, attachmentLimits, uploadSession, issueUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}`, attachments };
+  };
+  if (!body.async) return sendJson(response, 200, await execute());
+  const owner = resolveReportOwner(request), id = body.operationId;
+  uploadStore.start(owner, id, uploadStore.fingerprint(connection, issueKey + ":manifest", []), execute);
+  response.setHeader("X-Upload-Id", id);
+  if (!response.hasHeader("X-Request-Id")) response.setHeader("X-Request-Id", id);
+  sendJson(response, 202, { operationId: id, statusUrl: `/api/jira/uploads/${id}` });
 }
 
 async function handleJiraImportAttachment(request, response) {
@@ -1614,6 +1631,7 @@ async function handleReportsClear(request, response) {
 }
 
 async function handleJiraAttachments(request, response) {
+  const receivedAt = performance.now();
   const body = await readJson(request);
   const connection = jiraConnection(request, body);
   const { issueKey } = parseIssueReference(connection, body.issueUrl);
@@ -1621,50 +1639,46 @@ async function handleJiraAttachments(request, response) {
   if (!files.length) return sendJson(response, 200, { ok: true, attachments: [] });
   if (files.length > 20) throw new Error("За один раз можно загрузить не более 20 вложений");
   const normalizedFiles = files.map((file, index) => decodeAttachmentFile(file, index, { allowOtherImageTypes: true }));
-  const limits = { ...ATTACHMENT_LIMITS, ...await AttachmentLimits.fromJira(connection, jiraFetch) };
-  for (const file of normalizedFiles) {
-    const message = AttachmentLimits.fileError({ name: file.name, size: file.bytes.length }, limits);
-    if (message) throw Object.assign(new Error(message), { status: limits.jiraEnabled === false ? 403 : 413, code: "ATTACHMENT_LIMIT" });
-  }
-  const existing = await listJiraAttachments({ connection, issueKey, jiraFetch });
-  const usedNames = new Set(existing.map(file => String(file.filename).toLowerCase()));
-  for (const file of normalizedFiles) {
-    const parsed = path.parse(file.name); let name = file.name, counter = 2;
-    while (usedNames.has(name.toLowerCase())) name = `${parsed.name} (${counter++})${parsed.ext}`;
-    file.name = name; usedNames.add(name.toLowerCase());
-  }
-  const results = [];
-  for (const file of normalizedFiles) {
-    const form = new FormData();
-    form.append("file", new Blob([file.bytes], { type: file.type }), file.name);
-    let uploaded;
-    try {
-      uploaded = await jiraFetch(
-        connection,
-        `/rest/api/2/issue/${encodeURIComponent(issueKey)}/attachments`,
-        {
-          method: "POST",
-          body: form,
-          headers: { "X-Atlassian-Token": "no-check" },
-        },
-      );
-    } catch (error) {
-      error.message = `Не удалось загрузить «${file.name}» (${file.bytes.length} байт): ${error.message}`;
-      throw error;
+  const execute = beforePost => UploadRuntime.locked(connection, issueKey, async () => {
+    UploadRuntime.log("received", { receive_ms: Math.round(performance.now() - receivedAt), bytes: normalizedFiles.reduce((n, file) => n + file.bytes.length, 0) });
+    const session = UploadRuntime.session(connection, issueKey, body.uploadSession);
+    UploadRuntime.stage("limits");
+    const limits = session?.limits || { ...ATTACHMENT_LIMITS, ...await AttachmentLimits.fromJira(connection, jiraFetch) };
+    for (const file of normalizedFiles) {
+      const message = AttachmentLimits.fileError({ name: file.name, size: file.bytes.length }, limits);
+      if (message) throw Object.assign(new Error(message), { status: limits.jiraEnabled === false ? 403 : 413, code: "ATTACHMENT_LIMIT" });
     }
-    const item = Array.isArray(uploaded) ? uploaded[0] : uploaded;
-    if (!item?.id) {
-      throw new Error(`Jira не вернула данные вложения для файла «${file.name}»`);
+    UploadRuntime.stage("inventory");
+    const existing = session?.files || await listJiraAttachments({ connection, issueKey, jiraFetch });
+    const usedNames = new Set(existing.map(file => String(file.filename).toLowerCase()));
+    const version = "2";
+    const results = [];
+    for (const file of normalizedFiles) {
+      const parsed = path.parse(file.name); let name = file.name, counter = 2;
+      while (usedNames.has(name.toLowerCase())) name = `${parsed.name} (${counter++})${parsed.ext}`;
+      usedNames.add(name.toLowerCase());
+      const form = new FormData(); form.append("file", new Blob([file.bytes], { type: file.type }), name);
+      UploadRuntime.stage("upload"); beforePost();
+      let uploaded;
+      try { uploaded = await jiraFetch(connection, `/rest/api/${version}/issue/${encodeURIComponent(issueKey)}/attachments`, { method: "POST", body: form, headers: { "X-Atlassian-Token": "no-check" } }); }
+      catch (error) { error.message = `Не удалось загрузить «${file.name}» (${file.bytes.length} байт): ${error.message}`; throw error; }
+      const item = Array.isArray(uploaded) ? uploaded[0] : uploaded;
+      if (!item?.id) throw Object.assign(new Error("Jira не подтвердила загрузку файла. Повторная отправка не начата."), { status: 502, code: "UPLOAD_RESULT_UNKNOWN" });
+      const result = { attachmentId: file.attachmentId, id: item.id, filename: item.filename || name, content: item.content, thumbnail: item.thumbnail };
+      results.push(result);
+      if (session) session.files.push({ ...result, size: file.bytes.length, mimeType: file.type });
     }
-    results.push({
-      attachmentId: file.attachmentId,
-      id: item.id,
-      filename: item.filename || file.name,
-      content: item.content,
-      thumbnail: item.thumbnail,
-    });
-  }
-  sendJson(response, 200, { ok: true, attachments: results });
+    return { ok: true, attachments: results };
+  });
+  if (!body.operationId && !body.async) return sendJson(response, 200, await execute(() => {}));
+  const owner = resolveReportOwner(request), id = body.operationId;
+  uploadStore.start(owner, id, uploadStore.fingerprint(connection, issueKey, normalizedFiles), execute);
+  response.setHeader("X-Upload-Id", id);
+  if (!response.hasHeader("X-Request-Id")) response.setHeader("X-Request-Id", id);
+  if (body.async) return sendJson(response, 202, { operationId: id, statusUrl: `/api/jira/uploads/${id}` });
+  const value = await uploadStore.wait(owner, id);
+  if (value.state === "completed") return sendJson(response, 200, value.result);
+  throw Object.assign(new Error(value.error), { status: value.status || 409, code: value.errorCode });
 }
 
 function normalizeStorageReportId(value) {
@@ -1893,6 +1907,12 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && checklistImportMatch) {
       await handleChecklistImportPayload(request, response, checklistImportMatch[1]);
       return;
+    }
+    const uploadStatus = requestPath.match(/^\/api\/jira\/uploads\/([a-f0-9-]{36})$/i);
+    if (request.method === "GET" && uploadStatus) {
+      const owner = resolveReportOwner(request);
+      const value = new URL(request.url, "http://localhost").searchParams.get("wait") === "1" ? await uploadStore.poll(owner, uploadStatus[1]) : uploadStore.view(owner, uploadStatus[1]);
+      sendJson(response, 200, value); return;
     }
     if (request.method === "POST" && requestPath === "/api/jira/attachments") {
       audit(request, response, "jira_attachment_create");

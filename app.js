@@ -4883,6 +4883,10 @@ async function jiraRequest(path, body, options = {}) {
     try {
       const safeBody = { ...(body || {}) };
       for (const field of ["token", "password", "cookie", "authorization", "user", "baseUrl", "authMethod"]) delete safeBody[field];
+      if (path === "/api/jira/attachments" || path === "/api/jira/attachment-manifest") {
+        try { return await window.QaReportJiraUploads.send(path, safeBody, { signal, headers: reportIdentityHeaders(), limits: path.endsWith("/attachments") ? attachmentLimits : null, onStage: options.onStage }); }
+        catch (error) { if (error.name === "AbortError") throw error; throw new JiraRequestError(error.message, { status: error.status || 502, path: path, payload: error.payload, code: error.code || "" }); }
+      }
       const serializedBody = JSON.stringify(safeBody);
       if (path === "/api/jira/attachments") {
         const limitError = window.QaReportAttachmentLimits.requestError(serializedBody, attachmentLimits);
@@ -5045,6 +5049,9 @@ async function uploadPendingImages(settings, issue, options = {}) {
   }
   summary.textContent = `Используем повторно: ${plan.reused.length} · Загрузим: ${plan.uploads.length}`; summary.hidden = false;
   const persist = async entries => {
+    const completedKeys = entries.map(entry => JSON.stringify([issue.issueUrl, entry.hash, entry.originals.map(item => item.attachmentId).sort()]));
+    const clearPending = value => { for (const key of completedKeys) if (value.jiraUploadOperations) delete value.jiraUploadOperations[key]; };
+    clearPending(draft);
     const changes = reuse.bindings(entries);
     reuse.apply(draft, changes); reuse.applyRoot(elements.introEditor, changes); reuse.applyRoot(elements.sections, changes);
     // Confirmed uploads are external facts, not an undoable edit. Only patch
@@ -5052,7 +5059,7 @@ async function uploadPendingImages(settings, issue, options = {}) {
     const preserve = serialized => {
       const value = JSON.parse(serialized);
       if (value.reportId !== publication.reportId || reuse.issueIdentity(value.issueUrl) !== reuse.issueIdentity(publication.issueUrl)) return serialized;
-      reuse.apply(value, changes);
+      reuse.apply(value, changes); clearPending(value);
       return JSON.stringify(value);
     };
     historyCurrent = preserve(historyCurrent);
@@ -5066,13 +5073,20 @@ async function uploadPendingImages(settings, issue, options = {}) {
   const uploaded = []; onProgress({done:0,total:plan.uploads.length});
   for (const [index, file] of plan.uploads.entries()) {
     signal?.throwIfAborted?.();
+    const uploadKey = JSON.stringify([issue.issueUrl, file.hash, file.originals.map(item => item.attachmentId).sort()]);
+    draft.jiraUploadOperations ||= {};
+    const pending = draft.jiraUploadOperations[uploadKey] ||= { id: crypto.randomUUID(), name: file.name };
+    file.attachmentId = pending.id; file.name = pending.name;
+    if (await saveDraft() === false) throw new Error("Не удалось сохранить состояние загрузки. Повторите публикацию.");
     // Uploads are not retried automatically: a lost response may hide a successful upload.
     const result = await jiraRequest("/api/jira/attachments", {
       ...settings, ...issue,
+      ...(true ? { operationId: file.attachmentId, uploadSession: manifest.uploadSession } : {}),
       files:[{attachmentId:file.attachmentId,name:file.name,type:file.type,dataBase64:file.dataBase64}],
-    }, {signal});
+    }, {signal, onStage: status => setPublishProgress({ step: "attachments", percent: 15 + Math.round(index / plan.uploads.length * 45), status })});
     const attachment = result.attachments?.find(item=>item.attachmentId===file.attachmentId);
     if (!attachment?.id) throw new Error(`Jira не подтвердила загрузку «${file.name}»`);
+    if (uploadKey) delete draft.jiraUploadOperations[uploadKey];
     await persist([{...file,...attachment}]); uploaded.push(attachment);
     onProgress({done:index+1,total:plan.uploads.length,current:attachment.filename});
   }

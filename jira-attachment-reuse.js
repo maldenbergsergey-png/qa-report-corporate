@@ -51,7 +51,9 @@
   async function digest(dataUrl) {
     const match = String(dataUrl).match(/^data:([^;,]+);base64,([a-z0-9+/=]*)$/i);
     if (!match) throw new Error("Некорректные локальные данные файла");
-    const raw = atob(match[2]); const bytes = Uint8Array.from(raw,c=>c.charCodeAt(0));
+    let bytes;
+    if (typeof Uint8Array.fromBase64 === "function") bytes = Uint8Array.fromBase64(match[2]);
+    else { const raw = atob(match[2]); bytes = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i); }
     const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(n=>n.toString(16).padStart(2,"0")).join("");
     return {hash, dataBase64:match[2], type:match[1], size:bytes.length};
   }

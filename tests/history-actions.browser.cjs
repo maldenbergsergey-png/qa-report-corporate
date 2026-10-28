@@ -83,7 +83,7 @@ async function main() {
   assert.equal(await first.locator('.history-publication-dates time').nth(0).getAttribute('datetime'), '2026-10-08T08:00:00.000Z');
   assert.equal(await first.locator('.history-publication-dates time').nth(1).getAttribute('datetime'), '2026-10-08T09:00:00.000Z');
   assert.equal(await page.locator('.history-publication-info').count(), 2);
-  assert.deepEqual(await first.locator('.history-action > svg use').evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['#icon-eye', '#icon-link', '#icon-copy']);
+  assert.deepEqual(await first.locator('.history-action > svg use').evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['#icon-eye', '#icon-link', '#icon-robot', '#icon-copy']);
   assert.equal(await first.getByRole('button', { name: 'Удалить', exact: true }).count(), 0);
   // The overflow menu is reachable by keyboard and Escape closes it without closing history.
   const more = first.getByRole('button', { name: /^Другие действия/ });

@@ -68,13 +68,17 @@ async function main() {
     }
     applyDraftLocally((await getReportRecord('receiver-0')).document);
   });
+  await page.locator('#introEditor').fill('Unsaved context from open report');
   async function open(index) {
     if (await page.locator('#localImportModal').isVisible()) await page.click('#closeLocalImport');
-    await page.evaluate(async index => {
-      await saveReportSnapshot('switch');
-      applyDraftLocally((await getReportRecord(`receiver-${index}`)).document);
-    }, index);
-    await page.click('#localImportButton');
+    await page.click('#historyButton');
+    const button = page.locator(`[data-history-ai="receiver-${index}"]`);
+    await button.waitFor();
+    await button.click();
+    await page.locator('#localImportModal').waitFor();
+    assert.equal(await page.locator('#historyModal').isVisible(), false);
+    assert.equal(await page.evaluate(() => draft.reportId), `receiver-${index}`);
+    assert.equal(await page.locator('#localImportReport').textContent(), `QA-${101 + index} · abc100${index + 1}`);
   }
   const connections = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')));
   for (let index = 0; index < 3; index++) {
@@ -86,6 +90,22 @@ async function main() {
   }
   const active = await connections();
   assert.equal(active.length, 3);
+  assert.match(await page.evaluate(async () => (await getReportRecord('receiver-0')).document.intro), /Unsaved context from open report/);
+  // History reflects each connection and reopening it keeps the same key and expiry.
+  await page.click('#closeLocalImport');
+  await page.click('#historyButton');
+  await page.locator('[data-history-ai="receiver-0"]').waitFor();
+  assert.equal(await page.locator('[data-history-ai][data-state="on"]').count(), 3);
+  assert.equal(await page.locator('[data-history-ai="receiver-0"]').textContent(), 'AI · ON');
+  const targetCard = page.locator('.history-item').filter({ has: page.locator('[data-history-ai="receiver-0"]') });
+  await targetCard.locator('.history-comment-field').fill('Receive retest results');
+  await page.locator('[data-history-ai="receiver-0"]').click();
+  assert.equal(await page.locator('#copyLocalImport').isEnabled(), true);
+  await page.click('#copyLocalImport');
+  await until(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes('"reportId": "receiver-0"')));
+  assert.equal(await page.evaluate(async () => (await getReportRecord('receiver-0')).historyComment), 'Receive retest results');
+  assert.deepEqual((await connections()).map(item => [item.id, item.expiresAt]), active.map(item => [item.id, item.expiresAt]));
+  await open(2);
   assert.equal(await page.locator('.local-import-report').count(), 2);
   const before = await page.locator('#localImportRemaining').textContent();
   await page.clock.fastForward(2100);
@@ -162,6 +182,12 @@ async function main() {
   await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 2);
   assert.equal((await send(active[0], '/context')).status, 404);
   assert.equal((await send(active[1], '/context')).status, 200);
+  await page.click('#closeLocalImport');
+  await page.click('#historyButton');
+  await page.locator('[data-history-ai="receiver-0"]').waitFor();
+  assert.equal(await page.locator('[data-history-ai="receiver-0"]').getAttribute('data-state'), 'off');
+  assert.equal(await page.locator('[data-history-ai][data-state="on"]').count(), 2);
+  await page.click('#closeHistoryButton');
   const expiresAt = (await connections()).map(item => item.expiresAt);
   await page.reload();
   await page.waitForSelector('.cell-editor');
@@ -174,8 +200,33 @@ async function main() {
   assert.equal(await page.locator('#localImportCountdown').isVisible(), false);
   assert.equal(await page.locator('#startLocalImport').isEnabled(), true);
   assert.match(await page.locator('#localImportStatus').textContent(), /истёк/);
+  // A cloud card must load its document before reception; a failed load keeps the current report.
+  await page.click('#closeLocalImport');
+  await page.evaluate(() => {
+    window.cloudFixture = normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: 'cloud-receiver',
+      draftId: 'cloud-draft', publicId: 'abc1004', issueUrl: 'QA-104', environment: 'STAGE' });
+    getServerReports = async () => [{ id: cloudFixture.reportId, publicId: cloudFixture.publicId,
+      title: 'QA-104', issueKey: 'QA-104', source: 'server', updatedAt: new Date().toISOString() }];
+    getServerReport = async () => { throw new Error('Synthetic history load failure'); };
+  });
+  const previousId = await page.evaluate(() => draft.reportId);
+  await page.click('#historyButton');
+  await page.locator('[data-history-ai="cloud-receiver"]').click();
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('Synthetic history load failure'));
+  assert.equal(await page.evaluate(() => draft.reportId), previousId);
+  assert.equal(await page.locator('#localImportModal').isVisible(), false);
+  assert.equal(await page.locator('#historyModal').isVisible(), true);
+  await page.evaluate(() => { getServerReport = async () => ({ id: cloudFixture.reportId, document: clone(cloudFixture) }); });
+  await page.locator('[data-history-ai="cloud-receiver"]').click();
+  await page.locator('#localImportModal').waitFor();
+  assert.equal(await page.locator('#localImportReport').textContent(), 'QA-104 · abc1004');
+  assert.equal(await page.evaluate(async () => (await getReportRecord('cloud-receiver')).document.reportId), 'cloud-receiver');
+  await page.click('#startLocalImport');
+  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 1);
+  await page.click('#copyLocalImport');
+  await until(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes('"reportId": "cloud-receiver"')));
   assert.deepEqual(errors, []);
-  console.log('Passed: three reports, independent delivery and context, persistent countdown, copy and stop by report, atomic conflict/deletion protection, reload and expiry, three themes and narrow layout.');
+  console.log('Passed: history AI entry, local/cloud reports, failed load, unsaved text and comments, three independent connections, prompts and stop by report, unchanged expiry, delivery, reload, three themes and narrow layout.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

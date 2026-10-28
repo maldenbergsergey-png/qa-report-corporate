@@ -5721,6 +5721,27 @@ function setHistoryLoading(loading) {
   elements.historyList.innerHTML = `<div class="history-loading-status" role="status">Загружаем историю…</div>${card.repeat(3)}`;
 }
 
+async function openHistoryReport(report) {
+  await flushVisibleHistoryComments();
+  await saveReportSnapshot("before-open-history");
+  if (report.id !== draft.reportId) {
+    const fullReport = report.source === "server" ? await getServerReport(report.id) : await getReportRecord(report.id);
+    if (!fullReport?.document) throw new Error("Отчёт больше не доступен в истории");
+    if (report.source === "server") await cacheOpenedServerReport(fullReport).catch(() => {});
+    suppressHistory = true;
+    try {
+      draft = normalizeDraft(clone(fullReport.document));
+      historyCurrent = serializeDraft();
+      undoStack = [];
+      redoStack = [];
+      render();
+      updateChecklistUrl(draft.publicId);
+      saveDraft();
+    } finally { suppressHistory = false; }
+  }
+  closeHistory();
+}
+
 async function renderHistoryList({ showLoading = false, saveSnapshot = false } = {}) {
   closeHistoryActionMenus();
   const requestId = ++historyRenderRequestId;
@@ -5829,22 +5850,25 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const actions = document.createElement("div");
     actions.className = "history-item-actions";
     const openButton = createSmallButton("Открыть", async () => {
-      await flushVisibleHistoryComments();
-      await saveReportSnapshot("before-open-history");
-      const fullReport = report.source === "server" ? await getServerReport(report.id) : report;
-      if (report.source === "server") await cacheOpenedServerReport(fullReport).catch(() => {});
-      suppressHistory = true;
-      draft = normalizeDraft(clone(fullReport.document));
-      historyCurrent = serializeDraft();
-      undoStack = [];
-      redoStack = [];
-      render();
-      updateChecklistUrl(draft.publicId);
-      saveDraft();
-      suppressHistory = false;
-      closeHistory();
-      showToast("Отчёт восстановлен из истории");
+      openButton.disabled = true;
+      try {
+        await openHistoryReport(report);
+        showToast("Отчёт восстановлен из истории");
+      } catch (error) { showToast(`Не удалось открыть отчёт: ${error.message}`, 9000); }
+      finally { openButton.disabled = false; }
     }, false, "eye");
+    const aiButton = createSmallButton("AI", async () => {
+      aiButton.disabled = true;
+      try {
+        await openHistoryReport(report);
+        window.QaLocalImport.open();
+      } catch (error) { showToast(`Не удалось открыть приём результатов: ${error.message}`, 9000); }
+      finally { aiButton.disabled = false; }
+    }, false, "robot");
+    aiButton.setAttribute("data-history-ai", report.id);
+    aiButton.setAttribute("aria-label", `Приём результатов от ИИ для ${issueLabel}, ${publicId}`);
+    aiButton.setAttribute("aria-haspopup", "dialog");
+    aiButton.setAttribute("aria-controls", "localImportModal");
     const copyButton = createSmallButton("Копия", async () => {
       await flushVisibleHistoryComments();
       await saveReportSnapshot("before-copy-history");
@@ -5885,11 +5909,12 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
         report.source === "local" ? "Ссылка скопирована — локальный отчёт доступен в этом браузере" : "Ссылка на отчёт скопирована");
     }, false, "link");
     linkButton.title = report.source === "local" ? "Локальный отчёт: ссылка работает в этом браузере" : "Скопировать ссылку на этот отчёт";
-    actions.append(openButton, linkButton, copyButton, createHistoryMoreMenu(report, deleteButton));
+    actions.append(openButton, linkButton, aiButton, copyButton, createHistoryMoreMenu(report, deleteButton));
     item.append(info, commentField, actions);
     if (publicationInfo) item.append(publicationInfo);
     elements.historyList.append(item);
   });
+  window.QaLocalImport?.updateHistoryButtons();
   updateHistorySelectionUi();
 }
 

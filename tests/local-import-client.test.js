@@ -33,6 +33,7 @@ function receiver(stored = []) {
       getElementById: element,
       addEventListener() {},
       querySelector: selector => selector === ".app-shell" ? shell : null,
+      querySelectorAll: () => [],
       createElement: () => ({ innerHTML: "", get content() {
         return { textContent: this.innerHTML.replace(/<[^>]*>/g, "") };
       } }),
@@ -59,6 +60,7 @@ function receiver(stored = []) {
       throw new Error(`Unexpected request: ${url}`);
     },
     reportIdentityHeaders: () => ({}), checkBackendCompatibility: async () => {},
+    reportIssueLabel: value => value.issueUrl || "Без задачи",
     getReportRecord: async id => records.has(id) ? clone(records.get(id)) : null,
     saveReportSnapshot: async (reason, candidate, options) => {
       if (candidate && ctx.saveError) throw ctx.saveError;

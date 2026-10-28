@@ -47,6 +47,7 @@
   const stop = document.getElementById("stopLocalImport");
   const copy = document.getElementById("copyLocalImport");
   const status = document.getElementById("localImportStatus");
+  const reportLabel = document.getElementById("localImportReport");
   const trigger = document.getElementById("localImportButton");
   const indicator = document.getElementById("localImportIndicator");
   const countdown = document.getElementById("localImportCountdown");
@@ -57,6 +58,18 @@
   const sessions = new Map();
   let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
+  function updateHistoryButtons() {
+    for (const button of document.querySelectorAll("[data-history-ai]")) {
+      const session = sessions.get(button.dataset.historyAi);
+      const active = Boolean(session && session.expiresAt > Date.now());
+      const state = active ? "on" : "off";
+      if (button.dataset.state === state) continue;
+      button.dataset.state = state;
+      button.classList.toggle("history-ai-active", active);
+      button.querySelector("span").textContent = active ? "AI · ON" : "AI";
+      button.title = active ? "Приём включён: скопировать промпт или остановить" : "Настроить приём результатов от ИИ для этого чек-листа";
+    }
+  }
   function message(value, current = currentSession()) {
     if (current) current.note = value;
     if (!current || current.reportId === draft.reportId) { displayedReportId = draft.reportId; status.textContent = value; }
@@ -71,6 +84,8 @@
     if (sessions.get(current.reportId) !== current || Date.now() >= current.expiresAt) throw new Error("Приём остановлен или срок подключения истёк");
   }
   function updateControls() {
+    updateHistoryButtons();
+    reportLabel.textContent = `${reportIssueLabel(draft)} · ${draft.publicId}`;
     const session = currentSession();
     const active = Boolean(session);
     start.disabled = active || starting; stop.disabled = !active; copy.disabled = !active;
@@ -215,7 +230,14 @@
     updateControls();
     clockTimer = setTimeout(tick, 1000);
   }
-  trigger.addEventListener("click", () => { panel.hidden = false; updateControls(); syncBodyModalOverflow(); (currentSession() ? copy : starting ? document.getElementById("closeLocalImport") : start).focus(); });
+  function open() {
+    panel.hidden = false;
+    updateControls();
+    syncBodyModalOverflow();
+    (currentSession() ? copy : starting ? document.getElementById("closeLocalImport") : start).focus();
+  }
+  Object.assign(root.QaLocalImport, { open, updateHistoryButtons });
+  trigger.addEventListener("click", open);
   document.getElementById("closeLocalImport").addEventListener("click", () => { panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); });
   panel.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); } });
   start.addEventListener("click", async () => {

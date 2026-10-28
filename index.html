@@ -11,7 +11,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=145" />
+    <link rel="stylesheet" href="/styles.css?v=146" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
   <body>
@@ -42,6 +42,7 @@
       <symbol id="icon-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5" /><path d="M20 9h-9a7 7 0 0 0-7 7v4" /></symbol>
       <symbol id="icon-focus" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" /></symbol>
       <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
+      <symbol id="icon-robot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="13" rx="4" /><path d="M12 5v3M4 12H3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h1m16-5h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1" /><circle cx="12" cy="4" r="1" /><circle cx="8.5" cy="13.5" r=".75" /><circle cx="15.5" cy="13.5" r=".75" /><path d="M9.5 17a3.5 3.5 0 0 0 5 0" /></symbol>
       <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></symbol>
       <symbol id="icon-file-down" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M12 12v6m-3-3 3 3 3-3" /></symbol>
@@ -762,7 +763,7 @@
 
     <div class="modal-backdrop" id="localImportModal" hidden>
       <section class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="localImportTitle">
-        <header class="modal-header"><div><div class="eyebrow">Автоматизация</div><h2 id="localImportTitle">Приём результатов от ИИ</h2></div><button class="icon-button" id="closeLocalImport" type="button" aria-label="Закрыть приём результатов">×</button></header>
+        <header class="modal-header"><div><div class="eyebrow">Автоматизация</div><h2 id="localImportTitle">Приём результатов от ИИ</h2><p class="local-import-report-label" id="localImportReport"></p></div><button class="icon-button" id="closeLocalImport" type="button" aria-label="Закрыть приём результатов">×</button></header>
         <div class="import-body">
           <p>Агент сможет заполнить этот отчёт и прикрепить скриншоты, логи и другие файлы. Результаты сохранятся в браузере. Включать облачное хранилище не требуется.</p>
           <p>Оставьте вкладку открытой. Подключение действует 5 часов с момента включения. Можно включить приём в трёх отчётах и переключаться между ними; «Остановить» отключает только выбранный отчёт.</p>
@@ -1229,7 +1230,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=94"></script>
+    <script src="/release-notes.js?v=95"></script>
     <script src="/jira-attachment-reuse.js?v=3"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
@@ -1316,7 +1317,7 @@
     <script src="/tracker-links.js?v=4"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=39"></script>
-    <script src="/app.js?v=158"></script>
-    <script src="/local-import-client.js?v=7"></script>
+    <script src="/app.js?v=159"></script>
+    <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

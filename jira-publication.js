@@ -39,6 +39,27 @@
     return { includeImages: enabled && value?.includeImages !== false, includeFiles: enabled && value?.includeFiles !== false };
   }
 
+  const contentFields = {
+    metadata: "Окружение, итог или ссылка на задачу",
+    intro: "Описание отчёта",
+    structure: "Разделы, колонки или порядок пунктов",
+    statuses: "Статусы проверок",
+    checks: "Содержимое пунктов",
+    attachments: "Вложения",
+  };
+
+  function normalizeContent(value) {
+    const valid = key => typeof value?.[key] === "string" && /^1:[a-f0-9]{1,8}:[a-f0-9]{1,8}:\d{1,12}$/.test(value[key]);
+    if (!Object.keys(contentFields).every(valid)) return null;
+    const content = Object.fromEntries(Object.keys(contentFields).map(key => [key, value[key]]));
+    if (valid("body")) content.body = value.body;
+    return content;
+  }
+
+  function contentChanges(before, after) {
+    return Object.entries(contentFields).filter(([key]) => before[key] !== after[key]).map(([, label]) => label);
+  }
+
   // Persist only publication metadata, never credentials or a caller-supplied URL.
   function normalize(value, reportId) {
     if (!value || value.reportId !== reportId || !Array.isArray(value.parts) || value.parts.length > 1000) return null;
@@ -50,7 +71,8 @@
       publishedAt: date(part.publishedAt),
     } : null);
     if (!parts.some(Boolean)) return null;
-    return { reportId, ...issue, format: value.format, split: Boolean(value.split), parts, updateIncomplete: Boolean(value.updateIncomplete),
+    const contentSnapshot = normalizeContent(value.contentSnapshot);
+    return { ...(contentSnapshot && { contentSnapshot }), reportId, ...issue, format: value.format, split: Boolean(value.split), parts, updateIncomplete: Boolean(value.updateIncomplete),
       sectionIds: Array.isArray(value.sectionIds) ? value.sectionIds.filter(id => typeof id === "string") : [],
       statuses: Array.isArray(value.statuses) ? value.statuses.filter(status => typeof status === "string") : [],
       ...attachmentOptions(value),
@@ -82,10 +104,17 @@
     return value;
   }
 
+  function normalizedBody(body) {
+    return typeof body === "string" ? body.replace(/\r\n/g, "\n").trim() : JSON.stringify(canonical(body) ?? null);
+  }
+
   function fingerprint(body) {
-    const normalized = typeof body === "string" ? body.replace(/\r\n/g, "\n").trim() : canonical(body);
-    return require("node:crypto").createHash("sha256")
-      .update(typeof normalized === "string" ? normalized : JSON.stringify(normalized ?? null)).digest("hex");
+    return require("node:crypto").createHash("sha256").update(normalizedBody(body)).digest("hex");
+  }
+
+  async function browserFingerprint(body) {
+    const hash = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalizedBody(body)));
+    return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
   }
 
   async function updateComment(connection, issue, payload, jiraFetch) {
@@ -127,5 +156,5 @@
       commentUrl: commentUrl(String(issue.issueUrl), id) };
   }
 
-  return { textForPublication, target, commentUrl, attachmentOptions, normalize, matching, sameComments, missingComment, fingerprint, updateComment };
+  return { textForPublication, target, commentUrl, attachmentOptions, normalize, matching, sameComments, missingComment, fingerprint, browserFingerprint, normalizeContent, contentChanges, updateComment };
 });

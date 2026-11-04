@@ -2263,6 +2263,7 @@ function scheduleSave({ collect = true } = {}) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => saveDraft({ collect: false }), 400);
   scheduleHistoryCommit();
+  schedulePublicationState();
 }
 
 function saveLocalMutationNow() {
@@ -2273,6 +2274,7 @@ function saveLocalMutationNow() {
   forceLocalDraftSave = true;
   saveDraft();
   scheduleHistoryCommit();
+  schedulePublicationState();
 }
 
 function serializeDraft() {
@@ -2365,12 +2367,7 @@ function setReportMetadataError(control, message = "") {
 function reportMetadataError(control) {
   if (control === elements.issueUrl) {
     if (!control.value.trim()) return "Укажите ссылку на задачу";
-    try {
-      parseIssueUrl(control.value);
-      return "";
-    } catch (error) {
-      return error.message;
-    }
+    return window.QaReportTrackerLinks.parse(control.value, "jira") ? "" : "Проверьте ссылку на задачу";
   }
   if (control === elements.environment) {
     return control.value.trim().replace(/^Не указано$/i, "") ? "" : "Укажите окружение";
@@ -4264,23 +4261,24 @@ function generateMarkup(options = {}) {
   const publicationText = value => forPublication
     ? window.QaReportJiraPublication.textForPublication(value, { wiki: true })
     : value;
-  collectDocumentFields();
-  const rowNumbers = ChecklistNumbering.rowNumbers(draft);
+  const source = options.source || draft;
+  if (!options.source) collectDocumentFields();
+  const rowNumbers = ChecklistNumbering.rowNumbers(source);
   const blocks = [];
   const heading = [];
-  if (draft.environment) heading.push(`*Проверено на ${escapeWikiNotEquals(publicationText(draft.environment))}*`);
-  if (draft.overallStatus) {
-    const overallColor = STATUS_META[draft.overallStatus]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor;
-    heading.push(`{color:${overallColor}}*ТЕСТ — ${draft.overallStatus}*{color}`);
+  if (source.environment) heading.push(`*Проверено на ${escapeWikiNotEquals(publicationText(source.environment))}*`);
+  if (source.overallStatus) {
+    const overallColor = STATUS_META[source.overallStatus]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor;
+    heading.push(`{color:${overallColor}}*ТЕСТ — ${source.overallStatus}*{color}`);
   }
   if (heading.length) blocks.push(heading.join("\n"));
-  const intro = htmlToWiki(draft.intro, options);
+  const intro = htmlToWiki(source.intro, options);
   if (intro) blocks.push(intro);
 
-  sectionsForPublication(sectionIds, draft, statuses).forEach((section) => {
+  sectionsForPublication(sectionIds, source, statuses).forEach((section) => {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length) return;
-    const lines = [`h2. ${escapeWikiNotEquals(publicationText(ChecklistNumbering.sectionTitle(draft, section)))}`];
+    const lines = [`h2. ${escapeWikiNotEquals(publicationText(ChecklistNumbering.sectionTitle(source, section)))}`];
     lines.push(
       `||${["Номер", ...section.columns.map((column) => escapeWikiNotEquals(publicationText(column.title || "Без названия"))), "Статус"].join("||")}||`,
     );
@@ -5282,21 +5280,169 @@ function historyPublication(report) {
   return api.normalize(value, report.id);
 }
 
-function renderPublicationState() {
-  const link = currentJiraPublication();
-  const isEva = typeof window.QaReportTrackerLinks !== "undefined" && window.QaReportTrackerLinks.parse(draft.issueUrl, "eva");
-  elements.publishButton.querySelector(".primary-action-label").textContent = publishInProgress ? "Отправляем…" : link ? "Обновить отчёт" : "Опубликовать отчёт";
-  elements.publishButton.disabled = publishInProgress;
-  const exportButton = document.getElementById("publishExportButton");
-  if (exportButton) {
-    exportButton.querySelector(".primary-action-label").textContent = elements.publishButton.querySelector(".primary-action-label").textContent;
-    exportButton.disabled = publishInProgress;
+function trackerPublicationBody(format, scope, source = draft) {
+  const options = { ...scope, source, forPublication: true };
+
+  return generateMarkup(options);
+}
+
+function publicationSnapshot(parts) {
+  return Object.fromEntries(Object.entries(parts).map(([key, value]) =>
+    [key, QaReportHistory.contentFingerprint({ value })]));
+}
+
+function trackerPublicationSnapshot(scope, body) {
+  const attachments = [];
+  const content = html => {
+    if (!/<(?:a\b|figure\b|img\b|video\b|audio\b|[^>]+class=["'][^"']*(?:cell-file|jira-))/i.test(html)) return html;
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    removeExportAttachments(template.content, scope);
+    const files = [];
+    for (const node of template.content.querySelectorAll(".cell-file, .jira-image-placeholder, .jira-file-placeholder, .jira-attachment-reference, img, video, audio, a[href]")) {
+      if (!template.content.contains(node)) continue;
+      const kind = window.QaReportJiraReuse.attachmentKind(node);
+      if (!kind) continue;
+      files.push([kind, node.dataset.fileName || node.dataset.jiraName,
+        node.dataset.jiraSourceHash || node.dataset.attachmentId || node.getAttribute("src") || node.getAttribute("href") || node.dataset.jiraId]);
+      node.remove();
+    }
+    if (files.length) attachments.push(files);
+    return template.innerHTML;
+  };
+  const numbers = ChecklistNumbering.rowNumbers(draft);
+  const sections = sectionsForPublication(scope.sectionIds, draft, scope.statuses)
+    .map(section => ({ ...section, rows: section.rows.filter(hasRowContent) })).filter(section => section.rows.length);
+  return publicationSnapshot({
+    body,
+    metadata: [draft.environment, draft.overallStatus],
+    intro: content(draft.intro),
+    structure: sections.map(section => [ChecklistNumbering.sectionTitle(draft, section),
+      section.columns.map(column => column.title), section.rows.map(row => [row.id, numbers.get(row.id)])]),
+    statuses: sections.flatMap(section => section.rows.map(row => row.status)),
+    checks: sections.flatMap(section => section.rows.map(row => section.columns.map(column => content(row.cells[column.id] || "")))),
+    attachments,
+  });
+}
+
+let publicationStateTimer;
+let legacyPublicationCheck;
+
+function schedulePublicationState() {
+  clearTimeout(publicationStateTimer);
+  publicationStateTimer = setTimeout(renderPublicationState, 180);
+}
+
+function trackerPublicationState(link, target) {
+  if (!target) return { state: "missing", label: draft.issueUrl.trim() ? "Проверьте ссылку на задачу" : "Задача не указана", action: "Указать задачу" };
+  const provider = target.provider === "eva" ? "EVA" : "Jira";
+  if (publishInProgress) return { state: "busy", label: "Отправляем…", action: "Отправляем…" };
+  if (!link) return { state: "fresh", label: "Не опубликован", action: `Опубликовать в ${provider}` };
+  if (link.updateIncomplete || link.parts.some(part => !part)) {
+    return { state: "partial", label: "Публикация не завершена", action: "Продолжить отправку", details: ["Часть комментариев ещё не отправлена или не обновлена."] };
   }
-  document.getElementById("publicationMenuButton").disabled = publishInProgress;
+  const api = window.QaReportJiraPublication;
+  const clean = { state: "current", label: "Изменений нет", action: `Открыть в ${provider}` };
+  const unknown = { ...clean, state: "unknown", label: "Не удалось сравнить версии" };
+  const dirty = { state: "dirty", label: "Есть изменения", action: `Обновить в ${provider}`, details: ["Содержимое отчёта"] };
+  let body;
+  try {
+    body = trackerPublicationBody(link.format, link);
+  } catch {
+    if (link.format !== "html" || !link.contentSnapshot) return unknown;
+    // EVA cannot render a new local attachment as a published link yet.
+    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, ""));
+    return changes.length ? { ...dirty, details: changes } : unknown;
+  }
+  const current = publicationSnapshot({ body }).body;
+  if (link.contentSnapshot?.body) {
+    if (current === link.contentSnapshot.body) return clean;
+    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, body));
+    return { ...dirty, details: changes.length ? changes : dirty.details };
+  }
+  if (!window.crypto.subtle || link.parts.some(part => !part.bodyHash)) return unknown;
+  const key = JSON.stringify([link.reportId, link.issueUrl, link.format, current, link.parts.map(part => part.bodyHash)]);
+  if (legacyPublicationCheck?.key !== key) {
+    const check = legacyPublicationCheck = { key, result: "pending" };
+    const comment = { format: link.format, body };
+    const parts = link.split ? splitJiraComment(comment) : [comment];
+    Promise.all(parts.map(part => api.browserFingerprint(part.body))).then(hashes => {
+      check.result = hashes.length === link.parts.length && hashes.every((hash, index) => hash === link.parts[index].bodyHash)
+        ? "current" : link.format === "html" ? "unknown" : "dirty";
+    }).catch(() => { check.result = "unknown"; }).finally(() => {
+      if (legacyPublicationCheck === check) renderPublicationState();
+    });
+  }
+  if (legacyPublicationCheck.result === "pending") return { ...unknown, label: "Сравниваем версии…" };
+  if (legacyPublicationCheck.result === "current") return clean;
+  return legacyPublicationCheck.result === "dirty" ? dirty : unknown;
+}
+
+function renderPublicationChannel(channel, state) {
+  channel.dataset.state = state.state;
+  const status = channel.querySelector("[data-publication-status]");
+  if (status.textContent !== state.label) status.textContent = state.label;
+  const action = channel.querySelector("[data-publication-action]");
+  action.querySelector(".primary-action-label").textContent = state.action;
+  action.disabled = state.state === "busy";
+  const detail = channel.querySelector(".publication-details");
+  const items = state.details || [];
+  detail.hidden = !items.length;
+  detail.querySelector("strong").textContent = state.state === "dirty" ? "Что изменилось" : "Ход публикации";
+  const list = detail.querySelector("ul");
+  if (JSON.stringify(items) !== list.dataset.items) {
+    list.dataset.items = JSON.stringify(items);
+    list.replaceChildren(...items.map(text => Object.assign(document.createElement("li"), { textContent: text })));
+  }
+}
+
+function publicationTrackerTarget() {
+  return window.QaReportTrackerLinks.parse(draft.issueUrl, "jira");
+}
+
+function renderPublicationState() {
+  clearTimeout(publicationStateTimer);
+  const link = currentJiraPublication();
+  const target = publicationTrackerTarget();
+  const state = trackerPublicationState(link, target);
+  const channel = document.getElementById("trackerPublication");
+  const provider = target?.provider === "eva" ? "EVA" : target ? "Jira" : "В задачу";
+  channel.querySelector("[data-publication-name]").textContent = provider;
+  renderPublicationChannel(channel, state);
+  const exportButton = document.getElementById("publishExportButton");
+  exportButton.querySelector(".primary-action-label").textContent = state.action;
+  exportButton.disabled = publishInProgress;
+  const menu = document.getElementById("publicationMenuButton");
+  if (!link && !menu.hidden) closeHeaderDropdowns();
+  menu.hidden = !link;
+  menu.disabled = publishInProgress;
+  menu.setAttribute("aria-label", target ? `Действия публикации в ${provider}` : "Действия публикации в задачу");
   document.getElementById("publishAgainButton").disabled = !link || publishInProgress;
+  document.getElementById("publishScopeAction").disabled = !link || publishInProgress;
   const info = document.getElementById("publicationInfo");
-  info.innerHTML = publicationInfoMarkup(draft.jiraPublication, draft.reportId);
-  info.hidden = !info.innerHTML;
+  const markup = publicationInfoMarkup(link, draft.reportId);
+  if (info.innerHTML !== markup) info.innerHTML = markup;
+  info.hidden = !markup;
+}
+
+function runTrackerPublicationAction() {
+  closeHeaderDropdowns();
+  collectDocumentFields();
+  const target = publicationTrackerTarget();
+  if (!target) {
+    if (draft.issueUrl.trim()) setReportMetadataError(elements.issueUrl, "Проверьте ссылку на задачу");
+    setFocusMode(false);
+    elements.issueUrl.focus();
+    return;
+  }
+  const link = currentJiraPublication();
+  const state = trackerPublicationState(link, target);
+  if (state.state === "current" || state.state === "unknown") {
+    const first = link.parts.find(Boolean);
+    window.open(window.QaReportJiraPublication.commentUrl(link.issueUrl, first.commentId), "_blank", "noopener");
+    return;
+  }
+  publishToJira();
 }
 
 async function rememberJiraPublication(context, parts, split) {
@@ -5347,7 +5493,7 @@ async function updatePublishedComment(link, request) {
     if (window.QaReportJiraPublication.missingComment(error)
       && await writeJiraPublication(link, null, link)) {
       error.publicationLinkCleared = true;
-      error.message = "Связанный комментарий не найден. Связь и даты публикации удалены. Нажмите «Опубликовать отчёт», чтобы создать новый комментарий.";
+      error.message = "Связанный комментарий не найден. Связь и даты публикации удалены. Опубликуйте отчёт в задачу, чтобы создать новый комментарий.";
     }
     throw error;
   }
@@ -5423,9 +5569,11 @@ async function publishToJira(mode = "auto") {
       },
     });
     if (draft.reportId !== publicationReportId) throw new Error("Открыт другой отчёт. Повторите публикацию из нужного отчёта.");
-    const comment = { format: "wiki", body: generateMarkup({ ...scope, forPublication: true }) };
+    collectDocumentFields();
+    const comment = { format: "wiki", body: trackerPublicationBody("wiki", scope) };
     setPublishProgress({ step: "comment", percent: 68, status: "Публикация комментария" });
     const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
+      contentSnapshot: trackerPublicationSnapshot(scope, comment.body),
       sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],
       statuses: [...(statuses || Object.keys(STATUS_META))],
       ...window.QaReportJiraPublication.attachmentOptions(scope), firstPublishedAt: linked?.firstPublishedAt || "" };
@@ -9001,9 +9149,9 @@ renderEnvironmentOptions();
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
     control.addEventListener(eventName, () => {
       draft.issueUrl = elements.issueUrl.value;
-      renderPublicationState();
       draft.environment = elements.environment.value.trim();
       draft.overallStatus = elements.overallStatus.value;
+      if (control === elements.issueUrl) renderPublicationState();
       if (control === elements.overallStatus) setStatusClass(control, draft.overallStatus);
       if (control.hasAttribute("aria-invalid")) setReportMetadataError(control, reportMetadataError(control));
       scheduleSave({ collect: false });
@@ -9871,8 +10019,27 @@ elements.jiraConnections.addEventListener("click", async (event) => {
 });
 elements.closeJiraSettingsButton.addEventListener("click", closeJiraSettings);
 elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
-elements.publishButton.addEventListener("click", () => publishToJira());
-document.getElementById("publishExportButton").addEventListener("click", () => publishToJira());
+elements.publishButton.addEventListener("click", runTrackerPublicationAction);
+document.getElementById("publishExportButton").addEventListener("click", runTrackerPublicationAction);
+document.getElementById("publishScopeAction").addEventListener("click", () => publishToJira());
+document.querySelectorAll(".publication-details-toggle").forEach(button => {
+  const details = button.closest(".publication-details");
+  button.addEventListener("click", () => {
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    button.setAttribute("aria-expanded", String(!expanded));
+    details.toggleAttribute("data-dismissed", expanded);
+  });
+  button.addEventListener("blur", () => {
+    button.setAttribute("aria-expanded", "false");
+    details.removeAttribute("data-dismissed");
+  });
+  details.addEventListener("pointerleave", () => details.removeAttribute("data-dismissed"));
+  button.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    button.setAttribute("aria-expanded", "false");
+    details.setAttribute("data-dismissed", "");
+  });
+});
     document.getElementById("publishAgainButton").addEventListener("click", () => publishToJira("new"));
     document.getElementById("publicationMenuButton").addEventListener("click", event => {
       event.stopPropagation(); toggleHeaderDropdown(event.currentTarget, document.getElementById("publicationMenu"));

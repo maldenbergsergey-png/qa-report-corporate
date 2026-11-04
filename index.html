@@ -11,7 +11,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=148" />
+    <link rel="stylesheet" href="/styles.css?v=149" />
     <link rel="stylesheet" href="/report-view.css?v=4" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
@@ -230,14 +230,26 @@
           <div class="report-heading">
             <div><div class="eyebrow">Отчёт о тестировании</div><h1>Чек-лист</h1></div>
             <div class="report-publication">
-              <div class="report-publication-buttons header-dropdown">
-                <button class="button button-primary" id="publishButton" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg><span class="primary-action-label">Опубликовать отчёт</span></button>
-                <button class="button button-primary header-dropdown-trigger publication-menu-trigger" id="publicationMenuButton" type="button" aria-label="Другие действия публикации" aria-haspopup="menu" aria-expanded="false" aria-controls="publicationMenu"><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
-                <div class="header-dropdown-menu header-dropdown-menu-right" id="publicationMenu" role="menu" aria-label="Публикация отчёта" hidden>
-                  <button class="header-dropdown-item" id="publishAgainButton" type="button" role="menuitem">Опубликовать заново</button>
+              <div class="publication-channel" id="trackerPublication">
+                <div class="publication-channel-name"><svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg><span data-publication-name>В задачу</span></div>
+                <div class="publication-status">
+                  <span class="publication-dot" aria-hidden="true"></span>
+                  <span data-publication-status role="status"></span>
+                  <div class="publication-details" hidden>
+                    <button class="publication-details-toggle" type="button" aria-label="Подробнее о публикации" aria-describedby="trackerPublicationDetails" aria-expanded="false">ⓘ</button>
+                    <div class="publication-details-panel" id="trackerPublicationDetails" role="tooltip"><strong></strong><ul></ul></div>
+                  </div>
                 </div>
+                <div class="report-publication-buttons header-dropdown">
+                  <button class="button button-primary" id="publishButton" type="button" data-publication-action><span class="primary-action-label">Указать задачу</span></button>
+                  <button class="button button-primary header-dropdown-trigger publication-menu-trigger" id="publicationMenuButton" type="button" aria-label="Действия публикации в задачу" aria-haspopup="menu" aria-expanded="false" aria-controls="publicationMenu" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+                  <div class="header-dropdown-menu header-dropdown-menu-right" id="publicationMenu" role="menu" aria-label="Публикация в задачу" hidden>
+                    <button class="header-dropdown-item" id="publishAgainButton" type="button" role="menuitem">Опубликовать заново</button>
+                    <button class="header-dropdown-item" id="publishScopeAction" type="button" role="menuitem">Изменить состав публикации</button>
+                  </div>
+                </div>
+                <div class="publication-info" id="publicationInfo" hidden></div>
               </div>
-              <div class="publication-info" id="publicationInfo" hidden></div>
             </div>
           </div>
 
@@ -1262,7 +1274,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=105"></script>
+    <script src="/release-notes.js?v=106"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1274,7 +1286,7 @@
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
-    <script src="/jira-publication.js?v=4"></script>
+    <script src="/jira-publication.js?v=5"></script>
     <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
       <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
@@ -1351,7 +1363,7 @@
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/report-view.js?v=5"></script>
-    <script src="/app.js?v=164"></script>
+    <script src="/app.js?v=165"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

@@ -1,13 +1,13 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v138';
+const CACHE_NAME = 'qa-report-corporate-assets-v139';
 const SHELL = [
   "/jira-upload-client.js?v=1",
   "/usage.js?v=1",
   "/bug-report.js?v=7", "/bug-rich-editor.js?v=9", "/bug-report-ui.js?v=40", "/tracker-links.js?v=4", "/bug-attachment-analysis.js?v=2",
   "/vendor/jszip/jszip.min.js", "/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs",
   "/bug-wizard.css?v=25",
-  "/jira-publication.js?v=4",
+  "/jira-publication.js?v=5",
   "/dictation-input.js?v=2",
   "/bug-voice-input.js?v=5",
   "/draft-storage-worker.js?v=2",
@@ -21,9 +21,9 @@ const SHELL = [
   "/checklist-table.js?v=3",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=4', '/report-view.js?v=5', '/styles.css?v=148', '/app.js?v=164', '/pwa.js?v=5',
+  '/report-view.css?v=4', '/report-view.js?v=5', '/styles.css?v=149', '/app.js?v=165', '/pwa.js?v=5',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=105',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=106',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

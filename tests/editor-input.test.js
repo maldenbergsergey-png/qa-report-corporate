@@ -17,6 +17,7 @@ function harness() {
     cleanEditorHtml: editor => { counts.cleanups++; return editor.html; },
     htmlToText: html => html.replace(/<[^>]*>/g, '').trim(),
     renderSummary: () => counts.summaries++,
+    schedulePublicationState() {},
     setSaveStatus() {}, saveDraft: options => { counts.saveOptions = options; }, scheduleHistoryCommit: () => counts.history++,
     clearTimeout: id => timers.delete(id),
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },

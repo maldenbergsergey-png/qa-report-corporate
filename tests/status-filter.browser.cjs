@@ -189,6 +189,18 @@ async function main() {
   assert.equal(await page.locator('.report-filter-empty').isVisible(), true);
   assert.equal(await page.locator('#summaryTotal').textContent(), '0');
   assert.equal(await page.locator('#selectionDelete').isDisabled(), true);
+  // Clearing the preview filter restores every preview row without changing the editor filter.
+  await page.click('#previewButton');
+  const previewReset = preview.getByRole('button', { name: 'Показать все пункты' });
+  assert.equal(await preview.getByText('Пунктов с таким статусом нет', { exact: true }).isVisible(), true);
+  assert.match(await preview.locator('.counts').textContent(), /Показано 0 из 9/);
+  await previewReset.click();
+  assert.equal(await page.locator('#previewFilter').inputValue(), 'all');
+  assert.equal(await page.locator('#previewFilter').evaluate(node => node === document.activeElement), true);
+  assert.match(await preview.locator('.counts').textContent(), /Показано 9 из 9/);
+  assert.equal(await previewReset.isHidden(), true);
+  await page.keyboard.press('Escape');
+  assert.equal((await rows()).length, 0);
   await page.click('#resetReportStatusFilter');
   assert.equal((await rows()).length, 10);
   assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);

@@ -17,8 +17,10 @@ async function main() {
   const upstreamPort = listener.address().port;
   await new Promise(resolve => listener.close(resolve));
   const source = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const storageWorkerEntry = source.match(/^ *["'](\/draft-storage-worker\.js\?v=\d+)["'],\n/m);
+  assert.ok(storageWorkerEntry, 'The draft storage worker must be precached');
   let workerSource = source.replace(/(const CACHE_NAME = ['"])([^'"]+)/, '$1$2-test-baseline')
-    .replace('  "/draft-storage-worker.js?v=1",\n', '');
+    .replace(storageWorkerEntry[0], '');
   let missingWorker = false;
   let missingRequests = 0;
   proxy = http.createServer((request, response) => {
@@ -104,11 +106,11 @@ async function main() {
   assert.equal(await page.evaluate(() => draft.reportId), original.reportId);
   assert.equal(await page.evaluate(() => draft.publicId), original.publicId);
   assert.equal(await page.evaluate(async () => htmlToText((await getReportRecord(draft.reportId)).document.intro)), 'Unsaved checklist text before PWA update');
-  assert.equal(await page.evaluate(async () => {
+  assert.equal(await page.evaluate(async workerUrl => {
     const keys = await caches.keys();
-    for (const key of keys) if (!key.endsWith('-test-baseline') && await (await caches.open(key)).match('/draft-storage-worker.js?v=1')) return true;
+    for (const key of keys) if (!key.endsWith('-test-baseline') && await (await caches.open(key)).match(workerUrl)) return true;
     return false;
-  }), true);
+  }, storageWorkerEntry[1]), true);
   assert.deepEqual(errors, []);
   console.log('PASS: missing Docker asset blocks installation safely; corrected build reveals update; activation preserves unsaved text and checklist IDs');
 }

@@ -162,13 +162,30 @@
     return present;
   }
 
+  function createEmptyState(container, filter) {
+    const message = element("p");
+    const reset = element("button", "report-view-reset", "Показать все пункты");
+    reset.type = "button";
+    reset.addEventListener("click", () => {
+      filter.value = "all";
+      filter.dispatchEvent(new Event("change"));
+      filter.focus();
+    });
+    container.append(message, reset);
+    return (visible, total) => {
+      container.hidden = visible > 0;
+      message.textContent = total ? "Пунктов с таким статусом нет" : "В чек-листе пока нет заполненных пунктов";
+      reset.hidden = filter.value === "all";
+    };
+  }
+
   function createPreview(dialog, openFile) {
     const filter = dialog.querySelector(".report-view-filter");
     const order = dialog.querySelector(".report-view-order");
     const counts = dialog.querySelector(".counts");
     const overview = dialog.querySelector(".report-overview");
     const sections = dialog.querySelector(".report-view-sections");
-    const empty = dialog.querySelector(".report-view-empty");
+    const updateEmptyState = createEmptyState(dialog.querySelector(".report-view-empty"), filter);
     const imageDialog = dialog.querySelector(".report-image-dialog");
     const image = imageDialog.querySelector("img");
     const imageTitle = imageDialog.querySelector("h2");
@@ -213,8 +230,7 @@
         group.section.hidden = !matching;
       }
       counts.textContent = `Показано ${visible} из ${total}`;
-      empty.textContent = total ? "Пунктов с таким статусом нет. Можно выбрать другой фильтр." : "В чек-листе пока нет заполненных пунктов.";
-      empty.hidden = Boolean(visible);
+      updateEmptyState(visible, total);
     }
     filter.addEventListener("change", update);
     order.addEventListener("change", update);
@@ -262,5 +278,5 @@
     };
   }
 
-  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, createPreview };
+  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, createEmptyState, createPreview };
 })(window);

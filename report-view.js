@@ -162,6 +162,15 @@
     return present;
   }
 
+  function appendStatusOptions(filter, groups) {
+    const available = new Set(groups.flatMap(group => group.rows.map(row => row.status)));
+    for (const status of statuses.keys()) {
+      const option = new Option(status, status);
+      option.disabled = !available.has(status);
+      filter.add(option);
+    }
+  }
+
   function createEmptyState(container, filter) {
     const message = element("p");
     const reset = element("button", "report-view-reset", "Показать все пункты");
@@ -240,7 +249,6 @@
       initialStatuses = selectedStatuses ? new Set([...selectedStatuses].map(statusKey)) : null;
       filter.replaceChildren(new Option("Все пункты", "all"));
       if (initialStatuses) filter.add(new Option("Как в чек-листе", "editor"));
-      for (const status of statuses.keys()) filter.add(new Option(status, status));
       filter.value = initialStatuses ? "editor" : "all";
       order.value = "original";
       dialog.querySelector("h1").textContent = report.title;
@@ -271,6 +279,7 @@
         });
         return { ...group, rows: entries };
       });
+      appendStatusOptions(filter, groups);
       sections.replaceChildren(...groups.map(group => group.section));
       update();
       dialog.showModal();
@@ -278,5 +287,5 @@
     };
   }
 
-  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, createEmptyState, createPreview };
+  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, appendStatusOptions, createEmptyState, createPreview };
 })(window);

@@ -166,6 +166,16 @@ async function main() {
   assert.equal(await page.locator('#previewButton').evaluate(node => node === document.activeElement), true);
   assert.equal(await page.evaluate(() => serializeDraft()), beforePreview);
   assert.deepEqual(await rows(), ['row-1', 'row-4', 'second-fail']);
+  await page.evaluate(() => showChecklistPreview({
+    title: 'Проверка фильтра',
+    sections: [{ title: 'Проверки', columns: [], rows: [{ number: '1', status: 'OK', cells: {} }] }],
+  }, new Set(['НЕ ОК'])));
+  const previewFilter = page.locator('#previewFilter');
+  assert.equal(await previewFilter.locator('option[value="OK"]').isEnabled(), true);
+  assert.equal(await previewFilter.locator('option[value="НЕ ОК"]').isDisabled(), true);
+  await page.selectOption('#previewFilter', 'OK');
+  assert.match(await preview.locator('.counts').textContent(), /Показано 1 из 1/);
+  await page.keyboard.press('Escape');
   const excel = await page.evaluate(() => buildXlsxWorksheet({ statuses: reportStatusFilter }));
   assert.match(excel.sharedStringsXml, /Token-1/); assert.doesNotMatch(excel.sharedStringsXml, /Token-0|Hidden edited/);
   // A complete portable backup keeps filtered-out content and attachments.

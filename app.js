@@ -8736,6 +8736,8 @@ function showToast(message, duration = 2500) {
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  const themeColor = getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
+  if (themeColor) document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColor);
   if (!elements.themeToggle) return;
   const iconMap = { light: "#icon-sun", graphite: "#icon-contrast", dark: "#icon-moon" };
   elements.themeToggle.querySelector(".theme-icon use")?.setAttribute(

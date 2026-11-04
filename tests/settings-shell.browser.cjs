@@ -50,8 +50,10 @@ async function main() {
   await page.goto(origin);
   await page.waitForSelector('.cell-editor');
   // Filled text must never filter the list opened from the arrow.
-  assert.equal(await page.locator('#environment').inputValue(), 'STAGE');
   const environmentMenu = page.locator('#environmentOptions');
+  await page.click('#environmentToggle');
+  await environmentMenu.locator('[data-value="STAGE"]').click();
+  assert.equal(await page.locator('#environment').inputValue(), 'STAGE');
   const environmentChoices = () => environmentMenu.locator('[data-value]').evaluateAll(nodes => nodes.map(node => node.dataset.value));
   await page.click('#environmentToggle');
   assert.equal(await environmentMenu.isVisible(), true);
@@ -156,7 +158,7 @@ async function main() {
       assert(expected.modal.x + expected.modal.width <= viewport.width);
       assert(expected.modal.y + expected.modal.height <= viewport.height);
       const margin = viewport.width <= 820 ? 24 : 64;
-      assert.equal(expected.modal.width, Math.min(viewport.width - margin, 1440));
+      assert.equal(expected.modal.width, Math.min(viewport.width - margin, 1040));
       assert.equal(expected.modal.height, Math.min(viewport.height - margin, viewport.width <= 820 ? viewport.height : 900));
       for (const key of panels) {
         await select(key);

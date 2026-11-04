@@ -96,17 +96,124 @@
     return { section, body };
   }
 
-  const richTags = new Set("A B BR CODE DIV EM FIGCAPTION FIGURE H1 H2 H3 HR I IMG LI OL P PRE S SPAN STRONG SUB SUP U UL".split(" "));
+  const linePlural = new Intl.PluralRules("ru-RU");
+  function lineCountLabel(count) {
+    const unit = { one: "строка", few: "строки", many: "строк" }[linePlural.select(count)];
+    return `${count} ${unit}`;
+  }
+
+  function formatXml(text) {
+    if (!/^\s*</.test(text) || /<!DOCTYPE/i.test(text) || text.length > 256_000) return text;
+    const xml = new DOMParser().parseFromString(text, "application/xml");
+    if (xml.querySelector("parsererror")) return text;
+    let changed = false;
+    function indent(node, depth) {
+      if (!node.children.length || depth >= 48 || node.hasAttributeNS("http://www.w3.org/XML/1998/namespace", "space")) return;
+      const children = [...node.childNodes];
+      // Leave mixed content and significant whitespace alone.
+      if (children.some(child => child.nodeType === Node.CDATA_SECTION_NODE ||
+        (child.nodeType === Node.TEXT_NODE && child.data.trim()))) return;
+      for (const child of children) {
+        if (child.nodeType === Node.TEXT_NODE) child.remove();
+        else {
+          child.before(xml.createTextNode("\n" + "  ".repeat(depth + 1)));
+          if (child.nodeType === Node.ELEMENT_NODE) indent(child, depth + 1);
+        }
+      }
+      node.append(xml.createTextNode("\n" + "  ".repeat(depth)));
+      changed = true;
+    }
+    indent(xml.documentElement, 0);
+    if (!changed) return text;
+    const declarationPattern = /^\s*(<\?xml\s[\s\S]*?\?>)/;
+    const declaration = declarationPattern.exec(text)?.[1];
+    const serialized = new XMLSerializer().serializeToString(xml);
+    return declaration ? declaration + "\n" + serialized.replace(declarationPattern, "").trimStart() : serialized;
+  }
+
+  function formatReportCode(text) {
+    const tools = root.QaReportFilePreview;
+    const readable = tools.readableCode(text);
+    if (/^(?:(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT|TRACE)\s+\S+|HTTP\/\d(?:\.\d)?\s+\d{3})/.test(readable)) {
+      const separator = /\r?\n\r?\n/.exec(readable);
+      if (separator) {
+        const body = separator.index + separator[0].length;
+        return readable.slice(0, body) + formatXml(tools.formatJson(readable.slice(body)));
+      }
+    }
+    return formatXml(readable);
+  }
+
+  function createCodePreview(text, openCode) {
+    const readable = text.length <= 256_000 ? formatReportCode(text) : null;
+    const display = readable ?? text;
+    const detail = lineCountLabel(display.split(/\r\n|\r|\n/).length);
+    const block = element("div", "report-code-block");
+    const trigger = element("button", "report-code-open");
+    trigger.type = "button";
+    trigger.setAttribute("aria-label", `Код, ${detail}. Открыть код`);
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.addEventListener("click", () => openCode({ text, readable, detail, trigger }));
+    const viewport = element("span", "report-code-viewport");
+    viewport.append(element("code", "", display.slice(0, 2400)));
+    trigger.append(element("span", "report-code-label", `Код · ${detail}`), viewport);
+    block.append(trigger);
+    return block;
+  }
+
+  function createCodeViewer(dialog) {
+    const content = dialog.querySelector("pre");
+    const readable = dialog.querySelector("input");
+    const copy = dialog.querySelector("[data-copy-code]");
+    const message = dialog.querySelector("[role=status]");
+    let code;
+    function render() {
+      content.textContent = readable.checked ? code.readable : code.text;
+      content.scrollTo(0, 0);
+      message.textContent = "";
+    }
+    readable.addEventListener("change", render);
+    dialog.querySelector("[data-close-code]").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => {
+      if (dialog.open) return;
+      code = null;
+      content.textContent = "";
+    });
+    copy.addEventListener("click", async () => {
+      const current = code;
+      const text = content.textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        if (code === current && content.textContent === text) message.textContent = "Код скопирован.";
+      } catch {
+        if (code === current && content.textContent === text) message.textContent = "Не удалось скопировать код.";
+      }
+    });
+    return ({ text, readable: formatted }) => {
+      code = { text, readable: formatted ?? formatReportCode(text) };
+      readable.checked = true;
+      render();
+      dialog.showModal();
+    };
+  }
+
+  const richTags = new Set("A B BR CODE DIV EM FIGCAPTION FIGURE H1 H2 H3 HR I IMG LI OL P S SPAN STRONG SUB SUP U UL".split(" "));
   const raster = /^data:image\/(?:png|jpeg|gif|webp|bmp|x-icon|vnd\.microsoft\.icon|avif);base64,[a-z0-9+/=]+$/i;
   const localFile = /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[a-z0-9+/=]*$/i;
   const textStyles = ["color", "background-color", "text-align", "font-weight", "font-style", "text-decoration"];
 
-  function readContent(target, html, openImage, openFile) {
+  function readContent(target, html, openImage, openFile, openCode, extractCode) {
     const template = element("template");
     template.innerHTML = html || "";
     template.content.querySelectorAll("script,style,iframe,object,embed,svg,math,template,[data-editor-ui]").forEach(node => node.remove());
     for (const node of template.content.querySelectorAll("*")) {
       if (!template.content.contains(node)) continue;
+      if (node.tagName === "PRE") {
+        const text = extractCode(node);
+        if (text) node.replaceWith(createCodePreview(text, openCode));
+        else node.remove();
+        continue;
+      }
       if (node.matches(".cell-file,.jira-file-placeholder,.jira-image-placeholder")) {
         const name = node.dataset.fileName || node.dataset.jiraName || node.textContent.trim() || "Вложение";
         const data = node.dataset.dataUrl;
@@ -150,6 +257,7 @@
       const style = textStyles.map(prop => [prop, node.style.getPropertyValue(prop)])
         .filter(([, value]) => value && !/url|expression|var\(|[<>\\]/i.test(value));
       for (const attr of [...node.attributes]) node.removeAttribute(attr.name);
+      if (node.tagName === "CODE") node.className = "report-inline-code";
       if (href) {
         node.href = href;
         node.target = "_blank";
@@ -188,7 +296,7 @@
     };
   }
 
-  function createPreview(dialog, openFile) {
+  function createPreview(dialog, openFile, extractCode) {
     const filter = dialog.querySelector(".report-view-filter");
     const order = dialog.querySelector(".report-view-order");
     const counts = dialog.querySelector(".counts");
@@ -196,6 +304,7 @@
     const sections = dialog.querySelector(".report-view-sections");
     const updateEmptyState = createEmptyState(dialog.querySelector(".report-view-empty"), filter);
     const imageDialog = dialog.querySelector(".report-image-dialog");
+    const openCode = createCodeViewer(dialog.querySelector(".report-code-dialog"));
     const image = imageDialog.querySelector("img");
     const imageTitle = imageDialog.querySelector("h2");
     let groups = [];
@@ -252,7 +361,7 @@
       filter.value = initialStatuses ? "editor" : "all";
       order.value = "original";
       dialog.querySelector("h1").textContent = report.title;
-      const append = (target, html) => readContent(target, html, openImage, openFile);
+      const append = (target, html) => readContent(target, html, openImage, openFile, openCode, extractCode);
       renderOverview(overview, report, target => append(target, report.intro));
       groups = report.sections.map(({ title, columns, rows }) => {
         const group = createSection(title, columns.map(column => column.title || "Без названия"));
@@ -287,5 +396,6 @@
     };
   }
 
-  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, appendStatusOptions, createEmptyState, createPreview };
+  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, appendStatusOptions, createEmptyState,
+    lineCountLabel, formatReportCode, createCodePreview, createPreview };
 })(window);

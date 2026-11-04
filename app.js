@@ -4013,7 +4013,7 @@ function htmlToSpreadsheetText(html) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function extractCodeText(node) {
+function extractCodeText(node, { preserveWhitespace = false } = {}) {
   let output = "";
   const walk = (current) => {
     if (current.nodeType === Node.TEXT_NODE) {
@@ -4031,7 +4031,7 @@ function extractCodeText(node) {
     if (block && output && !output.endsWith("\n")) output += "\n";
   };
   for (const child of node.childNodes) walk(child);
-  return output.replace(/\u00a0/g, " ").replace(/\n+$/, "");
+  return preserveWhitespace ? output : output.replace(/\u00a0/g, " ").replace(/\n+$/, "");
 }
 
 function escapeWikiNotEquals(value, protect = value => value) {
@@ -5470,7 +5470,9 @@ async function publishToJira(mode = "auto") {
   }
 }
 
-const showChecklistPreview = window.QaReportView.createPreview(elements.previewModal, openFileViewer);
+const showChecklistPreview = window.QaReportView.createPreview(
+  elements.previewModal, openFileViewer, node => extractCodeText(node, { preserveWhitespace: true }),
+);
 elements.previewModal.addEventListener("close", syncBodyModalOverflow);
 
 function openPreview() {

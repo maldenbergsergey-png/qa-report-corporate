@@ -64,6 +64,21 @@ async function main() {
     }] });
     collectDocumentFields(); historyCurrent=serializeDraft(); undoStack=[]; redoStack=[];
   }, source);
+  // Reading a compact card must keep the original code intact.
+  await page.click('#previewButton');
+  const card = page.locator('#previewModal .report-code-open');
+  assert.equal(await card.locator('code').textContent(), readable);
+  assert.equal(await card.locator('img').count(), 0);
+  const codeDialog = page.getByRole('dialog', { name: 'Просмотр кода' });
+  await card.press('Enter');
+  assert.equal(await codeDialog.locator('pre').textContent(), readable);
+  await codeDialog.getByLabel('Читаемый текст').uncheck();
+  assert.equal(await codeDialog.locator('pre').textContent(), source);
+  await page.keyboard.press('Escape');
+  assert.equal(await codeDialog.isHidden(), true);
+  assert.equal(await card.evaluate(node => node === document.activeElement), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#previewModal').isHidden(), true);
   const text = page.locator('#codeEditorTextarea');
   const toggle = page.locator('#codeEditorReadable');
   const save = page.locator('#saveCodeButton');
@@ -104,6 +119,11 @@ async function main() {
   assert.equal(await page.locator(selector).evaluate(node => node.querySelector('code').textContent), source);
   await page.click('#redoButton'); await waitSaved();
   assert.equal(await page.locator(selector).evaluate(node => node.querySelector('code').textContent), edited);
+  // The editor can report a local copy before the history record has caught up.
+  await page.waitForFunction(async () => {
+    const stored = await getReportRecord(draft.reportId);
+    return stored?.document.sections[0].rows[0].cells.check === draft.sections[0].rows[0].cells.check;
+  });
   await page.reload(); await page.waitForSelector(selector);
   await page.evaluate(() => { cloudHistoryEnabled=false; });
   await open(); assert.equal(await toggle.isChecked(), true); assert.equal(await text.inputValue(),edited);

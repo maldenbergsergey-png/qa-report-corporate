@@ -5256,13 +5256,13 @@ function currentJiraPublication() {
   return window.QaReportJiraPublication.matching(draft.jiraPublication, draft.reportId, draft.issueUrl);
 }
 
-function publicationInfoMarkup(value, reportId, history = false) {
+function publicationInfoMarkup(value, reportId, history = false, includeLinks = true) {
   const api = window.QaReportJiraPublication, link = api.normalize(value, reportId);
   if (!link) return "";
   const provider = "Jira";
-  const links = link.parts.flatMap((part, index) => part ? [
-    `<a${history ? ' class="history-publication-link"' : ""} href="${escapeHtml(api.commentUrl(link.issueUrl, part.commentId))}" target="_blank" rel="noopener noreferrer">${history ? '<svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg>' : ""}<span>${link.parts.length > 1 ? `${provider}: часть ${index + 1}` : history ? `Комментарий в ${provider}` : `Открыть в ${provider}`}</span></a>`
-  ] : []).join(history ? "" : " · ");
+  const links = includeLinks ? link.parts.flatMap((part, index) => part ? [
+    `<a${history ? ' class="history-publication-link"' : ' role="menuitem"'} href="${escapeHtml(api.commentUrl(link.issueUrl, part.commentId))}" target="_blank" rel="noopener noreferrer"><svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg><span>${link.parts.length > 1 ? `${provider}: часть ${index + 1}` : history ? `Комментарий в ${provider}` : `Открыть в ${provider}`}</span></a>`
+  ] : []).join(history ? "" : " · ") : "";
   const time = (value, label) => value ? `<span>${label} <time datetime="${escapeHtml(value)}">${escapeHtml(new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</time></span>` : "";
   const dates = time(link.firstPublishedAt, "Опубликован")
     + (link.lastPublishedAt !== link.firstPublishedAt ? time(link.lastPublishedAt, "Обновлён") : "")
@@ -5378,21 +5378,25 @@ function trackerPublicationState(link, target) {
   return legacyPublicationCheck.result === "dirty" ? dirty : unknown;
 }
 
-function renderPublicationChannel(channel, state) {
+function renderPublicationChannel(channel, state, icon, hasPublication) {
   channel.dataset.state = state.state;
   const status = channel.querySelector("[data-publication-status]");
   if (status.textContent !== state.label) status.textContent = state.label;
   const action = channel.querySelector("[data-publication-action]");
   action.querySelector(".primary-action-label").textContent = state.action;
+  action.querySelector("use").setAttribute("href", `#icon-${icon}`);
   action.disabled = state.state === "busy";
-  const detail = channel.querySelector(".publication-details");
+  for (const option of channel.querySelectorAll("button:not([data-publication-action])")) {
+    option.hidden = !hasPublication;
+    option.disabled = option.hidden || action.disabled;
+  }
+  const details = channel.querySelector(".publication-details");
   const items = state.details || [];
-  detail.hidden = !items.length;
-  detail.querySelector("strong").textContent = state.state === "dirty" ? "Что изменилось" : "Ход публикации";
-  const list = detail.querySelector("ul");
-  if (JSON.stringify(items) !== list.dataset.items) {
-    list.dataset.items = JSON.stringify(items);
-    list.replaceChildren(...items.map(text => Object.assign(document.createElement("li"), { textContent: text })));
+  details.hidden = !items.length;
+  const key = JSON.stringify(items);
+  if (key !== details.dataset.items) {
+    details.dataset.items = key;
+    details.replaceChildren(...items.map(text => Object.assign(document.createElement("li"), { textContent: text })));
   }
 }
 
@@ -5408,19 +5412,14 @@ function renderPublicationState() {
   const channel = document.getElementById("trackerPublication");
   const provider = target?.provider === "eva" ? "EVA" : target ? "Jira" : "В задачу";
   channel.querySelector("[data-publication-name]").textContent = provider;
-  renderPublicationChannel(channel, state);
+  const icons = { missing: "link", fresh: "send", current: "external", unknown: "external", dirty: "upload", partial: "history", busy: "upload" };
+  renderPublicationChannel(channel, state, icons[state.state], Boolean(link));
   const exportButton = document.getElementById("publishExportButton");
   exportButton.querySelector(".primary-action-label").textContent = state.action;
   exportButton.disabled = publishInProgress;
-  const menu = document.getElementById("publicationMenuButton");
-  if (!link && !menu.hidden) closeHeaderDropdowns();
-  menu.hidden = !link;
-  menu.disabled = publishInProgress;
-  menu.setAttribute("aria-label", target ? `Действия публикации в ${provider}` : "Действия публикации в задачу");
-  document.getElementById("publishAgainButton").disabled = !link || publishInProgress;
-  document.getElementById("publishScopeAction").disabled = !link || publishInProgress;
   const info = document.getElementById("publicationInfo");
-  const markup = publicationInfoMarkup(link, draft.reportId);
+  const includeLinks = icons[state.state] !== "external" || link?.parts.length > 1;
+  const markup = publicationInfoMarkup(link, draft.reportId, false, includeLinks);
   if (info.innerHTML !== markup) info.innerHTML = markup;
   info.hidden = !markup;
 }
@@ -10022,28 +10021,18 @@ elements.saveJiraSettingsButton.addEventListener("click", saveJiraSettings);
 elements.publishButton.addEventListener("click", runTrackerPublicationAction);
 document.getElementById("publishExportButton").addEventListener("click", runTrackerPublicationAction);
 document.getElementById("publishScopeAction").addEventListener("click", () => publishToJira());
-document.querySelectorAll(".publication-details-toggle").forEach(button => {
-  const details = button.closest(".publication-details");
-  button.addEventListener("click", () => {
-    const expanded = button.getAttribute("aria-expanded") === "true";
-    button.setAttribute("aria-expanded", String(!expanded));
-    details.toggleAttribute("data-dismissed", expanded);
-  });
-  button.addEventListener("blur", () => {
-    button.setAttribute("aria-expanded", "false");
-    details.removeAttribute("data-dismissed");
-  });
-  details.addEventListener("pointerleave", () => details.removeAttribute("data-dismissed"));
-  button.addEventListener("keydown", event => {
-    if (event.key !== "Escape") return;
-    button.setAttribute("aria-expanded", "false");
-    details.setAttribute("data-dismissed", "");
-  });
+document.getElementById("publishAgainButton").addEventListener("click", () => publishToJira("new"));
+const publicationMenuButton = document.getElementById("publicationMenuButton");
+const publicationMenu = document.getElementById("publicationMenu");
+publicationMenuButton.addEventListener("click", event => {
+  event.stopPropagation();
+  toggleHeaderDropdown(publicationMenuButton, publicationMenu);
 });
-    document.getElementById("publishAgainButton").addEventListener("click", () => publishToJira("new"));
-    document.getElementById("publicationMenuButton").addEventListener("click", event => {
-      event.stopPropagation(); toggleHeaderDropdown(event.currentTarget, document.getElementById("publicationMenu"));
-    });
+publicationMenu.addEventListener("click", event => {
+  if (!event.target.closest('[role="menuitem"]')) return;
+  closeHeaderDropdowns();
+  publicationMenuButton.focus({ preventScroll: true });
+}, { capture: true });
 elements.publishCancelButton.addEventListener("click", cancelPublishProgress);
 document.getElementById("publishStatusSelectAll").addEventListener("change", (event) => {
   document.querySelectorAll('#publishStatusList input').forEach((input) => { input.checked = event.target.checked; });

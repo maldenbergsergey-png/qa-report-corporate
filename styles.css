@@ -6064,74 +6064,43 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .metadata-grid #environment[aria-invalid="true"],
 .metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 
-/* Keep publication menus above metadata, inside the report and below sticky toolbars. */
-.report-heading { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.report-publication { display: flex; gap: 16px; max-width: 100%; margin-inline-start: auto; }
-.publication-channel { display: flex; flex: 1 1 0; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
-.publication-channel + .publication-channel { border-inline-start: 1px solid var(--line); padding-inline-start: 16px; }
-.publication-channel-name { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 13px; }
-.publication-channel-name .ui-icon { width: 15px; height: 15px; color: var(--muted); }
-.publication-status { position: relative; display: flex; align-items: center; gap: 5px; min-height: 24px; color: var(--muted); font-size: 12px; }
-.publication-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.publication-channel[data-state="current"] .publication-status { color: var(--green); }
-.publication-channel:is([data-state="dirty"], [data-state="partial"]) .publication-status { color: var(--publication-warning, #99610b); }
-.publication-details { flex: none; }
-.publication-details-toggle {
-  display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px;
-  background: transparent; color: inherit; font: inherit; font-size: 16px; cursor: pointer;
-}
-.publication-details-toggle:hover, .publication-details-toggle[aria-expanded="true"] { background: var(--line-soft); }
-.publication-details-panel {
-  display: none; position: absolute; z-index: 3; top: calc(100% + 4px); left: 0;
-  width: max-content; max-width: min(230px, calc(100vw - 56px)); padding: 9px 11px;
+/* Keep the open menu above editor controls and below the sticky app header. */
+.report-heading { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
+.report-heading:has(.report-publication.open) { z-index: 46; }
+.report-publication { margin-inline-start: auto; --publication-warning: #99610b; }
+:root .report-publication > .publication-menu-trigger {
+  width: auto; min-height: 36px; gap: 7px; padding: 6px 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+  font-size: 13px; box-shadow: none;
 }
-.publication-channel + .publication-channel .publication-details-panel { right: 0; left: auto; }
-.publication-details-panel ul { margin: 4px 0 0; padding-inline-start: 16px; color: var(--muted); }
-@media (hover: hover) {
-  .publication-details:not([data-dismissed]):hover .publication-details-panel { display: block; }
+:root .report-publication > .publication-menu-trigger:hover,
+:root .report-publication.open > .publication-menu-trigger { background: var(--line-soft); }
+.report-publication .publication-menu-trigger .chevron-icon { display: block; color: var(--muted); }
+.report-publication .header-dropdown-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; left: auto;
+  width: max-content; min-width: min(240px, calc(100vw - 48px)); max-width: min(310px, calc(100vw - 48px));
+  max-height: min(60dvh, 420px); overflow-y: auto;
 }
-.publication-details:not([data-dismissed]):has(:focus-visible) .publication-details-panel,
-.publication-details:has([aria-expanded="true"]) .publication-details-panel { display: block; }
-.publication-details-panel::before { content: ""; position: absolute; inset: -5px 0 auto; height: 5px; }
-.report-publication-buttons {
-  display: flex; position: relative; max-width: 100%; border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, .16);
-  background: rgba(28, 33, 42, .76);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+.publication-channel + .publication-channel { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+.publication-status {
+  display: flex; flex-wrap: wrap; gap: 0 5px; align-items: baseline;
+  padding: 5px 9px 4px; color: var(--muted); font-size: 12px; line-height: 1.35;
 }
-.report-publication-buttons > [data-publication-action] {
-  min-width: 0; min-height: 36px; padding: 7px 10px; border-radius: 7px 0 0 7px;
-  background: transparent; color: #f4f6f9; box-shadow: none; font-size: 13px; text-align: start;
-}
-.report-publication-buttons > [data-publication-action]:has(+ [hidden]) { border-radius: 7px; }
-:root .report-publication-buttons .publication-menu-trigger {
-  min-height: 36px; min-width: 31px; padding: 6px;
-  background: transparent; color: #f4f6f9; border-radius: 0 7px 7px 0;
-  border-inline-start: 1px solid rgba(255, 255, 255, .12); box-shadow: none;
-}
-.report-publication-buttons > [data-publication-action]:hover:not(:disabled),
-:root .report-publication-buttons .publication-menu-trigger:hover:not(:disabled),
-:root .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: rgba(255, 255, 255, .09); }
-.report-publication-buttons > button:focus-visible,
-.publication-details-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.report-publication-buttons .header-dropdown-menu { position: absolute; top: calc(100% + 6px); left: 0; right: auto; }
-.publication-channel:last-child .header-dropdown-menu { left: auto; right: 0; }
-@media (max-width: 390px) {
-  .publication-channel:last-child .header-dropdown-menu { left: 0; right: auto; }
-}
-.publication-channel .publication-info { justify-content: flex-start; }
+.publication-channel:is([data-state="dirty"], [data-state="partial"]) [data-publication-status] { color: var(--publication-warning); }
+.publication-attention { display: none; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--publication-warning); }
+.report-publication:has(.publication-channel:is([data-state="dirty"], [data-state="partial"])) .publication-attention { display: block; }
+.publication-details { margin: 0 9px 5px; padding-inline-start: 16px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.report-publication .header-dropdown-item { min-height: 34px; padding: 6px 9px; white-space: normal; }
+.report-publication .header-dropdown-item .ui-icon { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.report-publication .header-dropdown-item:not([data-publication-action]) { font-weight: 500; }
+.publication-channel .publication-info { justify-content: flex-start; padding: 5px 9px; }
+.publication-channel .publication-info .ui-icon { width: 12px; height: 12px; margin-inline-end: 4px; }
 .report-publication [hidden] { display: none !important; }
-@media (max-width: 600px) {
-  .report-publication { gap: 10px; }
-  .publication-channel + .publication-channel { padding-inline-start: 10px; }
-}
 @media (pointer: coarse) {
-  .report-publication-buttons > [data-publication-action],
-  :root .report-publication-buttons .publication-menu-trigger { min-height: 44px; }
-  .publication-details-toggle { width: 40px; height: 40px; }
+  :root .report-publication > .publication-menu-trigger,
+  .report-publication .header-dropdown-item { min-height: 44px; }
 }
+
 .publication-info { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; color: var(--muted); font-size: 11px; max-width: 100%; }
 .publication-info[hidden] { display: none; }
 .publication-info a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
@@ -6368,13 +6337,6 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 /* Settings reuses the editor's themes and controls inside one fixed dialog. */
 
 /* Light glass publication controls follow the light toolbar palette. */
-:root[data-theme="light"] .report-publication-buttons { border-color: var(--line); background: rgba(255, 255, 255, .72); }
-:root[data-theme="light"] .report-publication-buttons > #publishButton,
-:root[data-theme="light"] .report-publication-buttons .publication-menu-trigger { color: var(--ink); }
-:root[data-theme="light"] .report-publication-buttons .publication-menu-trigger { border-left-color: var(--line); }
-:root[data-theme="light"] .report-publication-buttons > #publishButton:hover:not(:disabled),
-:root[data-theme="light"] .report-publication-buttons .publication-menu-trigger:hover:not(:disabled),
-:root[data-theme="light"] .report-publication-buttons.header-dropdown.open .publication-menu-trigger { background: color-mix(in srgb, var(--ink) 6%, transparent); }
 
 /* Reception clocks stay separate from transient batch messages. */
 #localImportModal .import-body { display: block; overflow-y: auto; }

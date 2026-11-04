@@ -115,7 +115,7 @@ let child, browser;
   }
   await page.fill('#issueUrl', '');
   assert.equal(await page.locator('#publishButton').innerText(), 'Указать задачу');
-  await page.click('#publishButton');
+  await page.click('#publicationMenuButton'); await page.click('#publishButton');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
   await page.fill('#issueUrl', 'https://example.test/not-a-task');
   assert.equal(await page.locator('#trackerPublication [data-publication-status]').innerText(), 'Проверьте ссылку на задачу');
@@ -139,7 +139,7 @@ let child, browser;
     for (const literal of ['STAGE [zone]', 'Endpoints [group]', 'Check [column]', 'Description [context]', '/api/items/[id]']) assert.ok(adf.includes(literal), literal);
     assert.equal(await page.evaluate(() => JSON.stringify(draftContentSnapshot())), publicationSource);
   }
-  await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  await page.click('#publicationMenuButton'); await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
   await page.waitForFunction(() => !publishInProgress);
   assert.equal(creates, 1); assert.equal(await page.locator('#publishButton').innerText(), 'Открыть в Jira');
   assert.equal(comments.get('10001'), preparedWiki, 'Jira receives the converted comment');
@@ -159,13 +159,13 @@ let child, browser;
   await page.click('#publishCancelButton');
   await page.locator('.cell-editor').first().fill('PATCH /api/items/{itemId}');
   await page.waitForFunction(() => document.querySelector('#publishButton').textContent === 'Обновить в Jira');
-  const detailsButton = page.locator('#trackerPublication .publication-details-toggle');
-  await detailsButton.hover();
-  assert.match(await page.locator('#trackerPublicationDetails').innerText(), /Содержимое пунктов/);
-  await detailsButton.press('Enter');
-  await page.mouse.move(0, 0);
+  assert.equal(await page.locator('.publication-attention').isVisible(), true);
+  await page.locator('#publicationMenuButton').press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'publishButton');
   assert.equal(await page.locator('#trackerPublicationDetails').isVisible(), true);
-  await detailsButton.press('Escape');
+  assert.match(await page.locator('#trackerPublicationDetails').innerText(), /Содержимое пунктов/);
+  assert.equal(await page.locator('#publishButton use').getAttribute('href'), '#icon-upload');
+  await page.keyboard.press('Escape');
   assert.equal(await page.locator('#trackerPublicationDetails').isVisible(), false);
   await page.locator('.cell-editor').first().fill('GET /api/items/{id}');
   await page.waitForFunction(() => document.querySelector('#publishButton').textContent === 'Открыть в Jira');
@@ -222,15 +222,14 @@ let child, browser;
     if (screenshots) await page.locator('.report-heading').screenshot({ animations: 'disabled', path: path.join(screenshots, `${corporate ? 'corporate' : 'public'}-${theme}-${width}.png`) });
     await page.click('#publicationMenuButton');
     assert.equal(await page.locator('#publishAgainButton').isVisible(), true);
-    const placement = await page.locator('.report-publication-buttons').evaluate(node => {
+    const placement = await page.locator('.report-publication').evaluate(node => {
       const trigger = node.querySelector('#publicationMenuButton').getBoundingClientRect(), menu = node.querySelector('#publicationMenu').getBoundingClientRect();
-      const main = getComputedStyle(node.querySelector('#publishButton')), arrow = getComputedStyle(node.querySelector('#publicationMenuButton'));
-      return { triggerBottom: trigger.bottom, menuTop: menu.top, menuLeft: menu.left, menuRight: menu.right, mainColor: main.color, arrowColor: arrow.color,
+      return { triggerBottom: trigger.bottom, menuTop: menu.top, menuLeft: menu.left, menuRight: menu.right,
         menuReceivesPointer: !!document.elementFromPoint(menu.left + menu.width / 2, menu.top + menu.height / 2)?.closest('#publicationMenu') };
     });
     assert.ok(placement.menuTop >= placement.triggerBottom && placement.menuLeft >= 0 && placement.menuRight <= width);
-    assert.equal(placement.mainColor, placement.arrowColor);
     assert.equal(placement.menuReceivesPointer, true, `${theme}/${width}: publication menu is covered`);
+    if (screenshots && width === 1440 && theme === 'dark') await page.screenshot({ path: path.join(screenshots, 'publication-menu.png') });
 
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#publicationMenu').isVisible(), false);
@@ -247,7 +246,7 @@ let child, browser;
     window.scrollTo(0, 0);
   });
   const popoverHit = await page.evaluate(() => {
-    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const button = document.querySelector('#publicationMenuButton').getBoundingClientRect();
     const hint = document.querySelector('#updateAppHint');
     // Align the real popover over the action to cover overlap at any layout width.
     // No stacking styles are changed by the fixture.
@@ -261,13 +260,13 @@ let child, browser;
     document.activeElement.blur();
     document.querySelector('#updateAppHint').removeAttribute('style');
     document.querySelector('#updateAppContainer').hidden = true;
-    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const button = document.querySelector('#publicationMenuButton').getBoundingClientRect();
     const topbar = document.querySelector('.topbar').getBoundingClientRect();
     window.scrollTo(0, window.scrollY + button.top + button.height / 2 - topbar.height / 2);
   });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const scrolled = await page.evaluate(() => {
-    const button = document.querySelector('#publishButton').getBoundingClientRect();
+    const button = document.querySelector('#publicationMenuButton').getBoundingClientRect();
     const topbar = document.querySelector('.topbar').getBoundingClientRect();
     const hit = document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2);
     return { overlaps: button.top < topbar.bottom && button.bottom > topbar.top, topbarReceivesPointer: !!hit?.closest('.topbar') };
@@ -286,7 +285,7 @@ let child, browser;
   });
   for (const status of [403, 502]) {
     failureStatus = status;
-    await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+    await page.click('#publicationMenuButton'); await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
     await page.waitForFunction(() => !publishInProgress);
     assert.deepEqual(await page.evaluate(() => draft.jiraPublication), beforeMissing.link);
     assert.equal(await page.locator('#publishButton').innerText(), 'Обновить в Jira');
@@ -299,12 +298,12 @@ let child, browser;
   const oldCreates = creates, oldUpdates = updates;
   comments.delete(beforeMissing.link.parts[0].commentId);
   const detectedAfter = Date.now();
-  await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  await page.click('#publicationMenuButton'); await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
   await page.waitForFunction(() => !publishInProgress);
   assert.equal(await page.evaluate(() => draft.jiraPublication), null);
   assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать в Jira');
   assert.equal(await page.locator('#publishExportButton').innerText(), 'Опубликовать в Jira');
-  assert.equal(await page.locator('#publicationInfo').isVisible(), false);
+  assert.equal(await page.locator('#publicationInfo').getAttribute('hidden'), '');
   assert.match(await page.locator('#publishErrorText').innerText(), /Связь и даты публикации удалены/);
   assert.equal(creates, oldCreates); assert.equal(updates, oldUpdates);
   await page.click('#publishCancelButton');
@@ -324,9 +323,9 @@ let child, browser;
   assert.equal(await page.evaluate(() => draft.jiraPublication), null);
   await page.reload(); await page.waitForSelector('.cell-editor'); await prepare();
   assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать в Jira');
-  assert.equal(await page.locator('#publicationInfo').isVisible(), false);
+  assert.equal(await page.locator('#publicationInfo').getAttribute('hidden'), '');
   // Publishing again is an explicit click and starts fresh publication dates.
-  await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
+  await page.click('#publicationMenuButton'); await page.click('#publishButton'); await page.click('#acceptPublishScopeButton');
   await page.waitForFunction(() => !publishInProgress);
   const replacement = await page.evaluate(() => structuredClone(draft.jiraPublication));
   assert.equal(creates, oldCreates + 1);

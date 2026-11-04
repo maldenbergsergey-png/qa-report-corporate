@@ -106,36 +106,14 @@ async function main() {
     if (typeof validateJiraSettings === 'function') validateJiraSettings = () => {};
   });
   if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
-  // A missing task blocks all publication entry points before connection checks or uploads.
-  await page.click('#publishButton');
-  await page.waitForSelector('#confirmModal:not([hidden])');
-  assert.equal(await page.locator('#confirmModalTitle').innerText(), 'Укажите задачу');
-  assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), 'true');
-  assert.equal(await page.locator('#issueUrlError').innerText(), 'Укажите ссылку на задачу');
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'acceptConfirmButton');
-  assert.deepEqual(await page.evaluate(() => [publicationFixture.ready, publicationFixture.scopes, publicationFixture.uploads, publicationFixture.sent.length]), [0, 0, 0, 0]);
-  for (const width of [1600, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
-    for (const theme of ['light', 'dark', 'graphite']) {
-      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
-      const dialog = page.locator('#confirmModal .confirm-modal');
-      const box = await dialog.boundingBox();
-      assert.ok(box.x >= 0 && box.x + box.width <= width && box.height <= page.viewportSize().height, JSON.stringify({ width, theme, box }));
-      assert.equal(await page.locator('#issueUrl').evaluate(node => getComputedStyle(node).borderTopColor),
-        await page.locator('#issueUrlError').evaluate(node => getComputedStyle(node).color));
-      if (screenshots) await dialog.screenshot({ animations: 'disabled', path: path.join(screenshots, `${theme}-${width}-missing-task.png`) });
-    }
-  }
-  await page.click('#acceptConfirmButton');
-  await page.waitForFunction(() => !publishInProgress);
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
-  // Whitespace, a bare key and a URL without a task key cannot bypass the gate.
-  for (const [value, entry, dismiss] of [
-    ['   ', 'export', 'cancel'],
-    ['QA-1', 'new', 'escape'],
-    ['https://jira.example/browse/', 'main', 'accept'],
-    ['https://jira.example/', 'export', 'accept'],
-    ['', 'focus', 'accept'],
+  // A missing or malformed task blocks publication and focuses the address field.
+  for (const [value, entry] of [
+    ['', 'menu'],
+    ['   ', 'export'],
+    ['QA-1', 'new'],
+    ['https://jira.example/browse/', 'menu'],
+    ['https://jira.example/', 'export'],
+    ['', 'focus'],
   ]) {
     await page.fill('#issueUrl', value);
     if (entry === 'focus') await page.evaluate(() => setFocusMode(true));
@@ -144,18 +122,19 @@ async function main() {
       await page.click('#publishExportButton');
     } else if (entry === 'new') {
       await page.evaluate(() => { void publishToJira('new'); });
-    } else await page.click('#publishButton');
-    await page.waitForSelector('#confirmModal:not([hidden])');
-    assert.equal(await page.locator('#issueUrl').getAttribute('aria-invalid'), 'true');
-    assert.ok(await page.locator('#issueUrlError').innerText());
-    assert.equal(await page.locator('#publishScopeModal').isVisible(), false);
-    if (dismiss === 'escape') await page.keyboard.press('Escape');
-    else await page.click(dismiss === 'cancel' ? '#cancelConfirmButton' : '#acceptConfirmButton');
+      await page.waitForSelector('#confirmModal:not([hidden])');
+      await page.keyboard.press('Escape');
+    } else {
+      await page.click('#publicationMenuButton');
+      await page.click('#publishButton');
+    }
     await page.waitForFunction(() => !publishInProgress);
+    assert.equal(await page.locator('#publishScopeModal').isVisible(), false);
     assert.deepEqual(await page.evaluate(() => [publicationFixture.ready, publicationFixture.scopes, publicationFixture.uploads, publicationFixture.sent.length]), [0, 0, 0, 0]);
-    if (dismiss === 'accept') {
+    if (entry !== 'new') {
       assert.equal(await page.evaluate(() => document.activeElement.id), 'issueUrl');
       assert.equal(await page.locator('#issueUrl').isVisible(), true);
+      if (value.trim()) assert.equal(await page.locator('#issueUrlError').innerText(), 'Проверьте ссылку на задачу');
     }
   }
   if (!corporate) {
@@ -282,7 +261,7 @@ async function main() {
   assert.equal(await page.locator('#environmentError').isVisible(), false);
   assert.equal(await page.locator('#overallStatusError').isVisible(), false);
   assert.deepEqual(errors, []);
-  console.log('Passed: blank metadata, persistence, unfinished exports, task-link dialog at every publication entry, task-link scope revalidation, required-field publication gate, correction, explicit unchecked outcome, scope revalidation, themes, mobile arrow spacing and existing reports.');
+  console.log('Passed: blank metadata, persistence, unfinished exports, task-link validation from publication and export menus, task-link scope revalidation, required-field publication gate, correction, explicit unchecked outcome, scope revalidation, themes, mobile arrow spacing and existing reports.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, ".."), output = path.resolve(root, "../arti
       const page = await context.newPage(), errors = []; page.on("pageerror", error => errors.push(error.message));
       page.setDefaultTimeout(15000); await page.goto(fixture.origin);
       if (theme === "light") {
-        assert.match(await page.locator('.report-publication-buttons').evaluate(el => getComputedStyle(el).backgroundColor), /255, 255, 255, 0.72/);
+        assert.equal(await page.locator('#publicationMenuButton').isVisible(), true);
         await page.screenshot({ path: path.join(output, 'light-publication.png') });
       }
       await page.click("#reportMenuButton"); await page.click("#openStandaloneBugReport"); await page.locator('[name="bugCreationMode"][value="standalone"]').check();

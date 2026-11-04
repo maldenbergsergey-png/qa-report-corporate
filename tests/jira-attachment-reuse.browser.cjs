@@ -159,7 +159,8 @@ async function main() {
   }
   const publish = async (expectedError = null, selection = { includeImages: true, includeFiles: true }) => {
     const previous = await page.evaluate(() => QaReportJiraPublication.attachmentOptions(currentJiraPublication()));
-    await page.click('#publishButton');
+    await page.click('#publicationMenuButton');
+    await page.click(await page.locator('#publishScopeAction').isVisible() ? '#publishScopeAction' : '#publishButton');
     assert.equal(await page.locator('#publishIncludeImages').isChecked(), previous.includeImages, 'Image choice restores the last publication');
     assert.equal(await page.locator('#publishIncludeFiles').isChecked(), previous.includeFiles, 'File choice restores the last publication');
     if (selection) {
@@ -223,9 +224,9 @@ async function main() {
   assert.deepEqual({ manifests, uploads, downloads }, beforeTextOnly);
   assert.equal(inventories.get(issueUrl).length, 2, 'Disabling exports does not delete Jira files');
   // Cancelling staged changes preserves the last successfully published choices.
-  await page.click('#publishButton'); await page.check('#publishIncludeImages'); await page.check('#publishIncludeFiles');
+  await page.click('#publicationMenuButton'); await page.click('#publishScopeAction'); await page.check('#publishIncludeImages'); await page.check('#publishIncludeFiles');
   await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);
-  await page.click('#publishButton');
+  await page.click('#publicationMenuButton'); await page.click('#publishScopeAction');
   assert.equal(await page.locator('#publishIncludeImages').isChecked(), false);
   assert.equal(await page.locator('#publishIncludeFiles').isChecked(), false);
   await page.click('#cancelPublishScopeButton'); await page.waitForFunction(() => !publishInProgress);

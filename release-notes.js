@@ -1,7 +1,7 @@
 window.QaReportReleases = [
   {
     version: "0.28.0", date: "2026-11-04",
-    changes: { new: [], improvements: [], fixes: [] }
+    changes: { new: [], improvements: ["«Просмотр» открывает чек-лист на весь экран для чтения: заголовки колонок остаются видны при прокрутке."], fixes: [] }
   },
   {
     version: "0.27.0", date: "2026-10-28",

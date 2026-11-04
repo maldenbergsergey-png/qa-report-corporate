@@ -257,12 +257,6 @@ const elements = {
   closePublishScopeButton: document.querySelector("#closePublishScopeButton"),
   cancelPublishScopeButton: document.querySelector("#cancelPublishScopeButton"),
   acceptPublishScopeButton: document.querySelector("#acceptPublishScopeButton"),
-  closePreviewButton: document.querySelector("#closePreviewButton"),
-  visualPreview: document.querySelector("#visualPreview"),
-  markupPreview: document.querySelector("#markupPreview"),
-  modalCopyButton: document.querySelector("#modalCopyButton"),
-  modalCopyVisualButton: document.querySelector("#modalCopyVisualButton"),
-  modalSaveMarkupButton: document.querySelector("#modalSaveMarkupButton"),
   importModal: document.querySelector("#importModal"),
   closeImportButton: document.querySelector("#closeImportButton"),
   importMarkup: document.querySelector("#importMarkup"),
@@ -427,7 +421,6 @@ let stickyUpdateFrame = 0;
 let pinnedColumns = loadPinnedColumns();
 let selectionMode = false;
 let reportStatusFilter = null;
-let previewHasStatusFilter = false;
 let selectedRowIds = new Set();
 let selectionDraftId = null;
 let selectionTransferAction = "copy";
@@ -464,7 +457,7 @@ let projectSettingsRequestId = 0;
 let projectSettingsLoaded = false;
 
 function syncBodyModalOverflow() {
-  document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open]")
+  document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open], #previewModal[open]")
     ? "hidden"
     : "";
 }
@@ -5477,21 +5470,24 @@ async function publishToJira(mode = "auto") {
   }
 }
 
-function openPreview() {
-  const options = { statuses: reportStatusFilter };
-  previewHasStatusFilter = reportStatusFilter !== null;
-  document.getElementById("previewStatusFilterHint").hidden = !previewHasStatusFilter;
-  elements.modalSaveMarkupButton.disabled = previewHasStatusFilter;
-  elements.modalSaveMarkupButton.title = previewHasStatusFilter
-    ? "Сбросьте фильтр, чтобы сохранить отредактированную разметку в отчёт" : "Сохранить результат экспорта";
-  elements.markupPreview.value = generateMarkup(options);
-  elements.visualPreview.innerHTML = generateVisualPreview(draft, null, options);
-  elements.previewModal.hidden = false;
-  syncBodyModalOverflow();
-}
+const showChecklistPreview = window.QaReportView.createPreview(elements.previewModal, openFileViewer);
+elements.previewModal.addEventListener("close", syncBodyModalOverflow);
 
-function closePreview() {
-  elements.previewModal.hidden = true;
+function openPreview() {
+  const numbers = ChecklistNumbering.rowNumbers(draft);
+  showChecklistPreview({
+    title: issueKeyFromUrl(draft.issueUrl) || "Отчёт о тестировании",
+    issueUrl: draft.issueUrl,
+    environment: draft.environment,
+    overallStatus: draft.overallStatus,
+    intro: draft.intro,
+    sections: draft.sections.map(section => ({
+      title: ChecklistNumbering.sectionTitle(draft, section),
+      columns: section.columns,
+      rows: section.rows.filter(row => hasRowContent(row) || row.bugs?.length)
+        .map(row => ({ ...row, number: numbers.get(row.id) })),
+    })).filter(section => section.rows.length),
+  }, reportStatusFilter);
   syncBodyModalOverflow();
 }
 
@@ -7909,56 +7905,6 @@ async function copyMarkup() {
   await writeClipboardText(markup, "Разметка скопирована — можно вставлять в Jira");
 }
 
-async function copyPreviewMarkup() {
-  const markup = elements.markupPreview.value;
-  if (!markup.trim()) {
-    showToast("Разметка пуста");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(markup);
-  } catch {
-    const textarea = document.createElement("textarea");
-    textarea.value = markup;
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
-  }
-  showToast("Разметка из предпросмотра скопирована");
-}
-
-async function savePreviewMarkupToDraft() {
-  if (previewHasStatusFilter) {
-    showToast("Сбросьте фильтр и откройте предпросмотр заново, чтобы сохранить разметку в отчёт");
-    return;
-  }
-  try {
-    const imported = parseJiraMarkup(elements.markupPreview.value, collectCurrentAttachments());
-    ChecklistNumbering.configureImport(imported, draft.numberingMode === "manual", draft.numberingMode);
-    await saveReportSnapshot("before-preview-markup-save");
-    draft = normalizeDraft({
-      ...imported,
-      draftId: draft.draftId,
-      reportId: draft.reportId,
-      issueUrl: draft.issueUrl,
-      environment: imported.environment || draft.environment,
-      overallStatus: imported.overallStatus || draft.overallStatus,
-      revision: draft.revision,
-      updatedAt: draft.updatedAt,
-      lastSavedBy: draft.lastSavedBy,
-    });
-    scheduleHistoryCommit();
-    saveDraft();
-    render();
-    elements.visualPreview.innerHTML = generateVisualPreview();
-    elements.markupPreview.value = generateMarkup();
-    showToast("Изменения разметки сохранены в таблицу");
-  } catch (error) {
-    showToast(`Не удалось сохранить разметку: ${error.message}`, 9000);
-  }
-}
-
 let htmlCopyScopeSession = null;
 
 function htmlCopyScopeOptions() {
@@ -9775,10 +9721,6 @@ elements.cancelFeedbackButton.addEventListener("click", closeFeedback);
 elements.copyButton.addEventListener("click", copyMarkup);
 elements.copyVisualButton.addEventListener("click", openHtmlCopyScope);
 elements.exportXlsxButton.addEventListener("click", exportChecklistXlsx);
-elements.modalCopyButton.addEventListener("click", copyPreviewMarkup);
-elements.modalCopyVisualButton.addEventListener("click", openHtmlCopyScope);
-elements.modalSaveMarkupButton.addEventListener("click", savePreviewMarkupToDraft);
-elements.closePreviewButton.addEventListener("click", closePreview);
 elements.clearButton.addEventListener("click", resetDraft);
 elements.importButton.addEventListener("click", () => openImport("markup"));
 elements.closeImportButton.addEventListener("click", closeImport);
@@ -10001,15 +9943,6 @@ document.querySelectorAll(".theme-menu-item").forEach((item) => {
     elements.themeToggle.focus();
   });
 });
-document.querySelectorAll(".preview-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".preview-tab").forEach((item) => item.classList.remove("active"));
-    tab.classList.add("active");
-    const visual = tab.dataset.previewTab === "visual";
-    elements.visualPreview.hidden = !visual;
-    elements.markupPreview.hidden = visual;
-  });
-});
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".header-dropdown")) closeHeaderDropdowns();
   if (!event.target.closest(".theme-selector")) {
@@ -10163,7 +10096,6 @@ document.addEventListener("keydown", (event) => {
       closeMediaViewer();
       return;
     }
-    if (!elements.previewModal.hidden) closePreview();
     if (!elements.importModal.hidden) closeImport();
     if (!elements.jiraSettingsModal.hidden) closeJiraSettings();
     if (!elements.historyModal.hidden) closeHistory();

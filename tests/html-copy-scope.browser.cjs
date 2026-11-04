@@ -135,14 +135,6 @@ async function main() {
   assert.equal(await page.locator('#acceptHtmlCopyScopeButton').isDisabled(), true);
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#htmlCopyScopeModal').isHidden(), true);
-  // The preview action opens the same scope chooser and restores focus on close.
-  await page.click('#previewButton');
-  await page.click('#modalCopyVisualButton');
-  assert.equal(await page.locator('#htmlCopyScopeModal').isVisible(), true);
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('#previewModal').isVisible(), true);
-  assert.equal(await page.locator('#modalCopyVisualButton').evaluate(n => n === document.activeElement), true);
-  await page.click('#closePreviewButton');
   // Original row numbers survive both filters in every numbering mode.
   for (const mode of ['section', 'continuous', 'hierarchical', 'manual']) {
     await page.evaluate(mode => { draft.numberingMode = mode; render(); }, mode);

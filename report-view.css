@@ -2,6 +2,10 @@
   --reading-text: var(--text, var(--ink));
   --reading-accent: var(--accent, var(--primary));
   --reading-subtle: var(--surface-subtle, var(--preview-header));
+  display: grid;
+  grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
   color: var(--reading-text);
   line-height: 1.5;
 }
@@ -27,8 +31,7 @@
 .qa-report-view .intro-content { padding: 0 14px 11px; }
 
 .qa-report-view .toolbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 3;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -97,17 +100,35 @@
 }
 .qa-report-view .toolbar label { color: var(--muted); font-weight: 650; font-size: .84rem; }
 .qa-report-view .counts { font-size: .82rem; color: var(--muted); white-space: nowrap; }
-.qa-report-view .report-content { padding-block: 12px 36px; }
+/* Both axes share a scrollport so the table header stays aligned with its columns. */
+.qa-report-view .report-content {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 clamp(12px, 2vw, 32px) 36px;
+}
+.qa-report-view .report-content::before { display: block; height: 12px; content: ""; }
+.qa-report-view .report-content:focus-visible { outline: 2px solid var(--reading-accent); outline-offset: -2px; }
 .qa-report-view .report-section + .report-section { margin-top: 18px; }
 .qa-report-view .report-section h2 { margin: 0 0 7px; font-size: .97rem; overflow-wrap: anywhere; }
 .qa-report-view .point-index { font-variant-numeric: tabular-nums; color: var(--muted); }
-.qa-report-view .table-scroll { overflow-x: auto; isolation: isolate; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.qa-report-view .table-frame {
+  /* Keep the rounded corners without creating another scrollport for sticky headers. */
+  width: fit-content;
+  min-width: 100%;
+  overflow: clip;
+  isolation: isolate;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
 .qa-report-view .report-table { border-spacing: 0; width: 100%; text-align: start; font-size: .87rem; }
 .qa-report-view .report-table th, .qa-report-view .report-table td { padding: 8px 9px; border: solid var(--line); border-width: 0 1px 1px 0; vertical-align: top; text-align: start; }
 .qa-report-view .report-table :is(th, td):last-child { border-inline-end: 0; }
-.qa-report-view .report-table thead th { background: var(--reading-subtle); }
-.qa-report-view .report-table thead.is-docked { position: relative; z-index: 3; transform: translateY(var(--header-offset)); }
-.qa-report-view .report-table thead.is-docked th { border-bottom-color: color-mix(in srgb, var(--reading-accent) 48%, var(--line)); }
+.qa-report-view .report-table thead { position: sticky; top: 0; z-index: 3; }
+.qa-report-view .report-table thead th {
+  background: var(--reading-subtle);
+  border-bottom-color: color-mix(in srgb, var(--reading-accent) 48%, var(--line));
+}
 .qa-report-view .report-table tbody tr:last-child :is(th, td) { border-block-end: 0; }
 .qa-report-view .point-index { width: 1%; white-space: nowrap; font-weight: 650; }
 .qa-report-view .report-cell { min-width: 136px; overflow-wrap: anywhere; }
@@ -127,16 +148,14 @@
   inset: 0;
   width: 100%;
   max-width: none;
-  height: 100%;
-  height: 100dvh;
   max-height: none;
   margin: 0;
   padding: 0;
   border: 0;
   background: var(--canvas);
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
 }
+.report-preview:not([open]) { display: none; }
 .report-preview .toolbar-select select, .report-preview .report-home {
   border: 1px solid var(--line);
   color: var(--reading-text);
@@ -204,7 +223,7 @@
 .report-image-dialog img { display: block; max-width: 100%; max-height: 80dvh; object-fit: contain; margin-inline: auto; }
 
 @media (forced-colors: active) {
-  .qa-report-view .toolbar, .qa-report-view .report-table thead.is-docked th { border-color: CanvasText; }
+  .qa-report-view .toolbar, .qa-report-view .report-table thead th { border-color: CanvasText; }
   .qa-report-view .toolbar-select::after { display: none; }
   .qa-report-view .toolbar-select select { appearance: auto; padding-inline-end: 8px; }
   .qa-report-view .toolbar-select select:focus-visible { outline: 1px solid Highlight; outline-offset: -2px; }

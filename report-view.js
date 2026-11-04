@@ -78,7 +78,7 @@
 
   function createSection(title, columns, extraColumns = []) {
     const section = element("section", "report-section");
-    const scrollport = element("div", "table-scroll");
+    const frame = element("div", "table-frame");
     const table = element("table", "report-table");
     table.setAttribute("aria-label", title);
     const headers = table.createTHead().insertRow();
@@ -91,60 +91,9 @@
       headers.append(header);
     }
     const body = table.createTBody();
-    scrollport.append(table);
-    section.append(element("h2", "", title), scrollport);
+    frame.append(table);
+    section.append(element("h2", "", title), frame);
     return { section, body };
-  }
-
-  function watchHeaders(view, scrollTarget) {
-    const toolbar = view.querySelector(".toolbar");
-    const content = view.querySelector(".report-content");
-    const tables = [...content.querySelectorAll(".report-table")];
-    let docked;
-    let frame = 0;
-
-    function update() {
-      frame = 0;
-      const dockTop = toolbar.getBoundingClientRect().bottom;
-      let next;
-      let offset;
-      for (const table of tables) {
-        if (table.closest(".report-section").hidden) continue;
-        const bounds = table.getBoundingClientRect();
-        if (bounds.top >= dockTop) break;
-        if (bounds.bottom <= dockTop) continue;
-        // The real header stays in its horizontal scrollport and leaves with the last row.
-        offset = Math.min(dockTop - bounds.top, bounds.height - table.tHead.offsetHeight);
-        if (offset > 0) next = table.tHead;
-        break;
-      }
-      if (docked !== next) {
-        docked?.classList.remove("is-docked");
-        docked?.style.removeProperty("--header-offset");
-        docked = next;
-      }
-      if (next) {
-        next.style.setProperty("--header-offset", `${offset}px`);
-        next.classList.add("is-docked");
-      }
-    }
-    function schedule() {
-      if (!frame) frame = requestAnimationFrame(update);
-    }
-    const resize = new ResizeObserver(schedule);
-    [toolbar, content, ...tables].forEach(node => resize.observe(node));
-    scrollTarget.addEventListener("scroll", schedule, { passive: true });
-    root.addEventListener("resize", schedule);
-    schedule();
-    return {
-      schedule,
-      disconnect() {
-        resize.disconnect();
-        scrollTarget.removeEventListener("scroll", schedule);
-        root.removeEventListener("resize", schedule);
-        cancelAnimationFrame(frame);
-      },
-    };
   }
 
   const richTags = new Set("A B BR CODE DIV EM FIGCAPTION FIGURE H1 H2 H3 HR I IMG LI OL P PRE S SPAN STRONG SUB SUP U UL".split(" "));
@@ -225,7 +174,7 @@
     const imageTitle = imageDialog.querySelector("h2");
     let groups = [];
     let initialStatuses;
-    let pinned;
+    const scrollport = dialog.querySelector(".report-content");
 
     const openImage = (source, name) => {
       image.src = source;
@@ -240,8 +189,6 @@
     dialog.addEventListener("keydown", event => event.stopPropagation());
     dialog.addEventListener("close", () => {
       if (dialog.open) return;
-      pinned?.disconnect();
-      pinned = undefined;
       sections.replaceChildren();
       overview.querySelector(".intro-content").replaceChildren();
       groups = [];
@@ -268,15 +215,12 @@
       counts.textContent = `Показано ${visible} из ${total}`;
       empty.textContent = total ? "Пунктов с таким статусом нет. Можно выбрать другой фильтр." : "В чек-листе пока нет заполненных пунктов.";
       empty.hidden = Boolean(visible);
-      pinned?.schedule();
     }
     filter.addEventListener("change", update);
     order.addEventListener("change", update);
 
     return function open(report, selectedStatuses) {
       if (dialog.open) return;
-      pinned?.disconnect();
-      pinned = undefined;
       initialStatuses = selectedStatuses ? new Set([...selectedStatuses].map(statusKey)) : null;
       filter.replaceChildren(new Option("Все пункты", "all"));
       if (initialStatuses) filter.add(new Option("Как в чек-листе", "editor"));
@@ -314,10 +258,9 @@
       sections.replaceChildren(...groups.map(group => group.section));
       update();
       dialog.showModal();
-      dialog.scrollTop = 0;
-      pinned = watchHeaders(dialog, dialog);
+      scrollport.scrollTo(0, 0);
     };
   }
 
-  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, watchHeaders, createPreview };
+  root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, createPreview };
 })(window);

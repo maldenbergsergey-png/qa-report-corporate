@@ -156,24 +156,7 @@ button:hover:not(:disabled) { background: var(--surface-subtle); }
 .toolbar .save-state[data-state="dirty"] .save-dot { background: #ffba33; box-shadow: none; }
 .toolbar .save-state[data-state="saving"] .save-dot { background: #8995b6; box-shadow: none; }
 .toolbar .save-state[data-state="error"] .save-dot { background: #f04452; box-shadow: none; }
-.toolbar .save-state-label {
-  position: absolute;
-  z-index: 1;
-  top: calc(100% + 7px);
-  inset-inline-end: 0;
-  width: max-content;
-  max-width: min(180px, calc(100vw - 48px));
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 3px 8px #0002;
-  color: var(--text);
-  font-size: .78rem;
-  pointer-events: none;
-  clip-path: inset(50%);
-}
-.toolbar .save-state:is(:hover, :focus-visible) .save-state-label { clip-path: none; }
+.toolbar .save-state-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; border: 0; clip-path: inset(50%); white-space: nowrap; }
 
 .correction-status { min-width: 184px; width: 13%; }
 .correction-comment { min-width: 184px; width: 15%; }
@@ -562,7 +545,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .report-home .brand-mark { width: 56px; height: 34px; background: url("/icons/brand-light.png?v=2") center / 155% auto no-repeat; }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .report-home .brand-mark { background-image: url("/icons/brand-dark.png"); background-size: 122% auto; }
 .qa-report-view .toolbar-filters { flex: none; gap: 8px; }
-.qa-report-view { position: relative; }
+.qa-report-view { position: relative; --qa-status-width: 125px; --answer-status-width: 180px; --answer-comment-width: 280px; --report-data-min-width: 190px; }
 .qa-report-view > .reply-comment-toolbar { z-index: 8; inset: auto 16px 20px auto; }
 .answer-comment-slot > .reply-comment-toolbar { position: static; margin-top: 8px; max-width: 100%; box-shadow: none; }
 .qa-report-view .toolbar-select { width: 138px; }
@@ -573,16 +556,12 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .answer-view-options { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; }
 .answer-view-options button { min-height: 30px; padding: 3px 9px; border: 0; background: transparent; font-size: .84rem; white-space: nowrap; }
 .answer-view-options button[aria-pressed="true"] { background: var(--surface-subtle); font-weight: 650; }
-.toolbar .save-state { display: flex; flex: none; gap: 7px; height: auto; }
+.toolbar .save-state { display: grid; flex: 0 0 20px; height: 20px; place-items: center; }
 .toolbar .save-dot { width: 8px; height: 8px; box-shadow: none; }
-.toolbar .save-state-label { position: static; padding: 0; border: 0; background: none; box-shadow: none; clip-path: none; font-size: .78rem; max-width: 140px; }
 .shared-workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; min-width: 0; }
 .shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px); }
 .report-document { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; padding: 12px clamp(12px, 2vw, 32px) 16px; }
 .report-scroll-frame { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
-.report-scroll-frame::after { content: ""; position: absolute; z-index: 4; inset-block: 0; inset-inline-start: -1px; width: 1px; pointer-events: none; box-shadow: 5px 0 12px 4px #091e6659; opacity: 0; }
-.report-scroll-frame.has-left-overflow::after { opacity: 1; }
-:root:is([data-theme="dark"], [data-theme="graphite"]) .report-scroll-frame::after { box-shadow: 5px 0 12px 4px #0009; }
 .qa-report-view .report-content { width: 100%; height: 100%; min-width: 0; min-height: 0; scrollbar-gutter: stable; padding: 0; }
 .qa-report-view .report-content::before { display: none; }
 .qa-report-view .report-overview { flex: none; max-height: 40%; overflow: auto; margin: 0; }
@@ -591,9 +570,15 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view .intro-heading button { min-height: 24px; padding: 0 4px; border: 0; background: none; color: var(--accent); font-size: .78rem; }
 .qa-report-view .intro-content { line-height: 1.5; max-height: 9em; overflow: hidden; }
 .qa-report-view .intro[data-expanded="true"] .intro-content { max-height: none; }
-.qa-report-view .report-section > h2 { position: sticky; inset-inline-start: 0; width: fit-content; max-width: 100%; margin: 0; padding: 10px 12px; }
+.qa-report-view .report-section > h2 { position: sticky; inset-inline-start: 0; width: fit-content; max-width: var(--report-viewport-width, 100%); margin: 0; padding: 10px 12px; }
 .qa-report-view .report-cell { min-width: 190px; }
-.qa-report-view .table-frame { overflow: visible; border: 0; border-radius: 0; }
+.qa-report-view .table-frame { position: relative; width: 100%; overflow: visible; border: 0; border-block-end: 1px solid var(--line); border-radius: 0; }
+.qa-report-view .table-frame::after { content: ""; position: absolute; z-index: 4; inset-block: 0; inset-inline-start: var(--report-scroll-left, 0px); width: 1px; pointer-events: none; box-shadow: 5px 0 12px 4px #091e6659; opacity: 0; }
+.qa-report-view .table-frame.has-hidden-left::after { opacity: 1; }
+:root:is([data-theme="dark"], [data-theme="graphite"]) .qa-report-view .table-frame::after { box-shadow: 5px 0 12px 4px #0009; }
+.qa-report-view .report-table { table-layout: fixed; transform: translateX(var(--table-shift, 0px)); }
+.qa-report-view .report-table :is(th, td):is(.point-index, .report-cell) { position: relative; transform: translateX(var(--data-shift, 0px)); }
+.qa-report-view .report-table .report-scroll-spacer { padding: 0; border-inline: 0; pointer-events: none; }
 .qa-report-view .qa-status { width: 125px; min-width: 125px; }
 .qa-report-view .correction-status { width: 180px; min-width: 180px; }
 .qa-report-view .correction-comment { width: 280px; min-width: 280px; }
@@ -637,8 +622,13 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .answer-panel-fields[data-tone] { display: grid; gap: 20px; margin-top: 20px; padding: 0; color: var(--text); background: transparent; }
 .answer-panel-field { min-width: 0; }
 .answer-panel-field > label { display: block; margin-bottom: 7px; color: var(--text); font-size: .8rem; }
-.answer-status-slot select { width: 100%; min-height: 38px; padding: 7px 9px; appearance: auto; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
-.answer-status-slot { border-radius: 6px; }
+.answer-status-slot select { width: 100%; min-height: 38px; padding: 7px 34px 7px 9px; appearance: none; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+.answer-status-slot { position: relative; border-radius: 6px; }
+.answer-status-slot:has(select)::after { content: ""; position: absolute; inset-inline-end: 14px; top: 50%; width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-70%) rotate(45deg); pointer-events: none; }
+@media (forced-colors: active) {
+  .answer-status-slot select { appearance: auto; }
+  .answer-status-slot::after { display: none; }
+}
 .answer-status-slot[data-tone="neutral"] { background: transparent; color: var(--text); }
 .answer-status-slot[data-tone="negative"] { background: var(--answer-negative-bg); color: var(--answer-negative); }
 .answer-status-slot[data-tone] select { color: inherit; }
@@ -658,9 +648,9 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
   .qa-report-view .toolbar-identity { flex-basis: 240px; }
   .qa-report-view .toolbar-info { margin-inline-start: auto; }
   .answer-view-control > span { display: none; }
-  .toolbar .save-state-label { max-width: 105px; }
 }
 @media (max-width: 760px) {
+  .qa-report-view { --answer-status-width: 160px; --answer-comment-width: 220px; }
   .shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 1fr) minmax(180px, 42%); }
   .answer-panel { padding: 12px; border-inline-start: 0; border-top: 1px solid var(--line); }
   .answer-panel-heading { padding-bottom: 10px; }
@@ -673,7 +663,6 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
   .qa-report-view .toolbar-select { width: 130px; }
   .qa-report-view .toolbar-select-order { width: 135px; }
   .qa-report-view .toolbar-info { gap: 9px; }
-  .toolbar .save-state-label { position: absolute; top: 100%; inset-inline-end: 0; padding: 5px; background: var(--surface); clip-path: inset(50%); max-width: 160px; }
   .qa-report-view .correction-status { min-width: 160px; }
   .qa-report-view .correction-comment { min-width: 220px; }
   .qa-report-view[data-answer-view="table"] :is(th, td).qa-status,

@@ -209,6 +209,7 @@
     view.dataset.answerView = next;
     for (const control of answerViewButtons) control.setAttribute("aria-pressed", String(control.dataset.answerView === next));
     ensureSelectedAnswer();
+    syncReportLayout();
     contentViewport.scrollTop = scroll.top;
     contentViewport.scrollLeft = scroll.left;
     if (selectedRow && Number.isFinite(rowOffset)) {
@@ -216,6 +217,7 @@
     }
     try { localStorage.setItem("qa-report-shared-answer-view", next); } catch {}
     restoreEditorFocus(focus);
+    syncReportLayout();
   }
 
   for (const control of answerViewButtons) {
@@ -259,20 +261,52 @@
     introToggle.setAttribute("aria-expanded", String(expanded));
     introToggle.textContent = expanded ? "Свернуть" : "Развернуть";
   });
+  let reportLayoutKey;
+  let sectionLayouts = [];
   function syncReportLayout() {
-    contentViewport.parentElement.classList.toggle("has-left-overflow", contentViewport.scrollLeft > 1.5);
-    for (const section of sections) {
-      const table = section.element.querySelector("table");
-      const headers = table.tHead.rows[0];
-      const padding = getComputedStyle(contentViewport);
-      const availableWidth = contentViewport.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
-      table.classList.toggle("has-horizontal-overflow", table.getBoundingClientRect().width > availableWidth + 1);
-      table.style.setProperty("--answer-comment-width", `${headers.querySelector(".correction-comment").getBoundingClientRect().width}px`);
-      table.style.setProperty("--answer-status-width", `${headers.querySelector(".correction-status").getBoundingClientRect().width}px`);
-      const endHeader = headers.querySelector(answerView === "side" ? ".qa-status" : ".correction-comment");
-      const remaining = contentViewport.scrollWidth - contentViewport.clientWidth - contentViewport.scrollLeft;
-      table.classList.toggle("has-pinned-overlap", remaining > 1.5 && table.getBoundingClientRect().right - endHeader.getBoundingClientRect().right > 2);
+    const viewportWidth = contentViewport.clientWidth;
+    if (!viewportWidth || !sections.length) return;
+    const pinColumns = answerView === "side" || matchMedia("(min-width: 761px)").matches;
+    const key = JSON.stringify([viewportWidth, answerView, pinColumns, sections.map(section => section.element.hidden)]);
+    if (key !== reportLayoutKey) {
+      const styles = getComputedStyle(view);
+      const width = name => parseFloat(styles.getPropertyValue(name));
+      const pinnedWidths = [width("--qa-status-width"), ...(answerView === "table"
+        ? [width("--answer-status-width"), width("--answer-comment-width")] : [])];
+      const indices = [...document.querySelectorAll("#report-sections tbody .point-index")];
+      const longest = indices.reduce((before, cell) => !before || cell.textContent.length > before.textContent.length ? cell : before, null);
+      const range = document.createRange();
+      if (longest) range.selectNodeContents(longest);
+      const pointWidth = Math.max(42, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+      const plan = window.QaReportSharedTableLayout.plan({ viewportWidth, pointWidth,
+        dataMinWidth: width("--report-data-min-width"), pinnedWidths, pinColumns,
+        sections: sections.map(section => ({ columnCount: section.columnCount, hidden: section.element.hidden })),
+      });
+      const root = document.getElementById("report-sections");
+      root.style.width = `${plan.canvasWidth}px`;
+      root.style.setProperty("--report-viewport-width", `${viewportWidth}px`);
+      sectionLayouts = plan.sections;
+      sections.forEach((section, index) => {
+        const layout = sectionLayouts[index];
+        section.table.style.width = `${layout.width}px`;
+        let columns = section.table.querySelector("colgroup");
+        if (!columns) { columns = element("colgroup"); section.table.prepend(columns); }
+        columns.replaceChildren(...[pointWidth, ...Array(section.columnCount).fill(layout.columnWidth), layout.spacerWidth, ...pinnedWidths]
+          .map(value => { const column = element("col"); column.style.width = `${value}px`; return column; }));
+      });
+      reportLayoutKey = key;
     }
+    const scrollLeft = contentViewport.scrollLeft;
+    document.getElementById("report-sections").style.setProperty("--report-scroll-left", `${scrollLeft}px`);
+    sections.forEach((section, index) => {
+      const layout = sectionLayouts[index];
+      // Shorter sections stop at their own last column while sharing the report scrollbar.
+      const state = window.QaReportSharedTableLayout.scrollState(layout, scrollLeft);
+      section.element.style.setProperty("--data-shift", `${layout.pinColumns ? state.offset : 0}px`);
+      section.element.style.setProperty("--table-shift", `${layout.pinColumns ? 0 : state.offset}px`);
+      section.table.parentElement.classList.toggle("has-hidden-left", state.hiddenLeft);
+      section.table.classList.toggle("has-pinned-overlap", state.hiddenRight);
+    });
     if (!intro.hidden) introToggle.hidden = introContent.scrollHeight <= parseFloat(getComputedStyle(introContent).lineHeight) * 6 + 1;
   }
   const layoutObserver = new ResizeObserver(syncReportLayout);
@@ -1570,6 +1604,9 @@
       if (position === 0 && bugs.children.length) td.append(bugs);
       tr.append(td);
     }
+    const spacer = element("td", "report-scroll-spacer");
+    spacer.setAttribute("aria-hidden", "true");
+    tr.append(spacer);
     const statusCell = element("td", "qa-status");
     statusCell.append(statusTag(row.status));
     if (!section.columns.length && bugs.children.length) statusCell.append(bugs);
@@ -1608,6 +1645,7 @@
     noMatchesMessage.textContent = total ? "Пунктов с выбранными статусами нет" : "В чек-листе пока нет заполненных пунктов";
     noMatchesReset.hidden = !selectedStatuses.size;
     ensureSelectedAnswer();
+    syncReportLayout();
   }
 
   function resetStatusFilter() {
@@ -1689,15 +1727,19 @@
       const { section: node, body: points } = createSection(title, section.columns.map(column => column.label), [
         ["Статус исправления", "correction-status"], ["Комментарий к исправлению", "correction-comment"],
       ]);
+      const table = node.querySelector("table");
+      const spacer = element("th", "report-scroll-spacer");
+      spacer.setAttribute("aria-hidden", "true");
+      table.tHead.rows[0].querySelector(".qa-status").before(spacer);
       root.append(node);
-      layoutObserver.observe(node.querySelector("table"));
+      layoutObserver.observe(table);
       const rows = section.rows.map((row, rowIndex) => {
         const sectionNumber = /^\s*(\d+(?:\.\d+)*)\.\s/.exec(title)?.[1] || String(sectionIndex + 1);
         const point = renderPoint(section, row, row.number || `${sectionIndex + 1}.${rowIndex + 1}`, report.canReply, report.uploadsPaused, sectionNumber);
         points.append(point);
         return { element: point, status: statusKey(row.status), rank: statusMeta(row.status).rank, key: answerKey(section.id, row.id) };
       });
-      sections.push({ element: node, points, rows });
+      sections.push({ element: node, points, rows, table, columnCount: section.columns.length });
     }
     configureStatusFilter(report.defaultStatuses);
     order.addEventListener("change", updateVisibility);

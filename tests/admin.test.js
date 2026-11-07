@@ -5,12 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
-const { createAdminService, passwordHash, deviceInfo } = require('../admin/server');
+const { createAdminService, passwordHash, deviceInfo, loadConfig, validAdminPath } = require('../admin/server');
 const root = path.resolve(__dirname, '..');
 const password = 'fixture-only-long-password';
-const adminPath = '/_manage_' + 'a'.repeat(32);
+const adminPath = '/owner';
 const configPromise = passwordHash(password, 'b'.repeat(32)).then(hash => ({ version: 1, path: adminPath, username: 'owner', passwordSalt: 'b'.repeat(32), passwordHash: hash, visitorSecret: 'c'.repeat(64) }));
 const cookie = response => response.headers.get('set-cookie')?.split(';')[0] || '';
 
@@ -44,8 +44,55 @@ async function fixture(t, { configured = true, production = false, trustProxy = 
   async function signal(options = {}) {
     return request('/api/usage/visit', { method: 'POST', body: { mode: 'browser' }, ...options });
   }
-  return { service, dir, configFile, request, login, signal, setTime(value) { now = typeof value === 'string' ? Date.parse(value) : value; }, advance(ms) { now += ms; } };
+  return { service, dir, configFile, request, login, signal,
+    restart() { service.close(); service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now }); },
+    setTime(value) { now = typeof value === 'string' ? Date.parse(value) : value; }, advance(ms) { now += ms; } };
 }
+
+test('readable admin paths exclude system routes and accept old generated paths', () => {
+  for (const value of ['/owner', '/control-room', '/dashboard']) assert.equal(validAdminPath(value), true);
+  for (const value of ['/api', '/login', '/report', '/admin', '/secrets', '/owner/stats', '//evil.test', '/owner?x=1', '/%6fwner', '/owner/../api', '/.git', '/OWNER', '/owner/']) assert.equal(validAdminPath(value), false, value);
+  assert.equal(validAdminPath('/_manage_' + 'a'.repeat(32)), true);
+});
+
+test('automatic setup protects delivery, preserves credentials on repeat and migrates paths without reset', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-admin-setup-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const configFile = path.join(dir, 'secrets', 'admin.json'); const accessFile = path.join(dir, 'private', 'access.json');
+  const run = args => spawnSync(process.execPath, ['scripts/setup-admin.cjs', '--file', configFile, ...args], { cwd: root, encoding: 'utf8' });
+  const args = ['--generate', '--access-file', accessFile];
+  const created = run(args); assert.equal(created.status, 0, created.stderr);
+  const initial = loadConfig(configFile); const access = JSON.parse(fs.readFileSync(accessFile, 'utf8'));
+  assert.equal(initial.path, '/owner'); assert.equal(access.path, '/owner/'); assert.equal(access.username, 'owner');
+  assert.ok(access.password.length >= 40); assert.equal(initial.passwordHash, await passwordHash(access.password, initial.passwordSalt));
+  assert.ok(!(created.stdout + created.stderr).includes(access.password));
+  assert.ok(!fs.readFileSync(configFile, 'utf8').includes(access.password));
+  assert.equal(fs.statSync(configFile).mode & 0o777, 0o600); assert.equal(fs.statSync(accessFile).mode & 0o777, 0o600);
+  const original = fs.readFileSync(configFile, 'utf8'); const delivery = fs.readFileSync(accessFile, 'utf8');
+  assert.equal(run(args).status, 0); assert.equal(fs.readFileSync(configFile, 'utf8'), original); assert.equal(fs.readFileSync(accessFile, 'utf8'), delivery);
+  const changed = run(['--path', '/control-room/']); assert.equal(changed.status, 0, changed.stderr);
+  assert.deepEqual(loadConfig(configFile), { ...initial, path: '/control-room' });
+  assert.equal(run(['--path', '/api']).status, 1); assert.equal(loadConfig(configFile).path, '/control-room');
+  const legacy = { ...initial, path: '/_manage_' + 'f'.repeat(32) }; fs.writeFileSync(configFile, JSON.stringify(legacy));
+  assert.equal(run(['--path', '/owner']).status, 0); assert.deepEqual(loadConfig(configFile), initial);
+  const nextFile = path.join(dir, 'private', 'rotated.json');
+  const rotated = run(['--generate', '--rotate-password', '--access-file', nextFile]); assert.equal(rotated.status, 0, rotated.stderr);
+  const next = loadConfig(configFile); const nextAccess = JSON.parse(fs.readFileSync(nextFile, 'utf8'));
+  assert.notEqual(next.passwordHash, initial.passwordHash); assert.equal(next.visitorSecret, initial.visitorSecret); assert.equal(next.path, initial.path);
+  assert.equal(next.passwordHash, await passwordHash(nextAccess.password, next.passwordSalt));
+  assert.ok(!(rotated.stdout + rotated.stderr).includes(nextAccess.password));
+  assert.equal(run(['--generate', '--rotate-password', '--access-file', accessFile]).status, 1); assert.deepEqual(loadConfig(configFile), next);
+});
+
+test('statistics and visitor identity survive service restart while admin sessions are revoked', async t => {
+  const f = await fixture(t); const first = await f.signal(); const visitorCookie = cookie(first); const session = await f.login();
+  f.restart();
+  assert.equal((await f.request(adminPath + '/stats', { headers: { Cookie: session.cookie } })).status, 401);
+  const fresh = await f.login(); await f.signal({ headers: { Cookie: visitorCookie } });
+  const stats = await (await f.request(adminPath + '/stats', { headers: { Cookie: fresh.cookie } })).json();
+  assert.equal(stats.summary.visitors, 1); assert.equal(stats.summary.visits, 1);
+  assert.equal(stats.visitors[0].id, visitorCookie.split('=')[1].split('.')[0]);
+});
 
 test('absent configuration leaves admin and collection disabled', async t => {
   const f = await fixture(t, { configured: false });

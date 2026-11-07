@@ -20,11 +20,19 @@ async function passwordHash(password, salt) {
   return (await scrypt(password, salt, 64, SCRYPT_OPTIONS)).toString('hex');
 }
 
+function validAdminPath(value) {
+  if (typeof value !== 'string') return false;
+  // Existing generated addresses remain valid during migration to /owner.
+  if (/^\/_manage_[a-f0-9]{32}$/.test(value)) return true;
+  return /^\/[a-z][a-z0-9-]{1,47}$/.test(value) &&
+    !['/api', '/report', '/login', '/admin', '/icons', '/downloads', '/agent', '/agent-updates', '/vendor', '/scripts', '/secrets', '/reports-data', '/feedback-data', '/admin-config'].includes(value);
+}
+
 function loadConfig(file) {
   let config;
   try { config = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return null; throw new Error('Не удалось прочитать конфигурацию администратора'); }
-  if (config.version !== 1 || !/^\/_manage_[a-f0-9]{32}$/.test(config.path) ||
+  if (config.version !== 1 || !validAdminPath(config.path) ||
       typeof config.username !== 'string' || !/^[\w.@-]{1,80}$/.test(config.username) ||
       !/^[a-f0-9]{32}$/.test(config.passwordSalt) || !/^[a-f0-9]{128}$/.test(config.passwordHash) ||
       !/^[a-f0-9]{64}$/.test(config.visitorSecret)) throw new Error('Некорректная конфигурация администратора');
@@ -264,4 +272,4 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
   }, isPrivateFile, close() { if (timer) clearInterval(timer); db?.close(); } };
 }
 
-module.exports = { createAdminService, passwordHash, deviceInfo, loadConfig };
+module.exports = { createAdminService, passwordHash, deviceInfo, loadConfig, validAdminPath };

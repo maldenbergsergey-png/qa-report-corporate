@@ -17,7 +17,7 @@ async function main() {
   await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
   const origin = `http://127.0.0.1:${port}`;
-  const adminPath = '/_manage_' + crypto.randomBytes(16).toString('hex');
+  const adminPath = '/owner';
   const password = crypto.randomBytes(24).toString('hex'); const salt = crypto.randomBytes(16).toString('hex');
   const secret = crypto.randomBytes(32).toString('hex');
   const configFile = path.join(temp, 'credentials.json');

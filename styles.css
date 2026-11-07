@@ -6084,16 +6084,17 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .metadata-grid #overallStatus[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 
 /* Keep the open menu above editor controls and below the sticky app header. */
-.report-heading { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
+.report-heading { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
 .report-heading:has(.report-publication.open) { z-index: 46; }
 .report-publication { margin-inline-start: auto; --publication-warning: #99610b; }
 :root .report-publication > .publication-menu-trigger {
-  width: auto; min-height: 36px; gap: 7px; padding: 6px 10px;
+  width: auto; min-height: 42px; gap: 10px; padding: 0 16px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
-  font-size: 13px; box-shadow: none;
+  font-size: 14px; box-shadow: none;
 }
 :root .report-publication > .publication-menu-trigger:hover,
 :root .report-publication.open > .publication-menu-trigger { background: var(--line-soft); }
+.report-publication .publication-menu-label { display: inline; }
 .report-publication .publication-menu-trigger .chevron-icon { display: block; color: var(--muted); }
 .report-publication .header-dropdown-menu {
   position: absolute; top: calc(100% + 6px); right: 0; left: auto;

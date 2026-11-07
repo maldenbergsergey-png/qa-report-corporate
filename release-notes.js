@@ -1,7 +1,7 @@
 window.QaReportReleases = [
   {
     version: "0.30.0", date: "2026-11-07",
-    changes: { new: [], improvements: [], fixes: [] }
+    changes: { new: [], improvements: ["Кнопка «Публикация» стала крупнее и выровнена по верхнему краю заголовка отчёта — её проще найти."], fixes: [] }
   },
   {
     version: "0.29.0", date: "2026-11-05",

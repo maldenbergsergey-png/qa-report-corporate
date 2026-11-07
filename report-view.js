@@ -391,12 +391,17 @@
     emptyReset.addEventListener("click", resetFilter);
     dialog.addEventListener("click", event => { if (!filter.contains(event.target)) filter.open = false; });
     filter.addEventListener("keydown", event => {
+      // A label click briefly moves focus outside before activating its checkbox.
+      // Closing <details> during that native activation can crash Chromium.
+      if (event.key === "Tab") {
+        requestAnimationFrame(() => { if (!filter.contains(document.activeElement)) filter.open = false; });
+        return;
+      }
       if (event.key !== "Escape" || !filter.open) return;
       event.preventDefault();
       filter.open = false;
       filter.querySelector("summary").focus();
     });
-    filter.addEventListener("focusout", event => { if (!filter.contains(event.relatedTarget)) filter.open = false; });
 
     function configureFilter(defaults) {
       selectedStatuses = defaults == null ? null : new Set([...defaults].map(statusKey));

@@ -1660,13 +1660,15 @@
     if (!filter.contains(event.target)) filter.open = false;
   });
   filter.addEventListener("keydown", event => {
+    // Let native label activation finish; close on keyboard navigation instead.
+    if (event.key === "Tab") {
+      requestAnimationFrame(() => { if (!filter.contains(document.activeElement)) filter.open = false; });
+      return;
+    }
     if (event.key !== "Escape" || !filter.open) return;
     event.preventDefault();
     filter.open = false;
     filter.querySelector("summary").focus();
-  });
-  filter.addEventListener("focusout", event => {
-    if (!filter.contains(event.relatedTarget)) filter.open = false;
   });
 
   function configureStatusFilter(defaults = []) {

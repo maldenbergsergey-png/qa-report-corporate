@@ -182,7 +182,7 @@ button:hover:not(:disabled) { background: var(--surface-subtle); }
   appearance: none;
   font-weight: inherit;
 }
-.correction-status.is-editable option { color: var(--text); background: var(--surface); }
+.correction-status.is-editable option, .answer-status-slot option { color: var(--text); background: var(--surface); }
 .correction-status.is-editable select, .answer-comment-input { color: inherit; background: transparent; border: 0; border-radius: 0; }
 .correction-comment.is-editable:hover { background: color-mix(in srgb, currentColor 5%, transparent); }
 .correction-status.is-editable select:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }

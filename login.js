@@ -41,7 +41,10 @@ form.addEventListener("submit", async (event) => {
     const result = await response.json().catch(() => ({}));
     password.value = "";
     if (!response.ok) throw new Error(result.error || "Неверный email или пароль");
-    location.assign(result.callbackUrl || "/");
+    const target = result.callbackUrl || "/";
+    // The fragment stays in the browser, including across the session-gate redirect.
+    const reportToken = /^\/shared-report\/[a-f0-9]{32}$/.test(target) && /^#[A-Za-z0-9_-]{43}$/.test(location.hash) ? location.hash : "";
+    location.assign(target + reportToken);
   } catch (error) {
     password.value = "";
     errorBox.textContent = error.message || "Не удалось выполнить вход";

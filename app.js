@@ -456,6 +456,11 @@ const pendingHistoryServerSaves = new Map();
 let projectSettingsRequestId = 0;
 let projectSettingsLoaded = false;
 
+function syncOperationDock() {
+  const dock = document.getElementById("bugDockStack");
+  dock.hidden = !dock.querySelector(".bug-report-dock:not([hidden])");
+}
+
 function syncBodyModalOverflow() {
   document.body.style.overflow = document.querySelector(".modal-backdrop:not([hidden]), #fileViewerDialog[open], #previewModal[open]")
     ? "hidden"
@@ -5422,6 +5427,7 @@ function renderPublicationState() {
   const markup = publicationInfoMarkup(link, draft.reportId, false, includeLinks);
   if (info.innerHTML !== markup) info.innerHTML = markup;
   info.hidden = !markup;
+  renderSharePublicationState();
 }
 
 function runTrackerPublicationAction() {
@@ -8614,6 +8620,940 @@ async function exportReportFile() {
     return "Файл .report содержит отчёт и все вложения.\nПозже его можно открыть через «Импорт» →\n«Файл .report».";
   });
 }
+const shareReport = Object.fromEntries([
+  "Modal", "Title", "Hint", "State", "Spinner", "Status", "Stage", "Detail", "Error", "Options", "Images", "Files", "Statuses",
+  "Links", "Latest", "DateLabel", "Date", "Author", "TargetAuthor", "Access", "Update", "Revoke", "Attempts", "AttemptList", "Open", "Copy", "ChooseLink", "LinkSelect",
+  "Close", "Minimize", "Dock", "DockStatus", "DockSpinner", "DockProgress", "Restore",
+  "Footer", "Background", "CancelUpdate", "ReplacePending", "Publish", "SignOut",
+].map(name => [name, document.getElementById(`shareReport${name}`)]));
+const SHARED_REPORTS_KEY = "qa-report-corporate-shared-publications-v1:";
+const sharedReportMemory = new Map();
+let shareReportContext = null;
+let pendingShareBody = null;
+let shareReportBusy = false;
+let shareReportOperation = null;
+
+function setSharedDefaultStatuses(statuses = []) {
+  const selected = new Set(statuses);
+  shareReport.Statuses.replaceChildren(...[...window.QaReportView.statuses.keys()].map(status => {
+    const label = document.createElement("label");
+    label.className = "publish-scope-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = status;
+    input.checked = selected.has(status);
+    const text = document.createElement("span");
+    text.textContent = status;
+    label.append(input, text);
+    return label;
+  }));
+}
+
+function sharedReportPrefix(reportId) {
+  return `${SHARED_REPORTS_KEY}${encodeURIComponent(reportId)}:`;
+}
+
+function sharedReportPending(reportId) {
+  try {
+    const key = localStorage.getItem(`${sharedReportPrefix(reportId)}pending`);
+    return /^[A-Za-z0-9_-]{43}$/.test(key || "") ? key : "";
+  } catch { return ""; }
+}
+
+function priorSharedAttempts(reportId, publications) {
+  const prefix = `${sharedReportPrefix(reportId)}attempt:`;
+  const latestCompleted = publications.find(publication => !publication.attachmentsPending);
+  const cutoff = latestCompleted ? Date.parse(latestCompleted.updatedAt || latestCompleted.createdAt) : 0;
+  const publishedAttempts = new Set(publications.map(publication => publication.uploadKey));
+  const attempts = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const publishKey = key.slice(prefix.length);
+      if (!/^[A-Za-z0-9_-]{43}$/.test(publishKey) || publishedAttempts.has(publishKey)) continue;
+      const startedAt = Date.parse(sharedAttemptScope(reportId, publishKey)?.startedAt) || 0;
+      if (cutoff && startedAt <= cutoff) continue;
+      attempts.push({ publishKey, startedAt });
+    }
+  } catch {}
+  return attempts.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+function forgetSharedAttempt(reportId, publishKey) {
+  const prefix = sharedReportPrefix(reportId);
+  localStorage.removeItem(`${prefix}upload:${publishKey}`);
+  localStorage.removeItem(`${prefix}attempt:${publishKey}`);
+  if (sharedReportPending(reportId) === publishKey) localStorage.removeItem(`${prefix}pending`);
+}
+
+async function reserveSharedAttempt(reportId, expected, next, scope) {
+  const prefix = sharedReportPrefix(reportId);
+  const write = () => {
+    const current = sharedReportPending(reportId);
+    if (current !== expected) throw new Error("Другая вкладка уже начала публикацию. Восстановите её ссылки или повторите действие.");
+    try {
+      if (current) localStorage.setItem(`${prefix}attempt:${current}`, "");
+      localStorage.setItem(`${prefix}upload:${next}`, JSON.stringify({ ...scope, startedAt: new Date().toISOString() }));
+      localStorage.setItem(`${prefix}pending`, next);
+    } catch {
+      throw new Error("Браузер не смог сохранить данные для восстановления ссылок. Разрешите хранение данных для этого сайта.");
+    }
+  };
+  if (navigator.locks) await navigator.locks.request(`${prefix}reserve`, write);
+  else write();
+}
+
+function sharedAttemptScope(reportId, publishKey) {
+  try {
+    const scope = JSON.parse(localStorage.getItem(`${sharedReportPrefix(reportId)}upload:${publishKey}`));
+    if (typeof scope?.includeImages === "boolean" && typeof scope.includeFiles === "boolean") return scope;
+  } catch {}
+  return null;
+}
+
+function validSharedPublication(value) {
+  return value && /^[a-f0-9]{32}$/.test(value.id || "") && Number.isFinite(Date.parse(value.createdAt))
+    && [value.replyToken, value.ownerToken].every(token => /^[A-Za-z0-9_-]{43}$/.test(token || ""));
+}
+
+function sharedPublications(reportId, { includeRevoked = false } = {}) {
+  const prefix = sharedReportPrefix(reportId);
+  const list = new Map();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix) || !/^[a-f0-9]{32}$/.test(key.slice(prefix.length))) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key));
+        if (validSharedPublication(value)) list.set(key, value);
+      } catch {}
+    }
+  } catch {}
+  for (const [key, value] of sharedReportMemory) {
+    if (!key.startsWith(prefix)) continue;
+    if (!list.get(key)?.revokedAt) list.set(key, value);
+  }
+  return [...list.values()].filter(value => includeRevoked || !value.revokedAt)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+function rememberSharedPublication(reportId, publication) {
+  if (!validSharedPublication(publication)) throw new Error("Сервер не вернул ссылку. Повторите попытку.");
+  const key = sharedReportPrefix(reportId) + publication.id;
+  try {
+    const existing = JSON.parse(localStorage.getItem(key));
+    if (!publication.revokedAt && (existing?.revokedAt ||
+      Date.parse(existing?.updatedAt) > Date.parse(publication.updatedAt || publication.createdAt))) return true;
+    localStorage.setItem(key, JSON.stringify(publication));
+    sharedReportMemory.delete(key);
+    return true;
+  } catch {
+    sharedReportMemory.set(key, publication);
+    setShareReportError("Браузер не смог запомнить ссылку. Скопируйте её перед закрытием окна.");
+    return false;
+  }
+}
+
+function sharedReportUrl(id, token) {
+  return new URL(`/shared-report/${id}#${token}`, location.origin).href;
+}
+
+function sharedSnapshotOptions(source, scope) {
+  return {
+    title: issueKeyFromUrl(source.issueUrl) || "Отчёт о тестировании",
+    toText: htmlToSpreadsheetText,
+    toCode: node => extractCodeText(node, { preserveWhitespace: true }),
+    rowNumbers: ChecklistNumbering.rowNumbers(source),
+    sectionTitle: section => ChecklistNumbering.sectionTitle(source, section),
+    ...window.QaReportJiraPublication.attachmentOptions(scope),
+  };
+}
+
+function sharedContentSnapshot(source, options) {
+  const fingerprints = new Map();
+  const attachmentFingerprint = value => {
+    if (!fingerprints.has(value)) fingerprints.set(value, QaReportHistory.contentFingerprint({ value }));
+    return fingerprints.get(value);
+  };
+  return publicationSnapshot(window.QaReportFile.inspectSharedSnapshot(source, { ...options, attachmentFingerprint }));
+}
+
+let sharedContentCheck;
+
+function sharePublicationState(publication, reportId = draft.reportId, { checkPending = true } = {}) {
+  if (checkPending && shareReportBusy && shareReportContext?.reportId === reportId) {
+    return { state: "busy", label: "Отправляем…", action: "Отправляем…" };
+  }
+  if (checkPending && (sharedReportPending(reportId) || publication?.attachmentsPending)) {
+    return { state: "partial", label: "Публикация не завершена", action: "Продолжить публикацию", details: ["Откройте публикацию, чтобы продолжить загрузку или восстановить ссылку."] };
+  }
+  if (!publication) return { state: "fresh", label: "Не опубликован", action: "Создать ссылку" };
+  const unknown = { state: "unknown", label: "Не удалось сравнить версии", action: "Скопировать ссылку" };
+  const before = window.QaReportJiraPublication.normalizeContent(publication.contentSnapshot);
+  if (!before || reportId !== draft.reportId) return unknown;
+  const scope = window.QaReportJiraPublication.attachmentOptions(publication);
+  const key = `${localEditGeneration}:${scope.includeImages}:${scope.includeFiles}`;
+  if (sharedContentCheck?.source !== draft || sharedContentCheck?.key !== key) {
+    let snapshot;
+    try { snapshot = sharedContentSnapshot(draft, sharedSnapshotOptions(draft, scope)); } catch {}
+    sharedContentCheck = { source: draft, key, snapshot };
+  }
+  if (!sharedContentCheck.snapshot) return unknown;
+  const changes = window.QaReportJiraPublication.contentChanges(before, sharedContentCheck.snapshot);
+  return changes.length
+    ? { state: "dirty", label: "Есть изменения", action: "Обновить по ссылке", details: changes }
+    : { state: "current", label: "Изменений нет", action: "Скопировать ссылку" };
+}
+
+function renderSharePublicationState() {
+  const [publication] = sharedPublications(draft.reportId);
+  const state = sharePublicationState(publication);
+  const icons = { fresh: "link", current: "copy", unknown: "copy", dirty: "upload", partial: "history", busy: "upload" };
+  renderPublicationChannel(document.getElementById("linkPublication"), state, icons[state.state], Boolean(publication));
+  document.querySelector("#shareReportExportButton span").textContent = publication ? "Отчёт по ссылке" : "Поделиться по ссылке";
+}
+
+function runSharePublicationAction(event) {
+  closeHeaderDropdowns();
+  flushDraftFromDom();
+  const [publication] = sharedPublications(draft.reportId);
+  const state = sharePublicationState(publication);
+  if (state.state === "current" || state.state === "unknown") {
+    writeClipboardText(sharedReportUrl(publication.id, publication.replyToken), "Ссылка скопирована");
+    return;
+  }
+  return openShareReport(event, state.state === "dirty" ? "update" : "");
+}
+
+function sharedPublicationDate(date) {
+  return new Date(date).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function renderSharedAuthor(context, publication) {
+  const show = text => {
+    shareReport.Author.textContent = text;
+    shareReport.TargetAuthor.textContent = text;
+  };
+  if (!publication) { show(""); return; }
+  const { id, ownerToken } = publication;
+  const accounts = context.publicationAccounts;
+  if (!accounts.has(id)) {
+    accounts.set(id, "Определяем аккаунт публикации…");
+    requestSharedReport(`/${id}/author`, { method: "GET", token: ownerToken, timeout: 8000 })
+      .then(({ email }) => email ? `Аккаунт публикации: ${email}` : "Аккаунт публикации не указан.")
+      .catch(() => "Не удалось определить аккаунт публикации.")
+      .then(text => {
+        accounts.set(id, text);
+        if (shareReportContext === context && context.latest?.id === id) show(text);
+      });
+  }
+  show(accounts.get(id));
+}
+
+function renderSharedLinks() {
+  const context = shareReportContext;
+  if (!context) return;
+  const publications = sharedPublications(context.reportId, { includeRevoked: true });
+  const active = publications.filter(publication => !publication.revokedAt);
+  const latest = active.find(publication => publication.id === context.selectedPublicationId) || active[0];
+  const attempts = priorSharedAttempts(context.reportId, publications);
+  context.latest = latest;
+  context.selectedPublicationId = latest?.id;
+  shareReport.ChooseLink.hidden = active.length < 2;
+  shareReport.LinkSelect.replaceChildren(...active.map((publication, index) => new Option(
+    `${index === 0 ? "Текущая" : "Предыдущая"} · ${sharedPublicationDate(publication.createdAt)}`, publication.id,
+  )));
+  shareReport.LinkSelect.value = latest?.id || "";
+  const date = latest?.updatedAt || latest?.createdAt;
+  shareReport.DateLabel.textContent = latest?.updatedAt ? "Обновлено" : "Опубликовано";
+  shareReport.Date.dateTime = date || "";
+  shareReport.Date.textContent = date ? sharedPublicationDate(date) : "";
+  renderSharedAuthor(context, latest);
+  shareReport.Access.textContent = latest?.attachmentsPending
+    ? "Отчёт уже доступен. Вложения появятся по этой ссылке по мере загрузки."
+    : "По ссылке можно посмотреть отчёт и ответить после корпоративного входа.";
+  if (latest) shareReport.Open.href = sharedReportUrl(latest.id, latest.replyToken);
+  else shareReport.Open.removeAttribute("href");
+  shareReport.AttemptList.replaceChildren();
+  for (const { publishKey, startedAt } of attempts) {
+    const entry = document.createElement("div");
+    entry.className = "share-report-attempt";
+    const date = document.createElement(startedAt ? "time" : "span");
+    if (startedAt) date.dateTime = new Date(startedAt).toISOString();
+    date.textContent = startedAt ? sharedPublicationDate(startedAt) : "Дата не сохранена";
+    const recover = document.createElement("button");
+    recover.type = "button";
+    recover.className = "share-report-text-action";
+    recover.textContent = "Восстановить ссылку";
+    recover.setAttribute("aria-label", `Восстановить ссылку · ${date.textContent}`);
+    recover.addEventListener("click", () => {
+      context.archivedPending = publishKey;
+      updateShareReportControls();
+      publishSharedReport({ recoverKey: publishKey });
+    });
+    entry.append(date, recover);
+    shareReport.AttemptList.append(entry);
+  }
+}
+
+function setShareReportError(message = "") {
+  shareReport.Error.hidden = !message;
+  shareReport.Error.textContent = message;
+}
+
+function sharedReportErrorMessage(error, fallback) {
+  const code = error?.code || error?.errors?.[0]?.code;
+  if (error?.name === "TimeoutError") return "Сервер не ответил вовремя. Проверьте подключение и попробуйте ещё раз.";
+  if (error?.name === "TypeError") return "Не удалось связаться с сервером. Проверьте подключение и попробуйте ещё раз.";
+  if (code === "REPORT_SIGN_IN_REQUIRED") {
+    return "Не удалось подтвердить текущий вход. Повторите действие. Если ошибка останется, выйдите из аккаунта и войдите снова.";
+  }
+  return error?.message || fallback;
+}
+
+function syncShareReportDock() {
+  const context = shareReportContext;
+  shareReport.Dock.hidden = !context?.minimized;
+  if (!shareReport.Dock.hidden) {
+    const stage = shareReport.Stage.textContent || (shareReport.Error.hidden ? "Отчёт опубликован" : "Публикация не завершена");
+    const detail = shareReport.Detail.textContent;
+    shareReport.DockStatus.textContent = detail ? `${stage} · ${detail}` : stage;
+    shareReport.DockSpinner.hidden = !shareReportBusy;
+    shareReport.DockProgress.hidden = context.progress == null;
+    shareReport.DockProgress.value = context.progress ?? 0;
+  }
+  syncOperationDock();
+}
+
+function setShareReportStatus(stage = "", detail = "", progress = null) {
+  shareReport.Stage.textContent = stage;
+  shareReport.Detail.textContent = detail;
+  shareReport.Detail.hidden = !detail;
+  shareReport.State.hidden = !stage;
+  if (shareReportContext) shareReportContext.progress = progress;
+  syncShareReportDock();
+}
+
+function updateShareReportControls() {
+  const context = shareReportContext;
+  const waiting = shareReportBusy || Boolean(context?.accountBusy);
+  const pending = context && (context.archivedPending || sharedReportPending(context.reportId));
+  const editing = Boolean(context?.editingSnapshot);
+  const hasLatest = Boolean(context?.latest);
+  const creatingNew = context?.editingSnapshot === "new";
+  const recovering = pending && !creatingNew && context.editingSnapshot !== "replacement";
+  const publishing = !recovering && (editing || !hasLatest);
+  const hasAction = Boolean(recovering || publishing);
+  const updating = context?.editingSnapshot === "update" ||
+    (context?.editingSnapshot === "replacement" && hasLatest && !context.latest.attachmentsPending);
+  const showLatest = hasLatest && !editing && (!shareReportBusy || (shareReportOperation && context.uploadPublicationId === context.latest.id));
+  shareReport.Title.textContent = context?.publicationAccountMismatch ? "Нужен аккаунт автора" :
+    creatingNew ? "Создать новую ссылку" : updating ? "Обновить отчёт по ссылке"
+    : hasLatest ? context.latest.updatedAt ? "Отчёт обновлён" : "Отчёт опубликован" : "Поделиться по ссылке";
+  shareReport.Hint.textContent = creatingNew ? "Прежняя ссылка останется доступной." : updating
+    ? "Изменения и вложения появятся по той же ссылке после загрузки."
+    : "Открыть ссылку и ответить по пунктам можно после корпоративного входа.";
+  shareReport.Hint.hidden = waiting || showLatest;
+  shareReport.TargetAuthor.hidden = !updating || !hasLatest;
+  shareReport.Latest.hidden = !showLatest;
+  shareReport.Attempts.hidden = waiting || !shareReport.AttemptList.childElementCount;
+  shareReport.Links.hidden = editing || (!showLatest && shareReport.Attempts.hidden);
+  shareReport.Options.hidden = waiting || context?.paused || !publishing || !context?.enabled;
+  shareReport.Spinner.hidden = !waiting;
+  shareReport.LinkSelect.disabled = waiting;
+  shareReport.Update.hidden = waiting || !showLatest || Boolean(pending) || !context?.enabled || context.publicationPaused || context.latest.attachmentsPending;
+  if (!shareReport.Update.hidden) {
+    const state = sharePublicationState(context.latest, context.reportId, { checkPending: false });
+    shareReport.Update.textContent = state.state === "current" ? "Изменить состав публикации" : "Обновить отчёт по ссылке";
+  }
+  shareReport.Revoke.hidden = waiting || !showLatest;
+  shareReport.CancelUpdate.hidden = !editing && !context?.archivedPending;
+  shareReport.ReplacePending.hidden = !recovering || !context.allowNew || Boolean(context.archivedPending);
+  shareReport.ReplacePending.textContent = hasLatest && !context.latest.attachmentsPending
+    ? "Начать обновление заново" : "Создать новую публикацию";
+  shareReport.CancelUpdate.disabled = waiting;
+  shareReport.ReplacePending.disabled = waiting;
+  shareReport.Publish.hidden = !hasAction || shareReportBusy;
+  shareReport.Publish.textContent = context?.paused ? "Продолжить загрузку" : recovering
+    ? sharedAttemptScope(context.reportId, pending) && !context.archivedPending ? "Продолжить загрузку" : "Восстановить ссылку"
+    : creatingNew ? "Создать ссылку" : updating ? "Обновить отчёт" : "Опубликовать отчёт";
+  shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || (context.publicationPaused && !recovering);
+  shareReport.SignOut.hidden = shareReportBusy || !context?.accountSignedIn;
+  shareReport.SignOut.disabled = Boolean(context?.accountBusy);
+  shareReport.Minimize.hidden = !shareReportOperation && !context?.paused;
+  shareReport.Background.hidden = !shareReportOperation || !shareReportBusy;
+  shareReport.Close.disabled = shareReportBusy && (!shareReportOperation || shareReportOperation.controller.signal.aborted);
+  shareReport.Footer.hidden = [shareReport.Revoke, shareReport.Update, shareReport.Background,
+    shareReport.CancelUpdate, shareReport.ReplacePending, shareReport.Publish].every(control => control.hidden);
+  for (const control of shareReport.AttemptList.querySelectorAll("button")) {
+    control.disabled = waiting || !context?.enabled;
+  }
+  syncShareReportDock();
+}
+
+async function openShareReport(event, mode = "") {
+  const trigger = event.currentTarget;
+  if (shareReportContext?.minimized) {
+    closeHeaderDropdowns();
+    restoreShareReport();
+    return;
+  }
+  if (shareReportBusy) return;
+  const returnFocus = trigger.id === "shareReportExportButton"
+    ? elements.copyMenuButton : document.getElementById("publicationMenuButton");
+  const context = { reportId: draft.reportId, returnFocus, enabled: false,
+    allowNew: false, editingSnapshot: "", archivedPending: "", publicationAccounts: new Map() };
+  shareReportContext = context;
+  closeHeaderDropdowns();
+  shareReport.Modal.hidden = false;
+  shareReport.Images.checked = true;
+  shareReport.Files.checked = true;
+  setSharedDefaultStatuses();
+  setShareReportError();
+  renderSharedLinks();
+  if (mode === "new") editSharedSnapshot("new");
+  if (mode === "update" && context.latest && !context.latest.attachmentsPending && !sharedReportPending(context.reportId)) {
+    editSharedSnapshot("update");
+  }
+  const showingPublished = context.latest && !context.editingSnapshot && !sharedReportPending(context.reportId);
+  setShareReportStatus(showingPublished ? "" : "Проверяем доступность публикации");
+  updateShareReportControls();
+  syncBodyModalOverflow();
+  shareReport.Close.focus();
+  try {
+    const response = await fetch("/api/shared-reports/availability", { credentials: "same-origin", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000) });
+    const data = response.ok ? await response.json() : null;
+    if (shareReportContext !== context) return;
+    context.accountKey = data?.publishableKey || "";
+    context.enabled = data?.ok === true && data.enabled === true && (data.requiresPublishToken === false || Boolean(context.accountKey));
+    context.publicationPaused = data?.publicationPaused === true;
+    setShareReportStatus(context.publicationPaused ? "Публикация и обновление по ссылке приостановлены" :
+      data?.uploadsPaused && context.enabled && !showingPublished ? "Загрузка новых вложений приостановлена" :
+      context.enabled || showingPublished ? "" : data?.enabled ? "Откройте приглашение автора в этом браузере"
+      : "Публикация по ссылке пока недоступна на этом сервере");
+  } catch {
+    if (shareReportContext !== context) return;
+    if (!showingPublished) setShareReportError("Не удалось проверить доступность публикации. Откройте окно ещё раз при подключении к сети.");
+    setShareReportStatus();
+  }
+  updateShareReportControls();
+}
+
+function minimizeShareReport() {
+  if (!shareReportContext || shareReport.Modal.hidden) return;
+  shareReportContext.minimized = true;
+  shareReport.Modal.hidden = true;
+  syncBodyModalOverflow();
+  syncShareReportDock();
+  shareReport.Restore.focus();
+}
+
+function restoreShareReport() {
+  if (!shareReportContext?.minimized) return;
+  shareReportContext.minimized = false;
+  shareReport.Modal.hidden = false;
+  syncBodyModalOverflow();
+  syncShareReportDock();
+  if (shareReportBusy) shareReport.Status.focus();
+  else if (!shareReport.Publish.hidden) shareReport.Publish.focus();
+  else if (!shareReport.Latest.hidden) shareReport.Copy.focus();
+  else shareReport.Close.focus();
+}
+
+async function closeShareReport() {
+  const context = shareReportContext;
+  if (shareReportBusy) {
+    const operation = shareReportOperation;
+    if (!operation || operation.controller.signal.aborted || operation.confirmingPause) return;
+    if (!operation.canPause) {
+      minimizeShareReport();
+      return;
+    }
+    operation.confirmingPause = true;
+    const choice = await askConfirmation("Загрузка может идти в фоне. Если её остановить, загруженные файлы сохранятся.", {
+      title: "Загрузка вложений", confirmText: "Остановить загрузку", cancelText: "Оставить открытым",
+      alternativeText: "Свернуть",
+    });
+    operation.confirmingPause = false;
+    if (choice === "alternative" && shareReportContext === context) {
+      minimizeShareReport();
+      return;
+    }
+    if (shareReportContext !== context || shareReportOperation !== operation) {
+      if (shareReportContext === context && !shareReport.Modal.hidden) shareReport.Close.focus();
+      return;
+    }
+    if (choice === true) {
+      if (operation.canPause) {
+        operation.controller.abort();
+        setShareReportStatus("Останавливаем загрузку", context.uploadProgress, context.progress);
+      }
+      minimizeShareReport();
+    } else shareReport.Close.focus();
+    return;
+  }
+  shareReportContext = null;
+  shareReport.Modal.hidden = true;
+  syncBodyModalOverflow();
+  syncShareReportDock();
+  context?.returnFocus.focus();
+}
+
+function setSharedReportBusy(busy) {
+  if (shareReportBusy !== busy) pwaPendingOperations += busy ? 1 : -1;
+  shareReportBusy = busy;
+  renderSharePublicationState();
+  updateShareReportControls();
+}
+
+async function requestSharedReport(path, { method = "POST", body, token, timeout = 150_000, signal } = {}) {
+  const csrfToken = method === "GET" ? "" : await authCsrfToken();
+  const deadline = AbortSignal.timeout(timeout);
+  const response = await fetch(`/api/shared-reports${path}`, {
+    method, credentials: "same-origin", cache: "no-store", redirect: "error",
+    signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    headers: { ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(csrfToken ? { "X-QA-CSRF-Token": csrfToken } : {}) }, body,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.ok) throw Object.assign(new Error(data?.error || `Сервер вернул ошибку (${response.status})`),
+    { status: response.status, code: data?.errorCode, hasServerError: Boolean(data?.error) });
+  return data;
+}
+
+function recoverSharedLink(publishKey, signal) {
+  return requestSharedReport("/recover", { body: JSON.stringify({ publishKey, allowPending: true }), timeout: 15_000, signal });
+}
+
+function uncertainSharedPublication(error) {
+  return ["TimeoutError", "TypeError"].includes(error.name) ||
+    (!error.hasServerError && [502, 503, 504].includes(error.status));
+}
+
+function newSharedPublicationKey() {
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+    .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+async function uploadSharedFiles(publishKey, { files, body }, retrying, operation) {
+  const { signal } = operation.controller;
+  const prepared = await requestSharedReport("/prepare", { body, signal });
+  signal.throwIfAborted();
+  if (prepared.publication && !prepared.publication.attachmentsPending) return prepared;
+  if (prepared.publication) showUploadLink(publishKey, prepared.publication);
+  const fileById = new Map(files.map(file => [file.id, file]));
+  let completed = files.length - prepared.uploads.length;
+  const progress = () => {
+    shareReportContext.uploadProgress = `Загружено ${completed} из ${files.length}`;
+    setShareReportStatus(shareReportContext.uploadProgress, "", completed / files.length);
+  };
+  if (files.length) progress();
+  const fileError = (id, message) => new Error(`«${fileById.get(id).name}»: ${message}`);
+  const transfers = new AbortController();
+
+  function checkResults(uploads, results, allowMissing = false) {
+    signal.throwIfAborted();
+    if (!Array.isArray(results) || results.length !== uploads.length || results.some((item, index) => item?.id !== uploads[index].id)) {
+      throw new Error("Сервер не подтвердил загрузку вложений. Продолжите публикацию.");
+    }
+    completed += results.filter(({ status }) => status === 200).length;
+    progress();
+    const error = results.find(({ status }) => status !== 200 && !(allowMissing && [404, 422].includes(status)));
+    if (error) throw fileError(error.id, error.error);
+    return uploads.filter((_, index) => results[index].status !== 200);
+  }
+
+  async function confirm(upload, allowMissing = false) {
+    signal.throwIfAborted();
+    const { results } = await requestSharedReport("/confirm-file", {
+      body: JSON.stringify({ publishKey, fileIds: [upload.id] }),
+    });
+    return checkResults([upload], results, allowMissing).length === 0;
+  }
+
+  async function upload({ id, url }) {
+    try {
+      const response = await fetch(url, { method: "PUT", body: fileById.get(id).bytes, credentials: "omit",
+        redirect: "error", signal: AbortSignal.any([signal, transfers.signal, AbortSignal.timeout(15 * 60_000)]) });
+      if (!response.ok) throw new Error(`Хранилище вернуло HTTP ${response.status}.`);
+    } catch (error) {
+      if (error.name === "TypeError") {
+        throw fileError(id, "Не удалось отправить файл. Проверьте соединение и нажмите «Продолжить загрузку».");
+      }
+      throw fileError(id, error.message);
+    }
+  }
+
+  const batches = [];
+  const direct = [];
+  let batch = [];
+  let batchBytes = 0;
+  for (const pending of prepared.uploads) {
+    if (!pending.viaServer) {
+      direct.push(pending);
+      continue;
+    }
+    const size = fileById.get(pending.id).size;
+    if (batch.length === 3 || batchBytes + size > prepared.batchUploadBytes) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(pending);
+    batchBytes += size;
+  }
+  if (batch.length) batches.push(batch);
+
+  async function uploadBatch(group) {
+    const payload = group.map(({ id }) => {
+      const { bytes } = fileById.get(id);
+      let data;
+      if (typeof bytes.toBase64 === "function") {
+        data = bytes.toBase64();
+      } else {
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 32768) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+        }
+        data = btoa(binary);
+      }
+      return { id, data };
+    });
+    const { results } = await requestSharedReport("/upload-batch", {
+      body: JSON.stringify({ publishKey, files: payload }),
+    });
+    checkResults(group, results);
+  }
+
+  async function uploadDirect(pending) {
+    if (retrying && await confirm(pending, true)) return;
+    if (transfers.signal.aborted) return;
+    await upload(pending);
+    await confirm(pending);
+  }
+
+  let firstError;
+  async function work(queue, action) {
+    while (!signal.aborted && !firstError && queue.length) {
+      try {
+        await action(queue.shift());
+      } catch (error) {
+        if (!firstError) firstError = error;
+        transfers.abort();
+      }
+    }
+  }
+  // Each server batch writes up to three files at once. Share six slots with
+  // direct uploads so small batches and large files can progress independently.
+  const batchWorkers = Math.min(batches.length, direct.length ? 1 : 2);
+  const directWorkers = Math.min(direct.length, 6 - batchWorkers * 3);
+  await Promise.all([
+    ...Array.from({ length: batchWorkers }, () => work(batches, uploadBatch)),
+    ...Array.from({ length: directWorkers }, () => work(direct, uploadDirect)),
+  ]);
+  signal.throwIfAborted();
+  if (firstError) throw firstError;
+  operation.canPause = false;
+  setShareReportStatus("Завершаем загрузку");
+  return requestSharedReport("/complete", { body: JSON.stringify({ publishKey }), timeout: 15_000 });
+}
+
+function showUploadLink(publishKey, publication) {
+  rememberSharedPublication(shareReportContext.reportId, { ...publication, uploadKey: publishKey });
+  shareReportContext.uploadPublicationId = publication.id;
+  shareReportContext.selectedPublicationId = publication.id;
+  renderSharedLinks();
+  updateShareReportControls();
+}
+
+async function checkSharedPublisher() { return true; }
+
+async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
+  const context = shareReportContext;
+  if (!context?.enabled || shareReportBusy) return;
+  if (pwaPendingOperations || publishInProgress || importBusy) {
+    setShareReportError("Дождитесь завершения текущей операции с отчётом.");
+    return;
+  }
+  if (!await checkSharedPublisher(context, !startNew && Boolean(recoverKey || sharedReportPending(context.reportId))) ||
+      shareReportContext !== context || shareReportBusy) return;
+  const previousPending = sharedReportPending(context.reportId);
+  let publishKey = startNew ? "" : recoverKey || previousPending;
+  const attemptedScope = sharedAttemptScope(context.reportId, publishKey);
+  const resumeScope = !recoverKey && attemptedScope;
+  const updatesExisting = ["update", "replacement"].includes(context.editingSnapshot) && !context.latest?.attachmentsPending;
+  const updateId = resumeScope?.updateId || (updatesExisting ? context.latest?.id : "");
+  const scope = attemptedScope || context.preparation?.scope || {
+    includeImages: shareReport.Images.checked,
+    includeFiles: shareReport.Files.checked,
+    defaultStatuses: [...shareReport.Statuses.querySelectorAll("input:checked")].map(input => input.value),
+    ...(updateId && { updateId }),
+  };
+  let contentSnapshot = attemptedScope?.contentSnapshot;
+  const retry = Boolean(publishKey);
+  const recovery = retry && !resumeScope;
+  const operation = { controller: new AbortController(), canPause: true, confirmingPause: false };
+  const { signal } = operation.controller;
+  shareReportOperation = operation;
+  context.paused = false;
+  setShareReportError();
+  if (publishKey) setShareReportStatus("Ищем готовую ссылку", "Проверяем результат прежней публикации на сервере.");
+  else setShareReportStatus("Готовим отчёт");
+  setSharedReportBusy(true);
+  shareReport.Status.focus();
+  try {
+    let result;
+    if (retry) {
+      try {
+        result = await recoverSharedLink(publishKey, signal);
+        if (result.publication?.attachmentsPending) {
+          showUploadLink(publishKey, result.publication);
+          if (resumeScope) result = undefined;
+          else {
+            context.archivedPending = "";
+            context.allowNew = !recoverKey;
+            setShareReportStatus("Вложения ещё не опубликованы");
+            return;
+          }
+        }
+      } catch (error) {
+        if (recovery || error.status !== 404) throw error;
+      }
+    }
+    if (!result && (!publishKey || pendingShareBody?.publishKey !== publishKey)) {
+      setShareReportStatus("Готовим отчёт");
+      if (!context.preparation) {
+        if (context.reportId !== draft.reportId) throw new Error("Текущий отчёт сменился. Откройте публикацию из нужного отчёта.");
+        flushDraftFromDom();
+        const source = copyDraftValue(draft);
+        const capturedAt = new Date().toISOString();
+        const saved = await getReportMetadata(source.reportId).catch(() => null);
+        const updatedAt = saved?.updatedAt && saved.historyContentFingerprint === QaReportHistory.contentFingerprint(source)
+          ? saved.updatedAt : capturedAt;
+        context.preparation = { source, scope, updatedAt };
+      }
+      const { source, updatedAt } = context.preparation;
+      const snapshotOptions = sharedSnapshotOptions(source, scope);
+      const payload = await window.QaReportFile.prepareSharedSnapshot(source, {
+        ...snapshotOptions,
+        load: reportAttachmentLoader(signal),
+        signal,
+        onAttachment: name => setShareReportStatus("Готовим отчёт", `Обрабатываем «${name}»`),
+      });
+      signal.throwIfAborted();
+      const nextKey = publishKey || newSharedPublicationKey();
+      const target = updateId && sharedPublications(context.reportId).find(publication => publication.id === updateId);
+      if (updateId && !target) throw new Error("Ссылка для обновления недоступна в этом браузере.");
+      const reuseFrom = payload.files.length ? sharedPublications(context.reportId, { includeRevoked: true })
+        .filter(({ revokedAt }) => !revokedAt || Date.now() - Date.parse(revokedAt) < 7 * 24 * 60 * 60 * 1000)
+        .slice(0, 32)
+        .map(({ id, ownerToken }) => ({ id, ownerToken })) : [];
+      const body = JSON.stringify({
+        publishKey: nextKey, reportId: source.publicId, earlyLink: true, batchUploads: true,
+        snapshot: { ...payload.snapshot, updatedAt, ...(scope.defaultStatuses?.length && { defaultStatuses: scope.defaultStatuses }) },
+        files: payload.files.map(({ bytes, ...file }) => file), reuseFrom,
+        ...(target && { update: { id: target.id, ownerToken: target.ownerToken } }),
+      });
+      if (!publishKey) {
+        contentSnapshot = sharedContentSnapshot(source, snapshotOptions);
+        await reserveSharedAttempt(context.reportId, previousPending, nextKey, { ...scope, contentSnapshot });
+      }
+      pendingShareBody = { publishKey: nextKey, body, files: payload.files };
+      publishKey = nextKey;
+      context.preparation = null;
+      context.allowNew = false;
+      context.editingSnapshot = "";
+      renderSharedLinks();
+      updateShareReportControls();
+    }
+    if (!result) {
+      signal.throwIfAborted();
+      setShareReportStatus("Отправляем данные отчёта");
+      try {
+        result = await uploadSharedFiles(publishKey, pendingShareBody, retry, operation);
+      } catch (error) {
+        if (signal.aborted || !uncertainSharedPublication(error)) throw error;
+        setShareReportStatus("Проверяем, готова ли ссылка", "Соединение прервалось. Ищем сохранённый отчёт на сервере.");
+        try {
+          result = await recoverSharedLink(publishKey, signal);
+          if (result.publication?.attachmentsPending) {
+            showUploadLink(publishKey, result.publication);
+            throw error;
+          }
+        } catch {
+          throw error;
+        }
+      }
+    }
+    signal.throwIfAborted();
+    let { publication } = result;
+    const updated = Boolean(publication.updatedAt && !publication.ownerToken);
+    if (updated) {
+      const target = sharedPublications(context.reportId).find(value => value.id === publication.id);
+      if (!target) throw new Error("Ссылка для обновления недоступна в этом браузере.");
+      publication = { ...target, ...publication };
+    }
+    publication = { ...publication, ...window.QaReportJiraPublication.attachmentOptions(scope),
+      defaultStatuses: scope.defaultStatuses ?? publication.defaultStatuses ?? [], contentSnapshot: contentSnapshot || null };
+    context.selectedPublicationId = publication.id;
+    if (rememberSharedPublication(context.reportId, publication)) {
+      try { forgetSharedAttempt(context.reportId, publishKey); }
+      catch { setShareReportError("Не удалось очистить данные завершённой загрузки в браузере."); }
+    }
+    if (pendingShareBody?.publishKey === publishKey) pendingShareBody = null;
+    context.allowNew = false;
+    context.editingSnapshot = "";
+    context.archivedPending = "";
+    context.uploadPublicationId = "";
+    context.uploadProgress = "";
+    setShareReportStatus();
+    renderSharedLinks();
+    if (updated) showToast("Отчёт по ссылке обновлён");
+  } catch (error) {
+    if (signal.aborted) {
+      context.paused = true;
+      setShareReportStatus("Загрузка остановлена", context.uploadProgress || "Публикацию можно продолжить.", context.progress);
+      return;
+    }
+    context.preparation = null;
+    context.publicationAccountMismatch = error.code === "SHARE_PUBLICATION_ACCOUNT_MISMATCH";
+    if (error.code === "REPORT_PUBLICATION_PAUSED") context.publicationPaused = true;
+    if (context.uploadPublicationId) setShareReportStatus("Загрузка прервана", context.uploadProgress, context.progress);
+    else setShareReportStatus();
+    if (recovery && error.status === 404) {
+      if (!recoverKey) context.allowNew = true;
+      setShareReportError(recoverKey ? "У этой попытки пока нет готовой ссылки. Повторите восстановление позже."
+        : "Готовая ссылка пока не найдена. Можно повторить восстановление или начать публикацию заново.");
+    } else {
+      if (error.code === "SHARE_SNAPSHOT_CHANGED" && retry && !recoverKey) {
+        context.allowNew = true;
+      }
+      if (error.code === "SHARE_UPDATE_SUPERSEDED" || error.status === 410 || (!recovery && [400, 413].includes(error.status))) {
+        if (error.status === 410) {
+          const revoked = sharedPublications(context.reportId).find(value => value.uploadKey === publishKey);
+          if (revoked) rememberSharedPublication(context.reportId, { ...revoked, revokedAt: new Date().toISOString() });
+        }
+        try { forgetSharedAttempt(context.reportId, publishKey); } catch {}
+        if (pendingShareBody?.publishKey === publishKey) pendingShareBody = null;
+        context.allowNew = false;
+        if (context.archivedPending === publishKey) context.archivedPending = "";
+        renderSharedLinks();
+      }
+      const message = uncertainSharedPublication(error) && publishKey
+        ? "Не удалось получить подтверждение от сервера. При повторе сначала проверим, готова ли ссылка."
+        : sharedReportErrorMessage(error, "Публикация не удалась. Попробуйте ещё раз.");
+      setShareReportError(message);
+    }
+  } finally {
+    shareReportOperation = null;
+    setSharedReportBusy(false);
+    if (!shareReport.Modal.hidden && elements.confirmModal.hidden &&
+        !shareReport.Latest.hidden && shareReport.Publish.hidden && shareReport.Error.hidden) {
+      shareReport.Copy.focus();
+    }
+  }
+}
+
+async function revokeSharedPublication(publication, context) {
+  if (shareReportBusy || shareReportContext !== context) return;
+  if (!await askConfirmation("Доступ к этой публикации закроется для всех получателей.", {
+    title: "Отозвать ссылку?", confirmText: "Отозвать", danger: true,
+  }) || shareReportBusy || shareReportContext !== context) return;
+  setShareReportError();
+  setShareReportStatus("Отзываем ссылку");
+  setSharedReportBusy(true);
+  try {
+    await requestSharedReport(`/${publication.id}`, { method: "DELETE", token: publication.ownerToken });
+    rememberSharedPublication(context.reportId, { ...publication, revokedAt: new Date().toISOString() });
+    if (publication.uploadKey) {
+      try { forgetSharedAttempt(context.reportId, publication.uploadKey); } catch {}
+      if (pendingShareBody?.publishKey === publication.uploadKey) pendingShareBody = null;
+    }
+    context.uploadPublicationId = "";
+    context.uploadProgress = "";
+    context.paused = false;
+    setShareReportStatus();
+    showToast("Ссылка отозвана");
+    renderSharedLinks();
+  } catch (error) {
+    setShareReportStatus();
+    setShareReportError(sharedReportErrorMessage(error, "Не удалось отозвать ссылку. Попробуйте ещё раз."));
+  } finally {
+    setSharedReportBusy(false);
+    shareReport.Close.focus();
+  }
+}
+
+document.getElementById("shareReportButton").addEventListener("click", runSharePublicationAction);
+document.getElementById("shareReportExportButton").addEventListener("click", event => openShareReport(event));
+document.getElementById("shareReportManageLink").addEventListener("click", event => openShareReport(event));
+document.getElementById("shareReportNewLink").addEventListener("click", event => openShareReport(event, "new"));
+shareReport.LinkSelect.addEventListener("change", () => {
+  const context = shareReportContext;
+  if (!context || shareReportBusy) return;
+  context.selectedPublicationId = shareReport.LinkSelect.value;
+  renderSharedLinks();
+  updateShareReportControls();
+});
+shareReport.Close.addEventListener("click", closeShareReport);
+shareReport.Minimize.addEventListener("click", minimizeShareReport);
+shareReport.Background.addEventListener("click", minimizeShareReport);
+shareReport.Restore.addEventListener("click", restoreShareReport);
+shareReport.Copy.addEventListener("click", () => writeClipboardText(shareReport.Open.href, "Ссылка скопирована"));
+shareReport.Revoke.addEventListener("click", () => {
+  const context = shareReportContext;
+  if (context?.latest) revokeSharedPublication(context.latest, context);
+});
+shareReport.Publish.addEventListener("click", () => {
+  const context = shareReportContext;
+  if (context) publishSharedReport({ startNew: ["new", "replacement"].includes(context.editingSnapshot), recoverKey: context.archivedPending });
+});
+function editSharedSnapshot(mode) {
+  const context = shareReportContext;
+  if (!context || shareReportBusy) return;
+  context.editingSnapshot = mode;
+  context.archivedPending = "";
+  context.paused = false;
+  context.preparation = null;
+  const scope = window.QaReportJiraPublication.attachmentOptions(mode === "new" ? null : context.latest);
+  shareReport.Images.checked = scope.includeImages;
+  shareReport.Files.checked = scope.includeFiles;
+  setSharedDefaultStatuses(mode === "new" ? [] : context.latest?.defaultStatuses);
+  setShareReportStatus();
+  setShareReportError();
+  updateShareReportControls();
+  if (context.enabled) shareReport.Images.focus();
+}
+shareReport.Update.addEventListener("click", () => editSharedSnapshot("update"));
+shareReport.ReplacePending.addEventListener("click", () => editSharedSnapshot("replacement"));
+shareReport.CancelUpdate.addEventListener("click", () => {
+  if (!shareReportContext || shareReportBusy) return;
+  shareReportContext.editingSnapshot = "";
+  shareReportContext.archivedPending = "";
+  shareReportContext.paused = false;
+  shareReportContext.preparation = null;
+  setShareReportStatus();
+  setShareReportError();
+  updateShareReportControls();
+  (shareReport.Update.hidden ? shareReport.Close : shareReport.Update).focus();
+});
+shareReport.Modal.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeShareReport();
+  }
+  if (event.key !== "Tab") return;
+  const controls = [...shareReport.Modal.querySelectorAll("button, input, a, summary")].filter(node => !node.disabled && node.getClientRects().length);
+  if (!controls.includes(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
+  } else if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
+  else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
+});
+
 function portableHistoryRecord(value, reason, existing = {}) {
   const now = new Date().toISOString();
   return { ...existing, id: value.reportId, publicId: value.publicId,

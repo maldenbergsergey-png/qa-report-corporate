@@ -1,0 +1,47 @@
+/* The checklist editor, preview and published report share the QA status palette. */
+:root {
+  --qa-positive: #216e4e; --qa-positive-bg: #dcfff1;
+  --qa-negative: #ae2e24; --qa-negative-bg: #ffeceb;
+  --qa-informative: #0055cc; --qa-informative-bg: #e9f2ff;
+  --qa-unchecked: #5e4db2; --qa-unchecked-bg: #f3f0ff;
+  --qa-warning: #974f0c; --qa-warning-bg: #fff3eb;
+  --qa-clarification: #7f3f00; --qa-clarification-bg: #fff0d5;
+  --qa-muted: #505f79; --qa-muted-bg: #e9edf2;
+}
+:root:is([data-theme="dark"], [data-theme="graphite"]) {
+  --qa-positive: #8af0b1; --qa-positive-bg: #193326;
+  --qa-negative: #ff9a9d; --qa-negative-bg: #441c20;
+  --qa-informative: #92bbff; --qa-informative-bg: #1a2e4b;
+  --qa-unchecked: #b8acf6; --qa-unchecked-bg: #352c63;
+  --qa-warning: #ffc776; --qa-warning-bg: #4a3217;
+  --qa-clarification: #ffd294; --qa-clarification-bg: #5b3410;
+  --qa-muted: #c1cbd9; --qa-muted-bg: #303b4b;
+}
+:root[data-theme="graphite"] { --qa-positive: #45d483; }
+:root[data-theme="dark"] {
+  --qa-positive: #7ee2b8; --qa-positive-bg: #164b35;
+  --qa-negative: #ff9c8f; --qa-negative-bg: #5d1f1a;
+  --qa-informative: #85b8ff; --qa-informative-bg: #123263;
+  --qa-warning: #fec57b; --qa-warning-bg: #5f3811;
+}
+:root .status-ok, :root[data-theme] .status-ok,
+:root .overall-status-field #overallStatus.status-ok,
+.qa-report-view .report-tag[data-tone="positive"] { color: var(--qa-positive); background: var(--qa-positive-bg); }
+:root .status-fail, :root[data-theme] .status-fail,
+:root .overall-status-field #overallStatus.status-fail,
+.qa-report-view .report-tag[data-tone="negative"] { color: var(--qa-negative); background: var(--qa-negative-bg); }
+:root .status-almost, :root[data-theme] .status-almost,
+:root .overall-status-field #overallStatus.status-almost,
+.qa-report-view .report-tag[data-tone="informative"] { color: var(--qa-informative); background: var(--qa-informative-bg); }
+:root .status-unchecked, :root[data-theme] .status-unchecked,
+:root .overall-status-field #overallStatus.status-unchecked,
+.qa-report-view .report-tag[data-tone="unchecked"] { color: var(--qa-unchecked); background: var(--qa-unchecked-bg); }
+:root .status-partial, :root[data-theme] .status-partial,
+:root .overall-status-field #overallStatus.status-partial,
+.qa-report-view .report-tag[data-tone="warning"] { color: var(--qa-warning); background: var(--qa-warning-bg); }
+:root .status-clarification, :root[data-theme] .status-clarification,
+:root .overall-status-field #overallStatus.status-clarification,
+.qa-report-view .report-tag[data-tone="clarification"] { color: var(--qa-clarification); background: var(--qa-clarification-bg); }
+:root .status-blocked, :root[data-theme] .status-blocked,
+:root .overall-status-field #overallStatus.status-blocked,
+.qa-report-view .report-tag[data-tone="muted"] { color: var(--qa-muted); background: var(--qa-muted-bg); }

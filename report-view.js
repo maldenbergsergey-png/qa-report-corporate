@@ -49,7 +49,7 @@
     return tag;
   }
 
-  function renderOverview(overview, { issueUrl, environment, overallStatus, published }, renderIntro) {
+  function renderOverview(overview, { issueUrl, environment, overallStatus, published, updated }, renderIntro) {
     const meta = overview.querySelector(".metadata");
     const intro = overview.querySelector(".intro");
     const introContent = intro.querySelector(".intro-content");
@@ -59,6 +59,7 @@
       ["Окружение", environment?.trim() && element("span", "report-tag", environment.trim())],
       ["Итог проверки", overallStatus && statusTag(overallStatus)],
       ["Опубликовано", published],
+      ["Обновлено", updated],
     ];
     meta.replaceChildren();
     for (const [label, content] of fields) {

@@ -29,7 +29,19 @@
       return uuid ? `CmfComment:${uuid[1]}` : "";
     } catch { return ""; }
   }
-  const api = { parse, commentId, identity: value => parse(value)?.issueUrl || "" };
+  function* wikiLinks(text) {
+    const pattern = /(?<!\\)\[((?:[^\[\]|\r\n]|\[[^\[\]\r\n]*\])+)\|(https?:\/\/(?:[^\s<>\[\]|]|\[[^\s<>\[\]]*\])+)\]/gi;
+    for (const match of text.matchAll(pattern)) {
+      const label = match[1].trim();
+      if (!label) continue;
+      try {
+        const url = new URL(match[2]);
+        if (!url.hostname || url.username || url.password) continue;
+        yield { index: match.index, end: match.index + match[0].length, label, href: url.href };
+      } catch {}
+    }
+  }
+  const api = { parse, commentId, wikiLinks, identity: value => parse(value)?.issueUrl || "" };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportTrackerLinks = api;
 })(typeof window === "object" ? window : globalThis);

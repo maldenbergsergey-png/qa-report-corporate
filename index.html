@@ -10,8 +10,9 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=152" />
+    <link rel="stylesheet" href="/styles.css?v=153" />
     <link rel="stylesheet" href="/report-view.css?v=4" />
+    <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
   <body>
@@ -168,6 +169,7 @@
             <div class="header-dropdown-menu header-dropdown-menu-right" id="copyMenu" role="menu" aria-label="Экспорт" hidden>
               <div class="header-menu-title">Экспорт</div>
               <div class="header-menu-label">Jira</div>
+              <button class="header-dropdown-item" id="shareReportExportButton" type="button" role="menuitem"><svg class="ui-icon" aria-hidden="true"><use href="#icon-header-share"></use></svg><span>Поделиться по ссылке</span></button>
               <button class="header-dropdown-item" id="publishExportButton" type="button" role="menuitem"><svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg><span class="primary-action-label">Опубликовать отчёт</span></button>
               <button class="header-dropdown-item" id="copyButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-code"></use></svg>
@@ -244,6 +246,15 @@
                   <button class="header-dropdown-item" id="publishAgainButton" type="button" role="menuitem" hidden disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-redo"></use></svg><span>Опубликовать заново</span></button>
                   <button class="header-dropdown-item" id="publishScopeAction" type="button" role="menuitem" hidden disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-list"></use></svg><span>Изменить состав публикации</span></button>
                   <div class="publication-info" id="publicationInfo" hidden></div>
+                </div>
+                <div class="publication-channel" id="linkPublication" role="group" aria-labelledby="linkPublicationName">
+                  <div class="publication-status">
+                    <span id="linkPublicationName" data-publication-name>По ссылке</span><span aria-hidden="true">·</span><span data-publication-status role="status"></span>
+                  </div>
+                  <ul class="publication-details" id="linkPublicationDetails" hidden></ul>
+                  <button class="header-dropdown-item" id="shareReportButton" type="button" role="menuitem" data-publication-action><svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg><span class="primary-action-label">Создать ссылку</span></button>
+                  <button class="header-dropdown-item" id="shareReportNewLink" type="button" role="menuitem" hidden disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-plus"></use></svg><span>Создать новую ссылку</span></button>
+                  <button class="header-dropdown-item" id="shareReportManageLink" type="button" role="menuitem" hidden disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg><span>Управлять ссылкой</span></button>
                 </div>
               </div>
             </div>
@@ -472,6 +483,77 @@
     <button class="floating-help-button" id="feedbackButton" type="button" title="Помощь и обратная связь" aria-label="Помощь и обратная связь">
       <svg class="ui-icon" aria-hidden="true"><use href="#icon-bug"></use></svg>
     </button>
+
+    <div class="modal-backdrop" id="shareReportModal" hidden>
+      <section class="modal share-report-dialog" role="dialog" aria-modal="true" aria-labelledby="shareReportTitle" aria-describedby="shareReportHint">
+        <header class="modal-header">
+          <h2 id="shareReportTitle">Поделиться по ссылке</h2>
+          <span class="bug-window-actions">
+            <button class="icon-button" id="shareReportMinimize" type="button" aria-label="Свернуть публикацию" title="Свернуть публикацию" hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+            <button class="icon-button" id="shareReportClose" type="button" aria-label="Закрыть"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+          </span>
+        </header>
+        <div class="share-report-body">
+          <p id="shareReportHint" class="share-report-hint">Открыть ссылку и ответить по пунктам можно после корпоративного входа.</p>
+          <p id="shareReportTargetAuthor" class="share-report-hint share-report-author" role="status" hidden></p>
+          <div class="share-report-settings" id="shareReportOptions" hidden>
+            <fieldset class="share-report-options">
+              <legend>Вложения</legend>
+              <label class="publish-scope-option"><input id="shareReportImages" type="checkbox" checked><span>Включить скриншоты и изображения</span></label>
+              <label class="publish-scope-option"><input id="shareReportFiles" type="checkbox" checked><span>Включить остальные файлы</span></label>
+            </fieldset>
+            <fieldset class="share-report-options" aria-describedby="shareReportStatusHint">
+              <legend>На что обратить внимание разработчику</legend>
+              <p class="share-report-hint" id="shareReportStatusHint">Выберите статусы проверок, требующих внимания разработчика. По ссылке отчёт откроется с фильтром по этим статусам. Без выбора будут показаны все пункты.</p>
+              <div class="publish-status-list" id="shareReportStatuses"></div>
+            </fieldset>
+          </div>
+          <div class="share-report-state" id="shareReportState" hidden>
+            <span class="share-report-spinner" id="shareReportSpinner" aria-hidden="true" hidden></span>
+            <div class="share-report-state-text" id="shareReportStatus" role="status" tabindex="-1">
+              <p class="publish-status" id="shareReportStage"></p>
+              <p class="share-report-state-detail" id="shareReportDetail" hidden></p>
+            </div>
+          </div>
+          <p class="publish-error" id="shareReportError" role="alert" hidden></p>
+          <button class="share-report-text-action" id="shareReportSignOut" type="button" hidden>Выйти из аккаунта</button>
+          <div id="shareReportLinks" class="share-report-links" hidden>
+            <div class="share-report-result" id="shareReportLatest" hidden>
+              <label class="field" id="shareReportChooseLink" hidden>
+                <span>Выбрать публикацию</span>
+                <select id="shareReportLinkSelect"></select>
+              </label>
+              <div class="share-report-result-meta">
+                <span id="shareReportDateLabel">Опубликовано</span>
+                <time id="shareReportDate"></time>
+              </div>
+              <p class="share-report-hint share-report-author" id="shareReportAuthor" role="status"></p>
+              <p class="share-report-hint" id="shareReportAccess">По ссылке можно посмотреть отчёт и ответить по пунктам.</p>
+              <div class="share-report-link-actions">
+                <a class="button button-ghost" id="shareReportOpen" target="_blank" rel="noopener noreferrer">
+                  Открыть отчёт <svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg>
+                </a>
+                <button class="button button-secondary" id="shareReportCopy" type="button">
+                  <svg class="ui-icon" aria-hidden="true"><use href="#icon-copy"></use></svg> Копировать ссылку
+                </button>
+              </div>
+            </div>
+            <section id="shareReportAttempts" class="share-report-attempts" hidden>
+              <h3>Незавершённые попытки</h3>
+              <div id="shareReportAttemptList"></div>
+            </section>
+          </div>
+        </div>
+        <footer class="modal-footer share-report-footer" id="shareReportFooter" hidden>
+          <button class="button button-ghost" id="shareReportBackground" type="button" hidden>Свернуть в панель</button>
+          <button class="button button-ghost" id="shareReportRevoke" type="button" hidden>Отозвать ссылку</button>
+          <button class="button button-primary" id="shareReportUpdate" type="button" hidden>Обновить отчёт по ссылке</button>
+          <button class="share-report-text-action" id="shareReportCancelUpdate" type="button" hidden>Назад</button>
+          <button class="share-report-text-action" id="shareReportReplacePending" type="button" hidden>Создать новую публикацию</button>
+          <button class="button button-primary" id="shareReportPublish" type="button" disabled>Опубликовать отчёт</button>
+        </footer>
+      </section>
+    </div>
 
     <div class="modal-backdrop" id="reportFileModal" hidden>
       <section class="modal publish-progress-modal" role="dialog" aria-modal="true" aria-labelledby="reportFileTitle" aria-describedby="reportFileStatus">
@@ -1270,7 +1352,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=113"></script>
+    <script src="/release-notes.js?v=114"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1278,7 +1360,7 @@
     <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=5"></script>
+    <script src="/report-file.js?v=6"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
@@ -1293,6 +1375,16 @@
       <button class="icon-button bug-dock-close" id="closeBugDock" type="button" aria-label="Закрыть баг-репорт" title="Закрыть баг-репорт"><svg class="ui-icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
     </section>
       <div id="bugUploadDockList"></div>
+      <section class="bug-report-dock share-report-dock" id="shareReportDock" aria-label="Свёрнутая публикация" hidden>
+        <button class="bug-dock-restore" id="shareReportRestore" type="button" aria-label="Развернуть публикацию">
+          <span class="bug-dock-heading"><svg class="ui-icon" aria-hidden="true"><use href="#icon-link"></use></svg><strong>Публикация отчёта</strong><svg class="ui-icon bug-dock-expand" aria-hidden="true"><use href="#icon-focus"></use></svg></span>
+          <span class="share-report-dock-status" role="status" aria-live="polite">
+            <span class="share-report-spinner" id="shareReportDockSpinner" aria-hidden="true" hidden></span>
+            <span id="shareReportDockStatus"></span>
+          </span>
+          <progress id="shareReportDockProgress" class="bug-dock-progress" max="1" value="0" aria-label="Загрузка вложений отчёта" hidden></progress>
+        </button>
+      </section>
     </div>
     <div class="modal-backdrop" id="bugBackgroundModal" hidden>
       <section class="bug-background-window" role="dialog" aria-modal="true" aria-labelledby="backgroundBugCreatedTitle">
@@ -1355,11 +1447,11 @@
     </div>
     <script src="/bug-report.js?v=7"></script>
     <script src="/bug-attachment-analysis.js?v=2"></script>
-    <script src="/tracker-links.js?v=4"></script>
+    <script src="/tracker-links.js?v=5"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
-    <script src="/report-view.js?v=5"></script>
-    <script src="/app.js?v=167"></script>
+    <script src="/report-view.js?v=6"></script>
+    <script src="/app.js?v=168"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

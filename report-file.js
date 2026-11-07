@@ -120,9 +120,10 @@
       type: node.dataset.mimeType || (image ? "image/png" : "application/octet-stream"), image,
       issueUrl: node.dataset.jiraSourceIssue || issueUrl, jiraId: node.dataset.jiraId || "", jiraName: node.dataset.jiraName || "" };
   }
-  function decodeDataUrl(url) {
+  function decodeDataUrl(url, maximum = MAX_BYTES) {
     const match = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([a-z0-9+/]*={0,2})$/i.exec(url);
     if (!match) fail("Некорректные данные вложения.");
+    if (match[2].length > Math.ceil(maximum / 3) * 4) fail("Размер файла превышает допустимый лимит.");
     const raw = atob(match[2]);
     return { bytes: Uint8Array.from(raw, c => c.charCodeAt(0)), type: match[1].toLowerCase() };
   }
@@ -249,7 +250,249 @@
     if (used.size !== hashes.size) fail("Список вложений не соответствует отчёту.");
     return { document: report, count: hashes.size };
   }
-  const api = { pack, unpack, zip, unzip, hash, documentFields, MAX_BYTES };
+  async function loadAttachment(item, load, maximum = MAX_BYTES) {
+    const loaded = item.url.startsWith("data:") ? decodeDataUrl(item.url, maximum) : await load(item);
+    if ((loaded.bytes?.length ?? loaded.size) > maximum) fail("Размер файла превышает допустимый лимит.");
+    const bytes = loaded.bytes instanceof Uint8Array ? loaded.bytes : new Uint8Array(await loaded.arrayBuffer());
+    if (bytes.length > maximum) fail("Размер файла превышает допустимый лимит.");
+    const type = (loaded.type || item.type).split(";")[0].toLowerCase();
+    if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(type)) fail("Неизвестный тип файла.");
+    return { bytes, type };
+  }
+  function restoreWikiLinks(content) {
+    const { wikiLinks } = root.QaReportTrackerLinks;
+    if (!wikiLinks) return;
+    const excluded = "a, pre, code, .cell-file, [contenteditable=false]";
+    // Older plain-text paste could wrap just the address in a wiki link.
+    for (const anchor of content.querySelectorAll("a[href]")) {
+      const before = anchor.previousSibling;
+      const after = anchor.nextSibling;
+      if (before?.nodeType !== Node.TEXT_NODE || anchor.parentElement?.closest(excluded)) continue;
+      const address = anchor.textContent;
+      if (anchor.getAttribute("href") !== address) continue;
+      const text = before.data + address + (after?.nodeType === Node.TEXT_NODE ? after.data : "");
+      if (![...wikiLinks(text)].some(link => link.index < before.length && link.end > before.length)) continue;
+      before.data = text;
+      anchor.remove();
+      if (after?.nodeType === Node.TEXT_NODE) after.remove();
+    }
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const replacements = [];
+    for (let node; (node = walker.nextNode());) {
+      if (!node.data.includes("|") || node.parentElement?.closest(excluded)) continue;
+      const links = [...wikiLinks(node.data)];
+      if (links.length) replacements.push([node, links]);
+    }
+    for (const [node, links] of replacements) {
+      const fragment = document.createDocumentFragment();
+      let end = 0;
+      for (const link of links) {
+        const anchor = document.createElement("a");
+        anchor.href = link.href;
+        anchor.textContent = link.label;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        fragment.append(node.data.slice(end, link.index), anchor);
+        end = link.end;
+      }
+      fragment.append(node.data.slice(end));
+      node.replaceWith(fragment);
+    }
+  }
+
+  function shareUrl(value) {
+    try {
+      const url = new URL(value);
+      return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url : null;
+    } catch { return null; }
+  }
+
+  function shareLink(url) {
+    if (!url) return "";
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  }
+
+  function sharedContentFragments(template, structuredNodes, toText, toCode) {
+    const selector = "pre, code, a[href]";
+    const nodes = [...template.content.querySelectorAll("*")].filter(node =>
+      (structuredNodes.has(node) || node.matches(selector)) &&
+      !node.closest("figcaption") && !node.parentElement?.closest(selector)
+    );
+    if (!nodes.length) return undefined;
+
+    // Reuse the text export for prose without flattening code or named links.
+    const marker = `QA-CONTENT-${crypto.getRandomValues(new Uint32Array(4)).join("-")}-`;
+    const structured = nodes.map((node, index) => {
+      const block = node.tagName === "PRE";
+      const replacement = document.createElement(block ? "div" : "span");
+      replacement.textContent = `${marker}${index}:`;
+      node.replaceWith(replacement);
+      if (structuredNodes.has(node)) return structuredNodes.get(node);
+      const text = block ? toCode(node) : node.textContent;
+      const type = block ? "code" : "inline-code";
+      const language = block ? node.dataset.language : undefined;
+      return { type, text, ...(language ? { language: language.slice(0, 80) } : {}) };
+    });
+    const parts = toText(template.innerHTML).split(new RegExp(`${marker}(\\d+):`, "g"));
+    const fragments = [];
+    parts.forEach((text, index) => {
+      if (index % 2) fragments.push(structured[Number(text)]);
+      else if (text) fragments.push({ type: "text", text });
+    });
+    return fragments;
+  }
+
+  // Extract the recipient-visible content without loading attachment bytes.
+  function sharedPart(html, issueUrl, { includeImages, includeFiles, toText, toCode }) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const content = template.content;
+    content.querySelectorAll("script, style, link, meta, base, svg, math, template, [data-editor-ui]").forEach(node => node.remove());
+    if ((includeImages || includeFiles) && content.querySelector("video, audio, source, object, embed, iframe")) {
+      fail("В отчёте есть встроенное медиа. Добавьте его как файл перед публикацией.");
+    }
+    content.querySelectorAll("video, audio, source, object, embed, iframe").forEach(node => node.remove());
+    const attachments = [];
+    const structuredNodes = new Map();
+    for (const node of attachmentNodes(template)) {
+      const item = info(node, issueUrl);
+      if (item.image ? includeImages : includeFiles) {
+        // A linked image is opened through its attachment card in the report.
+        const anchor = node.closest("a");
+        if (anchor) anchor.replaceWith(...anchor.childNodes);
+        const placeholder = document.createElement("span");
+        structuredNodes.set(placeholder, { type: "attachment", index: attachments.length });
+        attachments.push(item);
+        node.replaceWith(placeholder);
+      } else {
+        node.replaceWith(document.createTextNode(item.image ? "[Изображение не включено]" : "[Файл не включён]"));
+      }
+    }
+    restoreWikiLinks(content);
+    for (const anchor of content.querySelectorAll("a[href]")) {
+      const original = anchor.getAttribute("href");
+      const text = anchor.textContent;
+      const url = shareUrl(original);
+      if (url) structuredNodes.set(anchor, { type: "link", text: text.trim() ? text : url.href, href: url.href });
+      const clean = shareLink(url);
+      if (text.trim() === original.trim()) anchor.textContent = clean;
+      if (clean) anchor.setAttribute("href", clean);
+      else anchor.removeAttribute("href");
+    }
+    content.querySelectorAll("[src], [srcset], [poster], [background]").forEach(node => {
+      for (const name of ["src", "srcset", "poster", "background"]) node.removeAttribute(name);
+    });
+    const text = toText(template.innerHTML);
+    const fragments = sharedContentFragments(template, structuredNodes, toText, toCode);
+    return { attachments, text, ...(fragments ? { fragments } : {}) };
+  }
+
+  function sharedBugs(row) {
+    return (row.bugs || []).map(bug => ({ key: bug.key, issueUrl: shareLink(shareUrl(bug.issueUrl)) }));
+  }
+
+  function sharedRowVisible(row, bugs, entries) {
+    return row.status !== "НЕ ПРОВЕРЕНО" || bugs.length > 0 || entries.some(([, cell]) => cell.text || cell.attachments.length);
+  }
+
+  function inspectSharedSnapshot(value, options) {
+    const report = documentFields(value);
+    const attachments = [];
+    const inspectPart = (html, position) => {
+      const { attachments: files, ...part } = sharedPart(html, report.issueUrl, options);
+      const identities = files.map(item => [item.name, item.url ? options.attachmentFingerprint(item.url) : [item.issueUrl, item.jiraId, item.jiraName]]);
+      if (identities.length) attachments.push([position, [...new Set(identities.map(identity => JSON.stringify(identity)))]]);
+      return { ...part, attachments: identities };
+    };
+    const { attachments: _introFiles, ...intro } = inspectPart(report.intro, "intro");
+    const structure = [], statuses = [], checks = [];
+    for (const section of report.sections) {
+      const rows = [];
+      for (const row of section.rows) {
+        const entries = section.columns.map(column => [column.id, inspectPart(row.cells[column.id], [row.id, column.id])]);
+        const bugs = sharedBugs(row);
+        if (!sharedRowVisible(row, bugs, entries)) continue;
+        rows.push([row.id, options.rowNumbers.get(row.id)]);
+        statuses.push(row.status);
+        checks.push([bugs, entries.map(([, { attachments: _cellFiles, ...part }]) => part)]);
+      }
+      if (rows.length) structure.push([section.id, options.sectionTitle(section), section.columns.map(column => [column.id, column.title]), rows]);
+    }
+    return { metadata: [options.title, shareLink(shareUrl(report.issueUrl)), report.environment, report.overallStatus],
+      intro, structure, statuses, checks, attachments };
+  }
+
+  async function prepareSharedSnapshot(value, {
+    title, load, toText, toCode, rowNumbers, sectionTitle, includeImages, includeFiles, onProgress, onAttachment, signal,
+  }) {
+    const report = documentFields(value);
+    const maximumFile = 50 * 1024 * 1024;
+    const maximumTotal = 90 * 1024 * 1024;
+    const files = new Map();
+    const loadedBySource = new Map();
+    let bytesTotal = 0;
+    let completed = 0;
+
+    async function preparePart(html) {
+      signal?.throwIfAborted();
+      const { attachments: items, ...part } = sharedPart(html, report.issueUrl, { includeImages, includeFiles, toText, toCode });
+      const attachments = new Set();
+      const attachmentIds = [];
+      for (const item of items) {
+        try {
+          const source = item.url || JSON.stringify([item.issueUrl, item.jiraId, item.jiraName, item.name]);
+          const identity = JSON.stringify([source, item.name]);
+          let id = loadedBySource.get(identity);
+          if (!id) {
+            onAttachment?.(item.name, completed);
+            const { bytes, type } = await loadAttachment(item, load, maximumFile);
+            const digest = await hash(bytes);
+            signal?.throwIfAborted();
+            id = await hash(encoder.encode(JSON.stringify([digest, type, item.name])));
+            if (!files.has(id)) {
+              bytesTotal += bytes.length;
+              if (bytesTotal > maximumTotal) fail("Вложения публикации занимают больше 90 МиБ.");
+              if (files.size >= 250) fail("В одну публикацию можно включить до 250 файлов.");
+              files.set(id, { id, name: item.name, type, size: bytes.length, sha256: digest, bytes });
+            }
+            loadedBySource.set(identity, id);
+          }
+          attachments.add(id);
+          attachmentIds.push(id);
+        } catch (error) {
+          signal?.throwIfAborted();
+          fail(`Не удалось включить вложение «${item.name}». ${error.message}`);
+        }
+        completed++;
+        onProgress?.(completed);
+      }
+      const fragments = part.fragments?.map(fragment => fragment.type === "attachment"
+        ? { type: "attachment", id: attachmentIds[fragment.index] } : fragment);
+      return { ...part, ...(fragments && { fragments }), attachments: [...attachments] };
+    }
+
+    const intro = await preparePart(report.intro);
+    const sections = [];
+    for (const section of report.sections) {
+      const columns = section.columns.map(column => ({ id: column.id, label: column.title }));
+      const rows = [];
+      for (const row of section.rows) {
+        const entries = [];
+        for (const column of columns) entries.push([column.id, await preparePart(row.cells[column.id])]);
+        const bugs = sharedBugs(row);
+        if (!sharedRowVisible(row, bugs, entries)) continue;
+        rows.push({ id: row.id, number: rowNumbers.get(row.id), status: row.status, cells: Object.fromEntries(entries), bugs });
+      }
+      if (rows.length) sections.push({ id: section.id, title: sectionTitle(section), columns, rows });
+    }
+    if (!sections.length) fail("Добавьте хотя бы один заполненный пункт для публикации.");
+    return { snapshot: { title, issueUrl: shareLink(shareUrl(report.issueUrl)), environment: report.environment,
+      overallStatus: report.overallStatus, intro, sections }, files: [...files.values()] };
+  }
+
+  const api = { pack, unpack, zip, unzip, hash, documentFields, inspectSharedSnapshot, prepareSharedSnapshot, MAX_BYTES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QaReportFile = api;
 })(typeof window === "undefined" ? globalThis : window);

@@ -29,6 +29,8 @@ const UploadRuntime = require("./jira-upload-runtime");
 const { createUploadStore } = require("./jira-upload-store");
 const uploadStore = createUploadStore(getReportsDb);
 const JiraPublication = require("./jira-publication");
+const { createReportSharing } = require("./report-sharing");
+const { createReportStorage } = require("./report-storage");
 
 const { createAdminService } = require("./admin/server");
 
@@ -224,7 +226,9 @@ function audit(request, response, event, details = {}) {
 }
 
 async function handleCsrf(request, response) {
-  const token = createCsrfToken();
+  // Reuse the live double-submit token so parallel uploads and answer saves agree.
+  const existing = request.headers.cookie?.match(/(?:^|;\s*)query-port-csrf=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
+  const token = existing || createCsrfToken();
   response.setHeader("Set-Cookie", csrfCookie(token));
   sendJson(response, 200, { csrfToken: token });
 }
@@ -1762,6 +1766,32 @@ const bugReportService = require("./bug-report-server").createBugReportService({
   directory: path.dirname(REPORTS_DB_PATH), audit,
 });
 
+const reportSharing = createReportSharing({
+  getDb: getReportsDb, readJson, sendJson, requestOrigin,
+  configPath: objectStorageConfigured() ? "corporate-storage" : undefined,
+  publisherIdentity: request => ({ id: requireUser(request) }),
+  // Base64 expands the raw batch by 4/3; 50 MiB still fits the 72 MiB JSON request.
+  uploadLimits: { fileBytes: 50 * 1024 * 1024, batchBytes: 50 * 1024 * 1024, requestBytes: 72 * 1024 * 1024 },
+  authorEmail: id => id,
+  storageLoader: () => {
+    const credentials = objectStorageCredentials();
+    return createReportStorage({ activeBucket: "corporate", buckets: { corporate: {
+      endpoint: OBJECT_STORAGE_ENDPOINT, region: OBJECT_STORAGE_REGION, name: OBJECT_STORAGE_BUCKET,
+      accessKeyId: credentials.accessKey, secretAccessKey: credentials.secretKey,
+    } } });
+  },
+  cleanupIntervalMs: 30_000,
+  async showPage(request, response) {
+    const html = await fs.promises.readFile(path.join(ROOT, "shared-report.html"));
+    response.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow",
+      "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    });
+    response.end(request.method === "HEAD" ? undefined : html);
+  },
+});
+
 const server = http.createServer(async (request, response) => {
   applySecurityHeaders(response);
   try {
@@ -1816,6 +1846,16 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
+    if (requestPath.startsWith("/api/shared-reports") || /^\/shared-report\/[a-f0-9]{32}$/.test(requestPath)) {
+      if (!["GET", "HEAD"].includes(request.method) && !verifyCsrf(request, request.headers["x-qa-csrf-token"])) {
+        sendJson(response, 403, { error: "Недействительный защитный токен" });
+        return;
+      }
+      if (await reportSharing(request, response, requestPath)) {
+        if (!["GET", "HEAD"].includes(request.method)) audit(request, response, "shared_report_write", { email: request.user.email });
+        return;
+      }
+    }
     if (request.user && requestPath === "/login") {
       response.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
       response.end();
@@ -1961,5 +2001,5 @@ server.on("error", (error) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`QA Report: http://${HOST}:${PORT}`);
+  console.log(`QA Report: http://${HOST}:${server.address().port}`);
 });

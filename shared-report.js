@@ -136,11 +136,8 @@
   let selectedAnswerKey;
   let hostedAnswer;
   let modeFocus;
+  // Every newly opened report starts with the reply panel.
   let answerView = "side";
-  try {
-    const preference = localStorage.getItem("qa-report-shared-answer-view");
-    if (["table", "side"].includes(preference)) answerView = preference;
-  } catch {}
 
   function rememberEditorFocus() {
     const active = document.activeElement;
@@ -219,7 +216,6 @@
     if (selectedRow && Number.isFinite(rowOffset)) {
       contentViewport.scrollTop += selectedRow.getBoundingClientRect().top - contentViewport.getBoundingClientRect().top - rowOffset;
     }
-    try { localStorage.setItem("qa-report-shared-answer-view", next); } catch {}
     restoreEditorFocus(focus);
     syncReportLayout();
   }

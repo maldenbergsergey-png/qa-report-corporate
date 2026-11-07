@@ -11,7 +11,7 @@
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=153" />
-    <link rel="stylesheet" href="/report-view.css?v=4" />
+    <link rel="stylesheet" href="/report-view.css?v=5" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
@@ -583,19 +583,24 @@
       <header class="toolbar">
         <div class="container toolbar-inner">
           <div class="toolbar-identity">
-            <button class="report-home" id="closePreviewButton" type="button" autofocus>
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-left"></use></svg>
-              К редактору
+            <button class="report-home" id="closePreviewButton" type="button" aria-label="К редактору" title="К редактору" autofocus>
+              <span class="brand-mark" aria-hidden="true"></span>
             </button>
             <h1 id="previewTitle"></h1>
           </div>
           <div class="toolbar-filters">
             <div class="toolbar-control">
-              <label for="previewFilter">Показать</label>
-              <div class="toolbar-select"><select id="previewFilter" class="report-view-filter"></select></div>
+              <span class="visually-hidden" id="previewFilterLabel">Статусы проверки</span>
+              <details id="previewFilter" class="toolbar-select report-status-filter">
+                <summary aria-labelledby="previewFilterLabel previewFilterValue"><span id="previewFilterValue">Все пункты</span></summary>
+                <div class="preview-filter-panel">
+                  <button type="button" class="preview-filter-reset">Все пункты</button>
+                  <fieldset class="preview-filter-options" aria-label="Статусы проверки"></fieldset>
+                </div>
+              </details>
             </div>
             <div class="toolbar-control">
-              <label for="previewOrder">Порядок</label>
+              <label class="visually-hidden" for="previewOrder">Порядок</label>
               <div class="toolbar-select toolbar-select-order">
                 <select id="previewOrder" class="report-view-order">
                   <option value="original">Как в отчёте</option>
@@ -607,16 +612,23 @@
           <div class="toolbar-info"><span class="counts" role="status"></span></div>
         </div>
       </header>
-      <div class="report-content" tabindex="0" role="region" aria-label="Чек-лист">
+      <div class="report-document">
         <section class="report-overview" aria-label="Сведения об отчёте" hidden>
           <dl class="metadata" hidden></dl>
-          <details class="intro" hidden>
-            <summary>Описание проверки</summary>
-            <div class="intro-content"></div>
-          </details>
+          <section class="intro" data-expanded="false" hidden>
+            <div class="intro-heading">
+              <h2>Описание проверки</h2>
+              <button class="intro-toggle" type="button" aria-controls="previewIntroContent" aria-expanded="false" hidden>Развернуть</button>
+            </div>
+            <div class="intro-content" id="previewIntroContent"></div>
+          </section>
         </section>
-        <div class="report-view-sections"></div>
-        <div class="report-view-empty" hidden></div>
+        <div class="report-scroll-frame">
+          <div class="report-content" tabindex="0" role="region" aria-label="Чек-лист">
+            <div class="report-view-sections"></div>
+            <div class="report-view-empty" hidden></div>
+          </div>
+        </div>
       </div>
       <dialog class="report-image-dialog" aria-labelledby="previewImageTitle">
         <header>
@@ -1352,7 +1364,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=117"></script>
+    <script src="/release-notes.js?v=118"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1450,7 +1462,8 @@
     <script src="/tracker-links.js?v=5"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
-    <script src="/report-view.js?v=6"></script>
+    <script src="/shared-table-layout.js?v=1"></script>
+    <script src="/report-view.js?v=7"></script>
     <script src="/app.js?v=168"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>

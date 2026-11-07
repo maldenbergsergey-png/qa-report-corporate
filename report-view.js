@@ -298,19 +298,132 @@
   }
 
   function createPreview(dialog, openFile, extractCode) {
-    const filter = dialog.querySelector(".report-view-filter");
+    const filter = dialog.querySelector(".report-status-filter");
+    const filterValue = filter.querySelector("summary span");
+    const filterOptions = filter.querySelector("fieldset");
+    const filterReset = filter.querySelector("button");
     const order = dialog.querySelector(".report-view-order");
     const counts = dialog.querySelector(".counts");
     const overview = dialog.querySelector(".report-overview");
     const sections = dialog.querySelector(".report-view-sections");
-    const updateEmptyState = createEmptyState(dialog.querySelector(".report-view-empty"), filter);
+    const empty = dialog.querySelector(".report-view-empty");
+    const emptyMessage = element("p");
+    const emptyReset = element("button", "report-view-reset", "Показать все пункты");
+    emptyReset.type = "button";
+    empty.append(emptyMessage, emptyReset);
     const imageDialog = dialog.querySelector(".report-image-dialog");
     const openCode = createCodeViewer(dialog.querySelector(".report-code-dialog"));
     const image = imageDialog.querySelector("img");
     const imageTitle = imageDialog.querySelector("h2");
     let groups = [];
-    let initialStatuses;
+    let selectedStatuses = null;
     const scrollport = dialog.querySelector(".report-content");
+    const intro = overview.querySelector(".intro");
+    const introContent = intro.querySelector(".intro-content");
+    const introToggle = intro.querySelector("button");
+    let layoutKey;
+    let layouts = [];
+    let layoutFrame;
+
+    function syncLayout() {
+      if (!dialog.open) return;
+      if (!intro.hidden) introToggle.hidden = introContent.scrollHeight <= parseFloat(getComputedStyle(introContent).lineHeight) * 6 + 1;
+      const viewportWidth = scrollport.clientWidth;
+      if (!viewportWidth || !groups.length) return;
+      const key = JSON.stringify([viewportWidth, groups.map(group => group.section.hidden)]);
+      if (key !== layoutKey) {
+        const styles = getComputedStyle(dialog);
+        const width = name => parseFloat(styles.getPropertyValue(name));
+        const indices = [...sections.querySelectorAll("tbody .point-index")];
+        const longest = indices.reduce((before, cell) => !before || cell.textContent.length > before.textContent.length ? cell : before, null);
+        const range = document.createRange();
+        if (longest) range.selectNodeContents(longest);
+        const pointWidth = Math.max(42, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+        const pinnedWidths = [width("--qa-status-width")];
+        const plan = root.QaReportSharedTableLayout.plan({ viewportWidth, pointWidth,
+          dataMinWidth: width("--report-data-min-width"), pinnedWidths, pinColumns: true,
+          sections: groups.map(group => ({ columnCount: group.columnCount, hidden: group.section.hidden })),
+        });
+        sections.style.width = `${plan.canvasWidth}px`;
+        sections.style.setProperty("--report-viewport-width", `${viewportWidth}px`);
+        layouts = plan.sections;
+        groups.forEach((group, index) => {
+          const layout = layouts[index];
+          group.table.style.width = `${layout.width}px`;
+          let columns = group.table.querySelector("colgroup");
+          if (!columns) { columns = element("colgroup"); group.table.prepend(columns); }
+          columns.replaceChildren(...[pointWidth, ...Array(group.columnCount).fill(layout.columnWidth), layout.spacerWidth, ...pinnedWidths]
+            .map(value => { const col = element("col"); col.style.width = `${value}px`; return col; }));
+        });
+        layoutKey = key;
+      }
+      const scrollLeft = scrollport.scrollLeft;
+      sections.style.setProperty("--report-scroll-left", `${scrollLeft}px`);
+      groups.forEach((group, index) => {
+        const state = root.QaReportSharedTableLayout.scrollState(layouts[index], scrollLeft);
+        group.section.style.setProperty("--data-shift", `${state.offset}px`);
+        group.table.parentElement.classList.toggle("has-hidden-left", state.hiddenLeft);
+        group.table.classList.toggle("has-pinned-overlap", state.hiddenRight);
+      });
+    }
+    function scheduleLayout() {
+      if (layoutFrame) return;
+      layoutFrame = requestAnimationFrame(() => { layoutFrame = undefined; syncLayout(); });
+    }
+    const layoutObserver = new ResizeObserver(scheduleLayout);
+    layoutObserver.observe(scrollport);
+    layoutObserver.observe(introContent);
+    scrollport.addEventListener("scroll", scheduleLayout, { passive: true });
+    introToggle.addEventListener("click", () => {
+      const expanded = intro.dataset.expanded !== "true";
+      intro.dataset.expanded = String(expanded);
+      introToggle.setAttribute("aria-expanded", String(expanded));
+      introToggle.textContent = expanded ? "Свернуть" : "Развернуть";
+    });
+
+    function resetFilter() {
+      selectedStatuses = null;
+      update();
+      filter.open = false;
+      filter.querySelector("summary").focus();
+    }
+    filterReset.addEventListener("click", resetFilter);
+    emptyReset.addEventListener("click", resetFilter);
+    dialog.addEventListener("click", event => { if (!filter.contains(event.target)) filter.open = false; });
+    filter.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || !filter.open) return;
+      event.preventDefault();
+      filter.open = false;
+      filter.querySelector("summary").focus();
+    });
+    filter.addEventListener("focusout", event => { if (!filter.contains(event.relatedTarget)) filter.open = false; });
+
+    function configureFilter(defaults) {
+      selectedStatuses = defaults == null ? null : new Set([...defaults].map(statusKey));
+      const statusCounts = new Map();
+      for (const row of groups.flatMap(group => group.rows)) statusCounts.set(row.status, (statusCounts.get(row.status) || 0) + 1);
+      const choices = new Set([...statuses.keys(), ...statusCounts.keys(), ...(selectedStatuses || [])]);
+      const available = element("div");
+      const unavailable = element("div", "preview-filter-unavailable");
+      unavailable.append(element("p", "preview-filter-heading", "Нет в отчёте"));
+      for (const status of choices) {
+        const label = element("label");
+        const input = element("input");
+        input.type = "checkbox";
+        input.value = status;
+        input.disabled = !statusCounts.has(status) && !selectedStatuses?.has(status);
+        input.addEventListener("change", () => {
+          selectedStatuses ||= new Set();
+          if (input.checked) selectedStatuses.add(status);
+          else selectedStatuses.delete(status);
+          if (!selectedStatuses.size) selectedStatuses = null;
+          update();
+        });
+        label.append(input, element("span", "", status || "Статус не указан"), element("span", "preview-filter-count", String(statusCounts.get(status) || 0)));
+        (input.disabled ? unavailable : available).append(label);
+      }
+      filterOptions.replaceChildren(available, ...(unavailable.children.length > 1 ? [unavailable] : []));
+    }
 
     const openImage = (source, name) => {
       image.src = source;
@@ -325,13 +438,17 @@
     dialog.addEventListener("keydown", event => event.stopPropagation());
     dialog.addEventListener("close", () => {
       if (dialog.open) return;
+      filter.open = false;
+      for (const group of groups) layoutObserver.unobserve(group.table);
       sections.replaceChildren();
-      overview.querySelector(".intro-content").replaceChildren();
+      sections.removeAttribute("style");
+      introContent.replaceChildren();
       groups = [];
+      layouts = [];
+      layoutKey = undefined;
     });
 
     function update() {
-      const mode = filter.value;
       let visible = 0;
       let total = 0;
       for (const group of groups) {
@@ -340,7 +457,7 @@
           : group.rows;
         let matching = 0;
         rows.forEach(({ status, node }, index) => {
-          node.hidden = !(mode === "all" || (mode === "editor" ? initialStatuses.has(status) : mode === status));
+          node.hidden = selectedStatuses !== null && !selectedStatuses.has(status);
           if (!node.hidden) matching++;
           if (group.body.rows[index] !== node) group.body.insertBefore(node, group.body.rows[index] || null);
         });
@@ -348,24 +465,37 @@
         visible += matching;
         group.section.hidden = !matching;
       }
-      counts.textContent = `Показано ${visible} из ${total}`;
-      updateEmptyState(visible, total);
+      counts.textContent = `${visible} из ${total}`;
+      counts.setAttribute("aria-label", `Показано ${visible} из ${total}`);
+      filterValue.textContent = selectedStatuses === null ? "Все пункты" : selectedStatuses.size === 1
+        ? [...selectedStatuses][0] : `Статусы · ${selectedStatuses.size}`;
+      filterValue.title = [...(selectedStatuses || [])].join(", ");
+      filterReset.disabled = selectedStatuses === null;
+      for (const input of filterOptions.querySelectorAll("input")) input.checked = Boolean(selectedStatuses?.has(input.value));
+      empty.hidden = visible > 0;
+      emptyMessage.textContent = total ? "Пунктов с выбранными статусами нет" : "В чек-листе пока нет заполненных пунктов";
+      emptyReset.hidden = selectedStatuses === null;
+      scheduleLayout();
     }
-    filter.addEventListener("change", update);
     order.addEventListener("change", update);
 
     return function open(report, selectedStatuses) {
       if (dialog.open) return;
-      initialStatuses = selectedStatuses ? new Set([...selectedStatuses].map(statusKey)) : null;
-      filter.replaceChildren(new Option("Все пункты", "all"));
-      if (initialStatuses) filter.add(new Option("Как в чек-листе", "editor"));
-      filter.value = initialStatuses ? "editor" : "all";
       order.value = "original";
+      intro.dataset.expanded = "false";
+      introToggle.setAttribute("aria-expanded", "false");
+      introToggle.textContent = "Развернуть";
+      introToggle.hidden = true;
       dialog.querySelector("h1").textContent = report.title;
       const append = (target, html) => readContent(target, html, openImage, openFile, openCode, extractCode);
       renderOverview(overview, report, target => append(target, report.intro));
       groups = report.sections.map(({ title, columns, rows }) => {
         const group = createSection(title, columns.map(column => column.title || "Без названия"));
+        const table = group.section.querySelector("table");
+        const spacer = element("th", "report-scroll-spacer");
+        spacer.setAttribute("aria-hidden", "true");
+        table.tHead.rows[0].querySelector(".qa-status").before(spacer);
+        layoutObserver.observe(table);
         const entries = rows.map(row => {
           const tr = group.body.insertRow();
           const index = element("th", "point-index", row.number);
@@ -384,16 +514,19 @@
             if (link) bugs.append(link);
           }
           if (bugs.childElementCount) (tr.cells[1] || status).append(bugs);
-          tr.append(status);
+          const spacer = element("td", "report-scroll-spacer");
+          spacer.setAttribute("aria-hidden", "true");
+          tr.append(spacer, status);
           return { node: tr, status: statusKey(row.status) };
         });
-        return { ...group, rows: entries };
+        return { ...group, table, columnCount: columns.length, rows: entries };
       });
-      appendStatusOptions(filter, groups);
+      configureFilter(selectedStatuses);
       sections.replaceChildren(...groups.map(group => group.section));
       update();
       dialog.showModal();
       scrollport.scrollTo(0, 0);
+      syncLayout();
     };
   }
 

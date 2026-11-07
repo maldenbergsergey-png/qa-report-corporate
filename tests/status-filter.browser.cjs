@@ -146,14 +146,13 @@ async function main() {
   const preview = page.locator('#previewModal');
   assert.equal(await preview.isVisible(), true);
   assert.equal(await preview.evaluate(n => n.clientWidth === innerWidth && n.clientHeight === innerHeight), true);
-  assert.deepEqual(await preview.locator('table').first().locator('thead th').allTextContents(), ['№', 'Проверка', 'Статус']);
+  assert.deepEqual(await preview.locator('table').first().locator('thead th:not([aria-hidden])').allTextContents(), ['№', 'Проверка', 'Статус']);
   assert.equal(await preview.locator('[contenteditable], textarea').count(), 0);
   assert.equal(await preview.getByText('Token-1', { exact: true }).isVisible(), true);
   assert.equal(await preview.getByText('Hidden edited', { exact: true }).isVisible(), false);
-  assert.equal(await preview.getByText('Full intro', { exact: true }).isVisible(), false);
-  await preview.locator('summary').click();
   assert.equal(await preview.getByText('Full intro', { exact: true }).isVisible(), true);
-  await page.selectOption('#previewFilter', 'all');
+  await preview.locator('#previewFilter summary').click();
+  await preview.locator('.preview-filter-reset').click();
   assert.equal(await preview.getByText('Hidden edited', { exact: true }).isVisible(), true);
   await preview.getByRole('button', { name: 'Открыть изображение: Изображение' }).click();
   assert.equal(await preview.locator('.report-image-dialog').isVisible(), true);
@@ -171,10 +170,14 @@ async function main() {
     sections: [{ title: 'Проверки', columns: [], rows: [{ number: '1', status: 'OK', cells: {} }] }],
   }, new Set(['НЕ ОК'])));
   const previewFilter = page.locator('#previewFilter');
-  assert.equal(await previewFilter.locator('option[value="OK"]').isEnabled(), true);
-  assert.equal(await previewFilter.locator('option[value="НЕ ОК"]').isDisabled(), true);
-  await page.selectOption('#previewFilter', 'OK');
-  assert.match(await preview.locator('.counts').textContent(), /Показано 1 из 1/);
+  assert.equal(await previewFilter.locator('input[value="OK"]').isEnabled(), true);
+  assert.equal(await previewFilter.locator('input[value="НЕ ОК"]').isChecked(), true);
+  await previewFilter.locator('summary').click();
+  await previewFilter.locator('.preview-filter-reset').click();
+  await previewFilter.locator('summary').click();
+  await previewFilter.locator('input[value="OK"]').check();
+  await preview.locator('h1').click();
+  assert.match(await preview.locator('.counts').textContent(), /1 из 1/);
   await page.keyboard.press('Escape');
   const excel = await page.evaluate(() => buildXlsxWorksheet({ statuses: reportStatusFilter }));
   assert.match(excel.sharedStringsXml, /Token-1/); assert.doesNotMatch(excel.sharedStringsXml, /Token-0|Hidden edited/);
@@ -202,12 +205,12 @@ async function main() {
   // Clearing the preview filter restores every preview row without changing the editor filter.
   await page.click('#previewButton');
   const previewReset = preview.getByRole('button', { name: 'Показать все пункты' });
-  assert.equal(await preview.getByText('Пунктов с таким статусом нет', { exact: true }).isVisible(), true);
-  assert.match(await preview.locator('.counts').textContent(), /Показано 0 из 9/);
+  assert.equal(await preview.getByText('Пунктов с выбранными статусами нет', { exact: true }).isVisible(), true);
+  assert.match(await preview.locator('.counts').textContent(), /0 из 9/);
   await previewReset.click();
-  assert.equal(await page.locator('#previewFilter').inputValue(), 'all');
-  assert.equal(await page.locator('#previewFilter').evaluate(node => node === document.activeElement), true);
-  assert.match(await preview.locator('.counts').textContent(), /Показано 9 из 9/);
+  assert.equal(await page.locator('#previewFilterValue').textContent(), 'Все пункты');
+  assert.equal(await page.locator('#previewFilter summary').evaluate(node => node === document.activeElement), true);
+  assert.match(await preview.locator('.counts').textContent(), /9 из 9/);
   assert.equal(await previewReset.isHidden(), true);
   await page.keyboard.press('Escape');
   assert.equal((await rows()).length, 0);

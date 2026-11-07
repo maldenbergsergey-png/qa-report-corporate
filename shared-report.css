@@ -184,7 +184,7 @@ button:hover:not(:disabled) { background: var(--surface-subtle); }
 }
 .correction-status.is-editable option { color: var(--text); background: var(--surface); }
 .correction-status.is-editable select, .answer-comment-input { color: inherit; background: transparent; border: 0; border-radius: 0; }
-.correction-status.is-editable select:hover, .correction-comment.is-editable:hover { background: color-mix(in srgb, currentColor 5%, transparent); }
+.correction-comment.is-editable:hover { background: color-mix(in srgb, currentColor 5%, transparent); }
 .correction-status.is-editable select:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .correction-comment.is-editable { height: 1px; }
 .correction-comment.is-editable:focus-within { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
@@ -559,8 +559,8 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .toolbar .save-state { display: grid; flex: 0 0 20px; height: 20px; place-items: center; }
 .toolbar .save-dot { width: 8px; height: 8px; box-shadow: none; }
 .shared-workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; min-width: 0; }
-.shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px); }
-.report-document { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; padding: 12px clamp(12px, 2vw, 32px) 16px; }
+.shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 360px); }
+.report-document { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; padding: 12px 16px 16px; }
 .report-scroll-frame { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .qa-report-view .report-content { width: 100%; height: 100%; min-width: 0; min-height: 0; scrollbar-gutter: stable; padding: 0; }
 .qa-report-view .report-content::before { display: none; }
@@ -612,9 +612,9 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .answer-comment-editor { height: 100%; }
 .answer-comment-input { flex: 1; }
 .qa-report-view .correction-comment.is-editable:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
-.qa-report-view .correction-status.is-editable:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.qa-report-view.keyboard-navigation .correction-status.is-editable:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
 .correction-status.is-editable select:focus-visible { outline: none; }
-.answer-panel { min-height: 0; min-width: 0; overflow: auto; padding: 20px; background: var(--surface); border-inline-start: 1px solid var(--line); }
+.answer-panel { min-height: 0; min-width: 0; overflow: auto; padding: 16px; background: var(--surface); border-inline-start: 1px solid var(--line); }
 .answer-panel-heading { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .answer-panel-heading h2 { margin: 0 0 20px; font-size: 1rem; }
 #answer-panel-check { margin: 0 0 16px; font-size: .92rem; font-weight: 650; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -650,6 +650,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
   .answer-view-control > span { display: none; }
 }
 @media (max-width: 760px) {
+  .report-document { padding-inline: 12px; }
   .qa-report-view { --answer-status-width: 160px; --answer-comment-width: 220px; }
   .shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 1fr) minmax(180px, 42%); }
   .answer-panel { padding: 12px; border-inline-start: 0; border-top: 1px solid var(--line); }

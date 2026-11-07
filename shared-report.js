@@ -63,6 +63,10 @@
   const order = document.getElementById("report-order");
   const counts = document.getElementById("report-count");
   const view = document.getElementById("report");
+  document.addEventListener("keydown", event => {
+    if (event.key === "Tab" || event.key.startsWith("Arrow")) view.classList.add("keyboard-navigation");
+  }, true);
+  document.addEventListener("pointerdown", () => view.classList.remove("keyboard-navigation"), true);
   const {
     statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection,
     lineCountLabel, formatReportCode, createCodePreview,

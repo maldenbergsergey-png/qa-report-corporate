@@ -6501,7 +6501,7 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .editor-column-pin:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .editor-column-pin[aria-pressed="true"] { color: var(--primary); }
 .editor-column-pin:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-.editor-column-pin > .ui-icon { width: 16px; height: 16px; transform: rotate(45deg); }
+.editor-column-pin > .ui-icon { width: 12px; height: 12px; transform: rotate(45deg); }
 .section-header-table .status-header { padding: 4px 60px 4px 9px !important; }
 .status-header > .editor-column-pin { position: absolute; top: 50%; right: 34px; transform: translateY(-50%); }
 .numbering-menu { min-width: 170px; padding: 4px; }

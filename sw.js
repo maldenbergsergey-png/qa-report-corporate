@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v158';
+const CACHE_NAME = 'qa-report-corporate-assets-v159';
 const SHELL = [
   "/shared-table-layout.js?v=2",
   "/status-palette.css?v=1",
@@ -23,7 +23,7 @@ const SHELL = [
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=7', '/report-view.js?v=10', '/styles.css?v=155', '/app.js?v=169', '/pwa.js?v=5',
+  '/report-view.css?v=7', '/report-view.js?v=10', '/styles.css?v=156', '/app.js?v=170', '/pwa.js?v=5',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
   '/checklist-numbering.js?v=4', '/release-notes.js?v=124',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',

@@ -3392,7 +3392,7 @@ function createNumberHeader(section) {
     }));
     buttons[options.findIndex(([value]) => value === mode)].focus({ preventScroll: true });
   });
-  controls.append(picker, createEditorColumnPin("number"));
+  controls.append(createEditorColumnPin("number"), picker);
   header.append(controls);
   return header;
 }

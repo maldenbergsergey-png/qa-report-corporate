@@ -252,6 +252,70 @@
     });
   }
 
+  const overview = document.getElementById("report-overview");
+  const overviewToggle = document.getElementById("report-overview-toggle");
+  const overviewPin = document.getElementById("report-overview-pin");
+  let hasOverview = false;
+  let overviewPinned = false;
+  let lastOverviewScroll = 0;
+  let collapseOverviewAfter = 0;
+  let manuallyCollapsedOverview = false;
+
+  function deferOverviewCollapse() {
+    collapseOverviewAfter = Math.max(contentViewport.scrollTop, overview.offsetHeight + 16) + 48;
+  }
+
+  function setOverviewExpanded(expanded, preservePosition = true) {
+    if (!hasOverview) return;
+    const before = contentViewport.getBoundingClientRect().top;
+    const scrollTop = contentViewport.scrollTop;
+    if (!expanded && overview.contains(document.activeElement)) overviewToggle.focus({ preventScroll: true });
+    overview.hidden = !expanded;
+    overviewToggle.setAttribute("aria-expanded", String(expanded));
+    overviewToggle.title = expanded ? "Свернуть сведения об отчёте" : "Показать сведения об отчёте";
+    if (preservePosition) {
+      // Compensate for the changed viewport so the current checklist point stays in place.
+      contentViewport.scrollTop = scrollTop + contentViewport.getBoundingClientRect().top - before;
+    }
+    lastOverviewScroll = contentViewport.scrollTop;
+    if (expanded) deferOverviewCollapse();
+    syncReportLayout();
+  }
+
+  overviewToggle.addEventListener("click", () => {
+    const expanded = overview.hidden;
+    manuallyCollapsedOverview = !expanded;
+    if (!expanded && overviewPinned) setOverviewPinned(false);
+    setOverviewExpanded(expanded);
+  });
+
+  function setOverviewPinned(pinned) {
+    overviewPinned = pinned;
+    overviewPin.setAttribute("aria-pressed", String(pinned));
+    overviewPin.title = pinned ? "Открепить сведения" : "Закрепить сведения";
+    overviewPin.setAttribute("aria-label", overviewPin.title);
+    overviewToggle.classList.toggle("is-pinned", pinned);
+    if (pinned) {
+      manuallyCollapsedOverview = false;
+      setOverviewExpanded(true);
+    } else deferOverviewCollapse();
+  }
+  overviewPin.addEventListener("click", () => setOverviewPinned(!overviewPinned));
+
+  contentViewport.addEventListener("scroll", () => {
+    const top = contentViewport.scrollTop;
+    if (!hasOverview || overviewPinned) { lastOverviewScroll = top; return; }
+    if (overview.hidden) {
+      if (top > lastOverviewScroll + 1) manuallyCollapsedOverview = false;
+      if (!manuallyCollapsedOverview && top <= 1 && lastOverviewScroll > top) setOverviewExpanded(true);
+    } else if (top > lastOverviewScroll && top > collapseOverviewAfter &&
+      !(view.classList.contains("keyboard-navigation") && overview.contains(document.activeElement))) {
+      // Only collapse after enough travel to preserve the point's on-screen position.
+      setOverviewExpanded(false);
+    }
+    lastOverviewScroll = contentViewport.scrollTop;
+  }, { passive: true });
+
   const intro = document.getElementById("report-intro");
   const introContent = document.getElementById("report-intro-content");
   const introToggle = document.getElementById("report-intro-toggle");
@@ -321,6 +385,11 @@
   }, { passive: true });
   layoutObserver.observe(contentViewport);
   layoutObserver.observe(introContent);
+  layoutObserver.observe(overview);
+  const overviewSizeObserver = new ResizeObserver(() => {
+    if (hasOverview && !overview.hidden && contentViewport.scrollTop <= 1) deferOverviewCollapse();
+  });
+  overviewSizeObserver.observe(overview);
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -1640,7 +1709,7 @@
     }
     counts.textContent = `${visible} из ${total}`;
     counts.setAttribute("aria-label", `Показано ${visible} из ${total}`);
-    filterValue.textContent = !selectedStatuses.size ? "Все пункты" : selectedStatuses.size === 1
+    filterValue.textContent = !selectedStatuses.size ? "Все" : selectedStatuses.size === 1
       ? [...selectedStatuses][0] : `Статусы · ${selectedStatuses.size}`;
     filterValue.title = [...selectedStatuses].join(", ");
     filterReset.disabled = !selectedStatuses.size;
@@ -1702,7 +1771,7 @@
   }
 
   function renderReport(report) {
-    const title = report.title || "Отчёт о тестировании";
+    const title = report.title?.trim() || window.QaReportTrackerLinks.parse(report.issueUrl)?.key || "Отчёт о тестировании";
     const titleNode = document.getElementById("report-title");
     titleNode.textContent = title;
     titleNode.title = title;
@@ -1726,6 +1795,13 @@
       if (hasText || hasFiles) appendContent(target, content);
       return Boolean(hasText || hasFiles);
     });
+
+    hasOverview = !overview.hidden;
+    overviewToggle.hidden = !hasOverview;
+    if (hasOverview) {
+      setOverviewExpanded(true, false);
+      deferOverviewCollapse();
+    }
 
     const root = document.getElementById("report-sections");
     for (const [sectionIndex, section] of report.sections.entries()) {

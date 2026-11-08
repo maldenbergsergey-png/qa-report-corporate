@@ -10,13 +10,13 @@
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/report-view.css?v=6" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
-    <link rel="stylesheet" href="/shared-report.css?v=29" />
+    <link rel="stylesheet" href="/shared-report.css?v=30" />
     <script src="/file-preview.js?v=4" defer></script>
     <script src="/shared-comment-editor.js?v=3" defer></script>
     <script src="/tracker-links.js?v=5" defer></script>
     <script src="/report-view.js?v=9" defer></script>
     <script src="/shared-table-layout.js?v=2" defer></script>
-    <script src="/shared-report.js?v=35" defer></script>
+    <script src="/shared-report.js?v=36" defer></script>
   </head>
   <body>
     <main>
@@ -35,16 +35,29 @@
         <header class="toolbar">
           <div class="container toolbar-inner">
             <div class="toolbar-identity">
-              <a class="report-home" href="/" aria-label="На главную QA Report">
-                <span class="brand-mark" aria-hidden="true"></span>
-              </a>
+              <div class="toolbar-brand">
+                <a class="report-home" href="/" aria-label="На главную QA Report">
+                  <span class="brand-mark" aria-hidden="true"></span>
+                </a>
+                <div id="saveState" class="save-state" data-state="saved" tabindex="0" role="status" hidden>
+                  <span class="save-dot" aria-hidden="true"></span>
+                  <span class="save-state-label">Сохранено</span>
+                </div>
+              </div>
               <h1 id="report-title"></h1>
+              <button id="report-overview-toggle" class="overview-toggle" type="button" aria-expanded="true" aria-controls="report-overview" hidden>
+                Сведения<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
             </div>
             <div class="toolbar-filters">
               <div class="toolbar-control">
                 <span class="visually-hidden" id="report-filter-label">Статусы проверки</span>
                 <details class="toolbar-select" id="report-filter">
-                  <summary aria-labelledby="report-filter-label report-filter-value"><span id="report-filter-value">Все пункты</span></summary>
+                  <summary aria-labelledby="report-filter-label report-filter-value report-count">
+                    <span class="toolbar-caption" aria-hidden="true">Статус:</span>
+                    <span id="report-filter-value">Все</span>
+                    <span class="counts" id="report-count" role="status"></span>
+                  </summary>
                   <div class="report-filter-panel">
                     <button type="button" id="report-filter-reset">Все пункты</button>
                     <fieldset id="report-filter-options" aria-label="Статусы проверки"></fieldset>
@@ -52,8 +65,9 @@
                 </details>
               </div>
               <div class="toolbar-control">
-                <label class="visually-hidden" for="report-order">Порядок</label>
+                <label class="visually-hidden" for="report-order">Сортировка</label>
                 <div class="toolbar-select toolbar-select-order">
+                  <span class="toolbar-caption" aria-hidden="true">Сортировка:</span>
                   <select id="report-order">
                     <option value="original">Как в отчёте</option>
                     <option value="priority">По статусу</option>
@@ -62,19 +76,14 @@
               </div>
             </div>
             <div class="answer-view-control" role="group" aria-label="Расположение ответов">
-              <span id="answer-view-label">Ответы</span>
+              <span id="answer-view-label">Ответы:</span>
               <div class="answer-view-options">
                 <button type="button" data-answer-view="table" aria-pressed="false">В таблице</button>
                 <button type="button" data-answer-view="side" aria-pressed="true">Справа</button>
               </div>
             </div>
             <div class="toolbar-info">
-              <span class="counts" id="report-count" role="status"></span>
               <span id="access-label" class="access-label" hidden>Только просмотр</span>
-              <div id="saveState" class="save-state" data-state="saved" tabindex="0" role="status" hidden>
-                <span class="save-dot" aria-hidden="true"></span>
-                <span class="save-state-label">Сохранено</span>
-              </div>
               <div class="shared-theme">
                 <button type="button" id="shared-theme-toggle" aria-label="Тема оформления" title="Тема оформления" aria-controls="shared-theme-menu" aria-expanded="false">
                   <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
@@ -92,6 +101,9 @@
         <div class="shared-workspace">
           <div class="report-document">
             <section class="report-overview" id="report-overview" aria-label="Сведения об отчёте" hidden>
+              <button id="report-overview-pin" class="column-pin overview-pin" type="button" aria-label="Закрепить сведения" title="Закрепить сведения" aria-pressed="false">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>
+              </button>
               <dl class="metadata" id="report-metadata" hidden></dl>
               <section id="report-intro" class="intro" data-expanded="false" hidden>
                 <div class="intro-heading">

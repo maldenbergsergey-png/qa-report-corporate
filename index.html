@@ -11,7 +11,7 @@
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=153" />
-    <link rel="stylesheet" href="/report-view.css?v=6" />
+    <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
   </head>
@@ -587,12 +587,19 @@
               <span class="brand-mark" aria-hidden="true"></span>
             </button>
             <h1 id="previewTitle"></h1>
+            <button class="overview-toggle" type="button" aria-expanded="true" aria-controls="previewOverview" hidden>
+              Сведения<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
           </div>
           <div class="toolbar-filters">
             <div class="toolbar-control">
               <span class="visually-hidden" id="previewFilterLabel">Статусы проверки</span>
               <details id="previewFilter" class="toolbar-select report-status-filter">
-                <summary aria-labelledby="previewFilterLabel previewFilterValue"><span id="previewFilterValue">Все пункты</span></summary>
+                <summary aria-labelledby="previewFilterLabel previewFilterValue previewCount">
+                  <span class="toolbar-caption" aria-hidden="true">Статус:</span>
+                  <span id="previewFilterValue">Все</span>
+                  <span class="counts" id="previewCount" role="status"></span>
+                </summary>
                 <div class="preview-filter-panel">
                   <button type="button" class="preview-filter-reset">Все пункты</button>
                   <fieldset class="preview-filter-options" aria-label="Статусы проверки"></fieldset>
@@ -600,8 +607,9 @@
               </details>
             </div>
             <div class="toolbar-control">
-              <label class="visually-hidden" for="previewOrder">Порядок</label>
+              <label class="visually-hidden" for="previewOrder">Сортировка</label>
               <div class="toolbar-select toolbar-select-order">
+                <span class="toolbar-caption" aria-hidden="true">Сортировка:</span>
                 <select id="previewOrder" class="report-view-order">
                   <option value="original">Как в отчёте</option>
                   <option value="priority">По статусу</option>
@@ -609,11 +617,13 @@
               </div>
             </div>
           </div>
-          <div class="toolbar-info"><span class="counts" role="status"></span></div>
         </div>
       </header>
       <div class="report-document">
-        <section class="report-overview" aria-label="Сведения об отчёте" hidden>
+        <section class="report-overview" id="previewOverview" aria-label="Сведения об отчёте" hidden>
+          <button class="column-pin overview-pin" type="button" aria-label="Закрепить сведения" title="Закрепить сведения" aria-pressed="false">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>
+          </button>
           <dl class="metadata" hidden></dl>
           <section class="intro" data-expanded="false" hidden>
             <div class="intro-heading">
@@ -1364,7 +1374,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=3"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=122"></script>
+    <script src="/release-notes.js?v=123"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1463,7 +1473,7 @@
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
-    <script src="/report-view.js?v=9"></script>
+    <script src="/report-view.js?v=10"></script>
     <script src="/app.js?v=168"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>

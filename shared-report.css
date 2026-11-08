@@ -544,17 +544,13 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view .toolbar-identity h1 { min-width: 0; -webkit-line-clamp: 1; }
 .toolbar-brand { display: flex; flex: none; align-items: center; gap: 6px; padding-inline-end: 12px; border-inline-end: 1px solid var(--line); }
 .qa-report-view .report-home { border: 0; border-radius: 0; padding: 4px 0; }
-.overview-toggle { display: inline-flex; flex: none; align-items: center; gap: 5px; min-height: 32px; padding: 3px 5px; border-color: transparent; background: transparent; font-size: .8rem; white-space: nowrap; }
-.overview-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.overview-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-.overview-toggle.is-pinned { color: var(--accent); }
 .report-home .brand-mark { width: 56px; height: 34px; background: url("/icons/brand-light.png?v=2") center / 155% auto no-repeat; }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .report-home .brand-mark { background-image: url("/icons/brand-dark.png"); background-size: 122% auto; }
 .qa-report-view .toolbar-filters { flex: none; gap: 8px; }
 .qa-report-view { position: relative; --qa-status-width: 125px; --answer-status-width: 180px; --answer-comment-width: 280px; --report-data-min-width: 190px; }
 .qa-report-view > .reply-comment-toolbar { z-index: 8; inset: auto 16px 20px auto; }
 .answer-comment-slot > .reply-comment-toolbar { position: static; margin-top: 8px; max-width: 100%; box-shadow: none; }
-.qa-report-view .toolbar-select { width: 235px; }
+.qa-report-view .toolbar-select { width: 245px; }
 .qa-report-view .toolbar-select-order { display: flex; align-items: center; gap: 5px; width: 218px; min-height: 36px; padding-inline-start: 10px; border: 1px solid var(--line); border-radius: 7px; }
 .toolbar-caption { flex: none; color: var(--muted); font-size: .84rem; }
 .qa-report-view .toolbar-select-order select { min-width: 0; min-height: 34px; padding: 5px 27px 5px 0; border: 0; background: transparent; font-size: .84rem; }
@@ -578,9 +574,6 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view .report-content { width: 100%; height: 100%; min-width: 0; min-height: 0; scrollbar-gutter: stable; padding: 0; }
 .qa-report-view .report-content::before { display: none; }
 .qa-report-view .report-overview { position: relative; flex: none; max-height: 40%; overflow: auto; margin: 0; }
-.qa-report-view .report-overview .metadata { padding-inline-end: 43px; }
-.qa-report-view .overview-pin { position: absolute; z-index: 1; inset-block-start: 8px; inset-inline-end: 8px; }
-.report-scroll-frame { overflow-anchor: none; }
 .qa-report-view .intro-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px 4px; }
 .qa-report-view .intro-heading h2 { margin: 0; font-size: .78rem; font-weight: 500; color: var(--muted); }
 .qa-report-view .intro-heading button { min-height: 24px; padding: 0 4px; border: 0; background: none; color: var(--accent); font-size: .78rem; }

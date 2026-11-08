@@ -370,9 +370,98 @@
     };
   }
 
+  function statusFilterLabel(selected) {
+    if (!selected?.size) return "Все";
+    return selected.size === 1 ? [...selected][0] : `Выбрано ${selected.size}`;
+  }
+
+  function createOverviewControl({ view, overview, toggle, pin, scrollport, onLayout }) {
+    view.addEventListener("keydown", event => {
+      if (event.key === "Tab" || event.key.startsWith("Arrow")) view.classList.add("keyboard-navigation");
+    }, true);
+    view.addEventListener("pointerdown", () => view.classList.remove("keyboard-navigation"), true);
+    let hasOverview = false;
+    let pinned = false;
+    let lastOverviewScroll = 0;
+    let collapseOverviewAfter = 0;
+    let manuallyCollapsedOverview = false;
+
+    function deferOverviewCollapse() {
+      collapseOverviewAfter = Math.max(scrollport.scrollTop, overview.offsetHeight + 16) + 48;
+    }
+
+    function setOverviewExpanded(expanded, preservePosition = true) {
+      if (!hasOverview) return;
+      const before = scrollport.getBoundingClientRect().top;
+      const scrollTop = scrollport.scrollTop;
+      if (!expanded && overview.contains(document.activeElement)) toggle.focus({ preventScroll: true });
+      overview.hidden = !expanded;
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.title = expanded ? "Свернуть сведения об отчёте" : "Показать сведения об отчёте";
+      if (preservePosition) {
+        // Compensate for the changed viewport so the current checklist point stays in place.
+        scrollport.scrollTop = scrollTop + scrollport.getBoundingClientRect().top - before;
+      }
+      lastOverviewScroll = scrollport.scrollTop;
+      if (expanded) deferOverviewCollapse();
+      onLayout();
+    }
+
+    toggle.addEventListener("click", () => {
+      const expanded = overview.hidden;
+      manuallyCollapsedOverview = !expanded;
+      if (!expanded && pinned) setOverviewPinned(false);
+      setOverviewExpanded(expanded);
+    });
+
+    function setOverviewPinned(next) {
+      pinned = next;
+      pin.setAttribute("aria-pressed", String(pinned));
+      pin.title = pinned ? "Открепить сведения" : "Закрепить сведения";
+      pin.setAttribute("aria-label", pin.title);
+      toggle.classList.toggle("is-pinned", pinned);
+      if (pinned) {
+        manuallyCollapsedOverview = false;
+        setOverviewExpanded(true);
+      } else deferOverviewCollapse();
+    }
+    pin.addEventListener("click", () => setOverviewPinned(!pinned));
+
+    scrollport.addEventListener("scroll", () => {
+      const top = scrollport.scrollTop;
+      if (!hasOverview || pinned) { lastOverviewScroll = top; return; }
+      if (overview.hidden) {
+        if (top > lastOverviewScroll + 1) manuallyCollapsedOverview = false;
+        if (!manuallyCollapsedOverview && top <= 1 && lastOverviewScroll > top) setOverviewExpanded(true);
+      } else if (top > lastOverviewScroll && top > collapseOverviewAfter &&
+        !(view.classList.contains("keyboard-navigation") && overview.contains(document.activeElement))) {
+        // Only collapse after enough travel to preserve the point's on-screen position.
+        setOverviewExpanded(false);
+      }
+      lastOverviewScroll = scrollport.scrollTop;
+    }, { passive: true });
+
+    const sizeObserver = new ResizeObserver(() => {
+      if (hasOverview && !overview.hidden && scrollport.scrollTop <= 1) deferOverviewCollapse();
+      onLayout();
+    });
+    sizeObserver.observe(overview);
+    return {
+      reset(available) {
+        hasOverview = available;
+        manuallyCollapsedOverview = false;
+        lastOverviewScroll = scrollport.scrollTop;
+        toggle.hidden = !available;
+        toggle.setAttribute("aria-expanded", String(available));
+        setOverviewPinned(false);
+        if (available) setOverviewExpanded(true, false);
+      },
+    };
+  }
+
   function createPreview(dialog, openFile, extractCode) {
     const filter = dialog.querySelector(".report-status-filter");
-    const filterValue = filter.querySelector("summary span");
+    const filterValue = filter.querySelector("#previewFilterValue");
     const filterOptions = filter.querySelector("fieldset");
     const filterReset = filter.querySelector("button");
     const order = dialog.querySelector(".report-view-order");
@@ -398,6 +487,9 @@
     let layouts = [];
     let layoutFrame;
     const pins = createColumnPins(dialog, syncLayout);
+    const overviewControl = createOverviewControl({ view: dialog, overview,
+      toggle: dialog.querySelector(".overview-toggle"), pin: overview.querySelector(".overview-pin"),
+      scrollport, onLayout: scheduleLayout });
 
     function syncLayout() {
       if (!dialog.open) return;
@@ -548,8 +640,8 @@
       }
       counts.textContent = `${visible} из ${total}`;
       counts.setAttribute("aria-label", `Показано ${visible} из ${total}`);
-      filterValue.textContent = selectedStatuses === null ? "Все пункты" : selectedStatuses.size === 1
-        ? [...selectedStatuses][0] : `Статусы · ${selectedStatuses.size}`;
+      filterValue.textContent = statusFilterLabel(selectedStatuses);
+      filter.dataset.multiple = String((selectedStatuses?.size || 0) > 1);
       filterValue.title = [...(selectedStatuses || [])].join(", ");
       filterReset.disabled = selectedStatuses === null;
       for (const input of filterOptions.querySelectorAll("input")) input.checked = Boolean(selectedStatuses?.has(input.value));
@@ -568,7 +660,9 @@
       introToggle.setAttribute("aria-expanded", "false");
       introToggle.textContent = "Развернуть";
       introToggle.hidden = true;
-      dialog.querySelector("h1").textContent = report.title;
+      const title = report.title?.trim() || root.QaReportTrackerLinks.parse(report.issueUrl)?.key || "Отчёт о тестировании";
+      dialog.querySelector("h1").textContent = title;
+      dialog.querySelector("h1").title = title;
       const append = (target, html) => readContent(target, html, openImage, openFile, openCode, extractCode);
       renderOverview(overview, report, target => append(target, report.intro));
       groups = report.sections.map(({ title, columns, rows }) => {
@@ -609,10 +703,11 @@
       update();
       dialog.showModal();
       scrollport.scrollTo(0, 0);
+      overviewControl.reset(!overview.hidden);
       syncLayout();
     };
   }
 
   root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, appendStatusOptions, createEmptyState,
-    lineCountLabel, formatReportCode, createCodePreview, createPreview, createColumnPins, arrangeTableColumns };
+    lineCountLabel, formatReportCode, createCodePreview, createPreview, createColumnPins, arrangeTableColumns, createOverviewControl, statusFilterLabel };
 })(window);

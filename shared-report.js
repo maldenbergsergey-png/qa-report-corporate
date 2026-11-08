@@ -69,7 +69,7 @@
   document.addEventListener("pointerdown", () => view.classList.remove("keyboard-navigation"), true);
   const {
     statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection,
-    lineCountLabel, formatReportCode, createCodePreview,
+    lineCountLabel, formatReportCode, createCodePreview, createColumnPins, arrangeTableColumns,
   } = window.QaReportView;
   const saveIndicator = document.getElementById("saveState");
   const saveLabel = saveIndicator.querySelector(".save-state-label");
@@ -263,21 +263,26 @@
   });
   let reportLayoutKey;
   let sectionLayouts = [];
+  const pins = createColumnPins(view, syncReportLayout);
   function syncReportLayout() {
     const viewportWidth = contentViewport.clientWidth;
     if (!viewportWidth || !sections.length) return;
-    const pinColumns = answerView === "side" || matchMedia("(min-width: 761px)").matches;
-    const key = JSON.stringify([viewportWidth, answerView, pinColumns, sections.map(section => section.element.hidden)]);
+    const pinAnswers = answerView === "table" && matchMedia("(min-width: 761px)").matches;
+    const pinColumns = pins.state.qa || pinAnswers;
+    view.dataset.pinAnswers = String(pinAnswers);
+    const key = JSON.stringify([viewportWidth, answerView, pins.state.qa, pinAnswers, [...selectedStatuses].sort(), sections.map(section => section.element.hidden)]);
     if (key !== reportLayoutKey) {
       const styles = getComputedStyle(view);
       const width = name => parseFloat(styles.getPropertyValue(name));
       const pinnedWidths = [width("--qa-status-width"), ...(answerView === "table"
         ? [width("--answer-status-width"), width("--answer-comment-width")] : [])];
-      const indices = [...document.querySelectorAll("#report-sections tbody .point-index")];
+      const indices = [...document.querySelectorAll("#report-sections tbody tr:not([hidden]) .point-index")];
       const longest = indices.reduce((before, cell) => !before || cell.textContent.length > before.textContent.length ? cell : before, null);
       const range = document.createRange();
       if (longest) range.selectNodeContents(longest);
-      const pointWidth = Math.max(42, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+      const pointWidth = Math.max(64, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+      view.style.setProperty("--point-index-width", `${pointWidth}px`);
+      view.style.setProperty("--pinned-answers-width", `${pinAnswers ? pinnedWidths[1] + pinnedWidths[2] : 0}px`);
       const plan = window.QaReportSharedTableLayout.plan({ viewportWidth, pointWidth,
         dataMinWidth: width("--report-data-min-width"), pinnedWidths, pinColumns,
         sections: sections.map(section => ({ columnCount: section.columnCount, hidden: section.element.hidden })),
@@ -289,10 +294,9 @@
       sections.forEach((section, index) => {
         const layout = sectionLayouts[index];
         section.table.style.width = `${layout.width}px`;
-        let columns = section.table.querySelector("colgroup");
-        if (!columns) { columns = element("colgroup"); section.table.prepend(columns); }
-        columns.replaceChildren(...[pointWidth, ...Array(section.columnCount).fill(layout.columnWidth), layout.spacerWidth, ...pinnedWidths]
-          .map(value => { const column = element("col"); column.style.width = `${value}px`; return column; }));
+        arrangeTableColumns(section.table, { pointWidth, columnCount: section.columnCount,
+          columnWidth: layout.columnWidth, spacerWidth: layout.spacerWidth, qaWidth: pinnedWidths[0],
+          answerWidths: pinnedWidths.slice(1), qaPinned: pins.state.qa, pinAnswers });
       });
       reportLayoutKey = key;
     }
@@ -1730,6 +1734,7 @@
         ["Статус исправления", "correction-status"], ["Комментарий к исправлению", "correction-comment"],
       ]);
       const table = node.querySelector("table");
+      pins.attach(table);
       const spacer = element("th", "report-scroll-spacer");
       spacer.setAttribute("aria-hidden", "true");
       table.tHead.rows[0].querySelector(".qa-status").before(spacer);

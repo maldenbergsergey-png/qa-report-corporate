@@ -31,7 +31,18 @@
       hiddenRight: section.pinColumns && section.overflow - scrolled > 1.5 };
   }
 
-  const api = { plan, scrollOffset, scrollState };
+  // Keep the spacer next to the fixed block, including a mobile QA column
+  // after the scrollable answer fields. Widths still account for every column.
+  function columns({ pointWidth, columnCount, columnWidth, spacerWidth, qaWidth, answerWidths, qaPinned, pinAnswers }) {
+    const order = ["point", "data", ...(qaPinned
+      ? answerWidths.length && !pinAnswers ? ["answers", "spacer", "qa"] : ["spacer", "qa", "answers"]
+      : ["qa", "spacer", "answers"])];
+    const widths = { point: [pointWidth], data: Array(columnCount).fill(columnWidth),
+      spacer: [spacerWidth], qa: [qaWidth], answers: answerWidths };
+    return { order, widths: order.flatMap(part => widths[part]) };
+  }
+
+  const api = { plan, scrollOffset, scrollState, columns };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportSharedTableLayout = api;
 })(typeof window === "object" ? window : globalThis);

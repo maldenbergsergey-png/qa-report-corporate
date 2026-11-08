@@ -374,3 +374,26 @@
   .report-preview .toolbar-select-order { width: 135px; }
   .report-preview .toolbar-info { margin-inline-start: auto; }
 }
+
+/* Column pin controls share state across every section of this reading view. */
+.qa-report-view .report-column-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.qa-report-view .report-table thead th.point-index { padding-inline: 6px; }
+.qa-report-view .column-pin { display: inline-grid; flex: 0 0 24px; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.qa-report-view .column-pin:hover { background: color-mix(in srgb, var(--reading-text) 8%, transparent); }
+.qa-report-view .column-pin[aria-pressed="true"] { color: var(--reading-accent); }
+.qa-report-view .column-pin:focus-visible { outline: 2px solid var(--reading-accent); outline-offset: 1px; }
+.qa-report-view .column-pin svg { width: 16px; height: 16px; transform: rotate(45deg); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.qa-report-view .report-table { transform: translateX(var(--table-shift, 0px)); }
+.qa-report-view[data-pin-qa="false"] .report-table :is(th, td).qa-status { position: relative; inset-inline: auto; transform: translateX(var(--data-shift, 0px)); box-shadow: none; }
+.qa-report-view[data-pin-qa="true"] .report-table :is(th, td).qa-status { position: sticky; inset-inline-start: auto; inset-inline-end: var(--pinned-answers-width, 0px); transform: none; }
+.qa-report-view[data-pin-answers="false"] .report-table :is(th, td):is(.correction-status, .correction-comment) { position: relative; inset-inline: auto; transform: translateX(var(--data-shift, 0px)); }
+.qa-report-view[data-pin-point="true"] .report-table :is(th, td).point-index { position: sticky; inset-inline-start: calc(0px - var(--table-shift, 0px)); z-index: 2; transform: none; background: var(--surface); }
+.qa-report-view[data-pin-point="true"] .report-table thead th.point-index { background: var(--reading-subtle); }
+.qa-report-view[data-pin-point="true"] .table-frame::after { inset-inline-start: calc(var(--report-scroll-left, 0px) + var(--point-index-width, 64px)); }
+.qa-report-view[data-pin-qa="false"][data-pin-answers="true"] .has-pinned-overlap :is(th, td).correction-status { box-shadow: -12px 0 16px -9px #091e6659; }
+:root:is([data-theme="dark"], [data-theme="graphite"]) .qa-report-view[data-pin-qa="false"][data-pin-answers="true"] .has-pinned-overlap :is(th, td).correction-status { box-shadow: -12px 0 16px -9px #000c; }
+/* Keep pinned cells opaque without removing the selected-row marker. */
+.qa-report-view[data-answer-view="side"][data-pin-point="true"] tr.answer-selected > .point-index { background: color-mix(in srgb, var(--reading-accent) 6%, var(--surface)); }
+
+.qa-report-view[data-pin-qa="true"] .report-table.has-pinned-overlap :is(th, td).qa-status { box-shadow: -12px 0 16px -9px #091e6659; }
+:root:is([data-theme="dark"], [data-theme="graphite"]) .qa-report-view[data-pin-qa="true"] .report-table.has-pinned-overlap :is(th, td).qa-status { box-shadow: -12px 0 16px -9px #000c; }

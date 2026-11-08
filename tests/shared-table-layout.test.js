@@ -75,3 +75,39 @@ test('shadows describe hidden columns of each section, including scroll boundari
   assert.equal(scrollState(wide, 0.5).hiddenLeft, false);
   assert.equal(scrollState(wide, wide.overflow - 0.5).hiddenRight, false);
 });
+
+test('independent QA pinning keeps every column width and places the spacer at the fixed boundary', () => {
+  const { columns } = require('../shared-table-layout');
+  for (const viewportWidth of [366, 1200, 1920]) {
+    for (const qaPinned of [false, true]) for (const pinAnswers of [false, true]) {
+      const answerWidths = [180, 280];
+      const result = layout({ viewportWidth, pointWidth: 64, pinColumns: qaPinned || pinAnswers });
+      for (const section of result.sections) {
+        const cols = columns({ pointWidth: 64, columnCount: section.columnCount,
+          columnWidth: section.columnWidth, spacerWidth: section.spacerWidth,
+          qaWidth: 125, answerWidths, qaPinned, pinAnswers });
+        assert.ok(Math.abs(cols.widths.reduce((sum, width) => sum + width, 0) - section.width) < .001);
+        assert.equal(cols.widths.length, section.columnCount + 5);
+        if (qaPinned) {
+          assert.equal(cols.order.indexOf('qa'), cols.order.indexOf('spacer') + 1);
+          if (!pinAnswers) assert.equal(cols.order.at(-1), 'qa');
+          else assert.ok(cols.order.indexOf('answers') > cols.order.indexOf('qa'));
+        } else assert.ok(cols.order.indexOf('qa') < cols.order.indexOf('spacer'));
+      }
+    }
+  }
+});
+
+test('preview without a fixed QA column clamps each section and removes only fixed-column shadows', () => {
+  const { columns } = require('../shared-table-layout');
+  const result = layout({ pointWidth: 64, pinnedWidths: [125], pinColumns: false });
+  const scroll = result.canvasWidth - 1200;
+  for (const section of result.sections) {
+    const cols = columns({ pointWidth: 64, columnCount: section.columnCount,
+      columnWidth: section.columnWidth, spacerWidth: section.spacerWidth,
+      qaWidth: 125, answerWidths: [], qaPinned: false, pinAnswers: false });
+    assert.equal(cols.order.indexOf('qa') + 1, cols.order.indexOf('spacer'));
+    assert.ok(Math.abs(section.width - scroll + scrollOffset(section, scroll) - 1200) < .001);
+    assert.equal(scrollState(section, scroll).hiddenRight, false);
+  }
+});

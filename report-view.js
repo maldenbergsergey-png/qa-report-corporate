@@ -97,6 +97,79 @@
     return { section, body };
   }
 
+  function createColumnPins(view, changed) {
+    const state = { qa: true, point: false };
+    function render(scope = view) {
+      view.dataset.pinQa = String(state.qa);
+      view.dataset.pinPoint = String(state.point);
+      for (const button of scope.querySelectorAll("[data-pin-column]")) {
+        const pinned = state[button.dataset.pinColumn];
+        const name = button.dataset.pinColumn === "qa" ? "Статус" : "№";
+        button.setAttribute("aria-pressed", String(pinned));
+        button.title = `${pinned ? "Открепить" : "Закрепить"} столбец «${name}»`;
+        button.setAttribute("aria-label", button.title);
+      }
+    }
+    view.addEventListener("click", event => {
+      const button = event.target.closest("button[data-pin-column]");
+      if (!button || !view.contains(button)) return;
+      event.stopPropagation();
+      state[button.dataset.pinColumn] = !state[button.dataset.pinColumn];
+      render();
+      changed();
+      button.focus({ preventScroll: true });
+    });
+    function attach(table) {
+      for (const [key, selector] of [["point", ".point-index"], ["qa", ".qa-status"]]) {
+        const header = table.tHead.querySelector(selector);
+        const heading = element("span", "report-column-heading");
+        heading.append(element("span", "", header.textContent));
+        const button = element("button", "column-pin");
+        button.type = "button";
+        button.dataset.pinColumn = key;
+        // Lucide pin, ISC license in LICENSE-icons.txt.
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true");
+        for (const d of ["M12 17v5", "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"]) {
+          const path = document.createElementNS(svg.namespaceURI, "path");
+          path.setAttribute("d", d);
+          svg.append(path);
+        }
+        button.append(svg);
+        heading.append(button);
+        header.replaceChildren(heading);
+      }
+      render(table);
+    }
+    render();
+    return { state, attach, reset() { state.qa = true; state.point = false; render(); } };
+  }
+
+  function arrangeTableColumns(table, settings) {
+    const columns = root.QaReportSharedTableLayout.columns(settings);
+    const lastQa = columns.order.at(-1) === "qa";
+    for (const row of [table.tHead.rows[0], ...table.tBodies[0].rows]) {
+      const qa = row.querySelector(".qa-status");
+      const spacer = row.querySelector(".report-scroll-spacer");
+      const answer = row.querySelector(".correction-status");
+      if (lastQa) {
+        if (row.lastElementChild !== qa || qa.previousElementSibling !== spacer) row.append(spacer, qa);
+      } else if (settings.qaPinned) {
+        if (qa.nextElementSibling !== answer) row.insertBefore(qa, answer);
+        if (spacer.nextElementSibling !== qa) row.insertBefore(spacer, qa);
+      } else {
+        if (spacer.nextElementSibling !== answer) row.insertBefore(spacer, answer);
+        if (qa.nextElementSibling !== spacer) row.insertBefore(qa, spacer);
+      }
+    }
+    let group = table.querySelector("colgroup");
+    if (!group) { group = element("colgroup"); table.prepend(group); }
+    group.replaceChildren(...columns.widths.map(width => {
+      const column = element("col"); column.style.width = `${width}px`; return column;
+    }));
+  }
+
   const linePlural = new Intl.PluralRules("ru-RU");
   function lineCountLabel(count) {
     const unit = { one: "строка", few: "строки", many: "строк" }[linePlural.select(count)];
@@ -324,24 +397,27 @@
     let layoutKey;
     let layouts = [];
     let layoutFrame;
+    const pins = createColumnPins(dialog, syncLayout);
 
     function syncLayout() {
       if (!dialog.open) return;
       if (!intro.hidden) introToggle.hidden = introContent.scrollHeight <= parseFloat(getComputedStyle(introContent).lineHeight) * 6 + 1;
       const viewportWidth = scrollport.clientWidth;
       if (!viewportWidth || !groups.length) return;
-      const key = JSON.stringify([viewportWidth, groups.map(group => group.section.hidden)]);
+      const pinColumns = pins.state.qa;
+      const key = JSON.stringify([viewportWidth, pinColumns, [...(selectedStatuses || [])].sort(), groups.map(group => group.section.hidden)]);
       if (key !== layoutKey) {
         const styles = getComputedStyle(dialog);
         const width = name => parseFloat(styles.getPropertyValue(name));
-        const indices = [...sections.querySelectorAll("tbody .point-index")];
+        const indices = [...sections.querySelectorAll("tbody tr:not([hidden]) .point-index")];
         const longest = indices.reduce((before, cell) => !before || cell.textContent.length > before.textContent.length ? cell : before, null);
         const range = document.createRange();
         if (longest) range.selectNodeContents(longest);
-        const pointWidth = Math.max(42, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+        const pointWidth = Math.max(64, longest ? Math.ceil(range.getBoundingClientRect().width) + 20 : 0);
+        dialog.style.setProperty("--point-index-width", `${pointWidth}px`);
         const pinnedWidths = [width("--qa-status-width")];
         const plan = root.QaReportSharedTableLayout.plan({ viewportWidth, pointWidth,
-          dataMinWidth: width("--report-data-min-width"), pinnedWidths, pinColumns: true,
+          dataMinWidth: width("--report-data-min-width"), pinnedWidths, pinColumns,
           sections: groups.map(group => ({ columnCount: group.columnCount, hidden: group.section.hidden })),
         });
         sections.style.width = `${plan.canvasWidth}px`;
@@ -350,10 +426,9 @@
         groups.forEach((group, index) => {
           const layout = layouts[index];
           group.table.style.width = `${layout.width}px`;
-          let columns = group.table.querySelector("colgroup");
-          if (!columns) { columns = element("colgroup"); group.table.prepend(columns); }
-          columns.replaceChildren(...[pointWidth, ...Array(group.columnCount).fill(layout.columnWidth), layout.spacerWidth, ...pinnedWidths]
-            .map(value => { const col = element("col"); col.style.width = `${value}px`; return col; }));
+          arrangeTableColumns(group.table, { pointWidth, columnCount: group.columnCount,
+            columnWidth: layout.columnWidth, spacerWidth: layout.spacerWidth, qaWidth: pinnedWidths[0],
+            answerWidths: [], qaPinned: pinColumns, pinAnswers: false });
         });
         layoutKey = key;
       }
@@ -361,7 +436,8 @@
       sections.style.setProperty("--report-scroll-left", `${scrollLeft}px`);
       groups.forEach((group, index) => {
         const state = root.QaReportSharedTableLayout.scrollState(layouts[index], scrollLeft);
-        group.section.style.setProperty("--data-shift", `${state.offset}px`);
+        group.section.style.setProperty("--data-shift", `${pinColumns ? state.offset : 0}px`);
+        group.section.style.setProperty("--table-shift", `${pinColumns ? 0 : state.offset}px`);
         group.table.parentElement.classList.toggle("has-hidden-left", state.hiddenLeft);
         group.table.classList.toggle("has-pinned-overlap", state.hiddenRight);
       });
@@ -486,6 +562,7 @@
 
     return function open(report, selectedStatuses) {
       if (dialog.open) return;
+      pins.reset();
       order.value = "original";
       intro.dataset.expanded = "false";
       introToggle.setAttribute("aria-expanded", "false");
@@ -497,6 +574,7 @@
       groups = report.sections.map(({ title, columns, rows }) => {
         const group = createSection(title, columns.map(column => column.title || "Без названия"));
         const table = group.section.querySelector("table");
+        pins.attach(table);
         const spacer = element("th", "report-scroll-spacer");
         spacer.setAttribute("aria-hidden", "true");
         table.tHead.rows[0].querySelector(".qa-status").before(spacer);
@@ -536,5 +614,5 @@
   }
 
   root.QaReportView = { statuses, statusKey, statusMeta, statusTag, externalLink, renderOverview, createSection, appendStatusOptions, createEmptyState,
-    lineCountLabel, formatReportCode, createCodePreview, createPreview };
+    lineCountLabel, formatReportCode, createCodePreview, createPreview, createColumnPins, arrangeTableColumns };
 })(window);

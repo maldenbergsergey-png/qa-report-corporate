@@ -6490,3 +6490,21 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
   .share-report-link-actions > .button,
   .share-report-footer > .button { flex: 1 0 100%; justify-content: center; }
 }
+
+/* Per-report column controls remain available in normal and focus modes. */
+.section-header-table .number-header { padding: 4px; }
+.number-header-controls { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
+.numbering-mode-picker { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 1px; min-height: 28px; margin: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.numbering-mode-picker > .ui-icon { width: 8px; height: 8px; }
+.numbering-mode-picker:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.editor-column-pin { display: inline-grid; flex: 0 0 24px; place-items: center; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.editor-column-pin:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.editor-column-pin[aria-pressed="true"] { color: var(--primary); }
+.editor-column-pin:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.editor-column-pin > .ui-icon { width: 16px; height: 16px; transform: rotate(45deg); }
+.section-header-table .status-header { padding: 4px 60px 4px 9px !important; }
+.status-header > .editor-column-pin { position: absolute; top: 50%; right: 34px; transform: translateY(-50%); }
+.numbering-menu { min-width: 170px; padding: 4px; }
+.numbering-menu button { min-height: 30px; gap: 8px; padding: 5px 8px; font-size: 12px; font-weight: 500; }
+.numbering-menu button .ui-icon { width: 14px; height: 14px; flex-basis: 14px; }
+.numbering-menu button[aria-checked="false"] .ui-icon { visibility: hidden; }

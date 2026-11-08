@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=153" />
+    <link rel="stylesheet" href="/styles.css?v=154" />
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -78,6 +78,7 @@
       <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" /></symbol>
       <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></symbol>
       <symbol id="icon-drag" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="6" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="9" cy="12" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="12" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="9" cy="18" r="1.4" style="fill:currentColor;stroke:none" /><circle cx="15" cy="18" r="1.4" style="fill:currentColor;stroke:none" /></symbol>
+      <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></symbol>
       <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></symbol>
       <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="M15 6 9 12l6 6" /><path d="M20 12H9" /></symbol>
       <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /><path d="M4 12h11" /></symbol>
@@ -352,7 +353,7 @@
             <button type="button" id="imageButton" class="toolbar-icon-button" title="Добавить вложение" aria-label="Добавить вложение">
               <svg class="ui-icon" aria-hidden="true"><use href="#icon-paperclip"></use></svg>
             </button>
-            <input id="imageInput" type="file" multiple hidden aria-describedby="attachmentLimitsHint" />
+            <input id="imageInput" type="file" multiple hidden />
             <div class="dictation-tools">
               <div class="dictation-caption"><span id="dictationStatus" role="status" aria-live="polite" hidden></span></div>
               <button type="button" id="dictationButton" class="toolbar-icon-button dictation-button" title="Надиктовать текст" aria-label="Надиктовать текст" aria-pressed="false" aria-describedby="dictationStatus">
@@ -1146,7 +1147,7 @@
           </div></section>
 
             <section class="settings-section active" id="settingsChecklistSection" data-settings-panel="checklist">
-              <header class="settings-page-header"><h3>Нумерация</h3><p>Настройте нумерацию разделов и пунктов.</p></header>
+              <header class="settings-page-header"><h3>Нумерация</h3><p>Настройте нумерацию разделов и значения для новых чек-листов.</p></header>
               <fieldset class="numbering-settings section-numbering-settings">
                 <legend>Нумерация разделов</legend>
                 <p class="settings-note">Настройка сохраняется в текущем чек-листе и не зависит от нумерации пунктов.</p>
@@ -1161,7 +1162,7 @@
               </fieldset>
               <fieldset class="numbering-settings">
                 <legend>Нумерация пунктов</legend>
-                <p class="settings-note">Настройка применяется к текущему чек-листу и сохраняется вместе с ним. В автоматических режимах номера обновляются при изменении порядка разделов и строк.</p>
+                <p class="settings-note">Для новых чек-листов. В текущем отчёте меняйте нумерацию через стрелку рядом с «№» в заголовке любой таблицы.</p>
                 <label class="settings-toggle-card numbering-option">
                   <input type="radio" name="numberingMode" value="section" />
                   <span><strong>В каждом разделе с 1</strong><small>Каждый раздел начинается заново.</small><span class="numbering-example">Раздел 1: 1, 2, 3 · Раздел 2: 1, 2, 3</span></span>
@@ -1176,7 +1177,7 @@
                 </label>
                 <label class="settings-toggle-card numbering-option">
                   <input type="radio" name="numberingMode" value="manual" />
-                  <span><strong>Вручную — для ретеста</strong><small>Текущие номера сохранятся. Редактируйте их прямо в таблице: удаление и перенос строк не изменят остальные номера. Для новых строк задайте номер вручную.</small><span class="numbering-example">После удаления пункта 4: 1, 2, 3, 5</span></span>
+                  <span><strong>Вручную — для ретеста</strong><small>Номера вводятся прямо в таблице. Удаление и перенос строк не меняют остальные номера; новые строки получают пустой номер.</small><span class="numbering-example">После удаления пункта 4: 1, 2, 3, 5</span></span>
                 </label>
               </fieldset>
             </section>
@@ -1209,7 +1210,7 @@
               <div class="settings-note default-columns-save-note">Нажмите «Сохранить», чтобы использовать этот набор для новых чек-листов и разделов в текущем браузере.</div>
               <fieldset class="numbering-settings" id="settingsPinningSection">
                 <legend>Закрепление столбцов</legend>
-                <p class="settings-note">Для всех чек-листов в этом браузере, включая новые. Закреплённые столбцы остаются видимыми при горизонтальной прокрутке.</p>
+                <p class="settings-note">Для новых чек-листов. В текущем отчёте используйте булавки в заголовках «№» и «Статус».</p>
                 <label class="settings-toggle-card pinning-option">
                   <input id="pinNumberColumn" type="checkbox" />
                   <span><strong>Закрепить номер слева</strong><small>Номер пункта всегда остаётся у левого края таблицы.</small></span>
@@ -1372,9 +1373,9 @@
 
     <script src="/jira-markup-import.js?v=14"></script>
     <script src="/checklist-selection.js?v=6"></script>
-    <script src="/checklist-table.js?v=3"></script>
+    <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=123"></script>
+    <script src="/release-notes.js?v=124"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1382,7 +1383,7 @@
     <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=6"></script>
+    <script src="/report-file.js?v=7"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
@@ -1474,7 +1475,7 @@
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
     <script src="/report-view.js?v=10"></script>
-    <script src="/app.js?v=168"></script>
+    <script src="/app.js?v=169"></script>
     <script src="/local-import-client.js?v=8"></script>
   </body>
 </html>

@@ -75,9 +75,12 @@
     if (!value || value.schemaVersion !== 3 || !Array.isArray(value.sections) || !value.sections.length || value.sections.length > 1000) bad();
     if ((value.overallStatus !== "" && !statuses.has(value.overallStatus)) || !["section", "continuous", "hierarchical", "manual"].includes(value.numberingMode)) bad();
     if (value.sectionNumberingMode !== undefined && !["automatic", "manual"].includes(value.sectionNumberingMode)) bad();
+    if (value.pinnedColumns !== undefined && (!value.pinnedColumns || Array.isArray(value.pinnedColumns)
+      || typeof value.pinnedColumns.number !== "boolean" || typeof value.pinnedColumns.status !== "boolean")) bad();
     let rows = 0;
     const result = { schemaVersion: 3, issueUrl: string(value.issueUrl), environment: string(value.environment), overallStatus: value.overallStatus,
       intro: string(value.intro), numberingMode: value.numberingMode,
+      ...(value.pinnedColumns !== undefined ? { pinnedColumns: { number: value.pinnedColumns.number, status: value.pinnedColumns.status } } : {}),
       ...(value.sectionNumberingMode !== undefined ? { sectionNumberingMode: value.sectionNumberingMode } : {}), sections: value.sections.map(section => {
         if (!section || !Array.isArray(section.columns) || !section.columns.length || section.columns.length > 100 || !Array.isArray(section.rows) || !section.rows.length || (rows += section.rows.length) > 20000) bad();
         const columns = section.columns.map(column => {

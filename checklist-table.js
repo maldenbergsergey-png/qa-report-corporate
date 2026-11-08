@@ -10,7 +10,11 @@
     return !sections.some(section => section.statusSort &&
       (section.id === targetId || section.rows.some(row => ids.has(row.id))));
   }
-  const api = { visibleRows, canMove, statuses };
+  function normalizePinning(value, defaults = {}) {
+    return Object.fromEntries(["number", "status"].map(key => [key,
+      typeof value?.[key] === "boolean" ? value[key] : defaults?.[key] === true]));
+  }
+  const api = { visibleRows, canMove, statuses, normalizePinning };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QaReportTable = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

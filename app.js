@@ -5,6 +5,7 @@ const DRAFT_SYNC_CHANNEL = "qa-report-draft-sync-v1";
 const HISTORY_PROJECT_NAMES_KEY = "qa-report-project-names-v1";
 const HISTORY_PROJECT_COLORS_KEY = "qa-report-project-colors-v1";
 const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
+const DEFAULT_NUMBERING_KEY = "qa-report-default-numbering-v1";
 const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
@@ -222,7 +223,8 @@ const DEFAULT_DRAFT = {
   environment: "",
   overallStatus: "",
   intro: "",
-  numberingMode: "hierarchical",
+  numberingMode: loadDefaultNumberingMode(),
+  pinnedColumns: loadPinnedColumns(),
   sectionNumberingMode: "automatic",
   sections: [createSection("Основные проверки", loadDefaultColumns(), 2)],
 };
@@ -418,7 +420,7 @@ let editingCodeBlock = null;
 let codeEditorInitialValue = "";
 let codeEditorTextViews = null;
 let stickyUpdateFrame = 0;
-let pinnedColumns = loadPinnedColumns();
+let pinnedColumns = draft.pinnedColumns;
 let selectionMode = false;
 let reportStatusFilter = null;
 let selectedRowIds = new Set();
@@ -583,6 +585,7 @@ function normalizeDraft(value) {
     environment: String(parsed.environment || "").trim().replace(/^Не указано$/i, ""),
     overallStatus: parsed.overallStatus || "",
     numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
+    pinnedColumns: window.QaReportTable.normalizePinning(parsed.pinnedColumns, loadPinnedColumns()),
     sectionNumberingMode: ChecklistNumbering.normalizeSectionMode(parsed.sectionNumberingMode),
     sections,
   };
@@ -3002,13 +3005,11 @@ function renderTable(fragment, section, rowNumbers) {
     cell.append(checkbox);
     header.append(cell);
   }
-  bodyColgroup.append(createColumnElement("number-col", ChecklistNumbering.columnWidth(draft)));
-  headerColgroup.append(createColumnElement("number-col", ChecklistNumbering.columnWidth(draft)));
-  const numberHeader = createHeader("№");
-  numberHeader.className = "number-header";
-  header.append(numberHeader);
+  bodyColgroup.append(createColumnElement("number-col", Math.max(56, ChecklistNumbering.columnWidth(draft))));
+  headerColgroup.append(createColumnElement("number-col", Math.max(56, ChecklistNumbering.columnWidth(draft))));
+  header.append(createNumberHeader(section));
 
-  let totalWidth = ChecklistNumbering.columnWidth(draft) + 164 + 40 + (selectionMode ? 44 : 0);
+  let totalWidth = Math.max(56, ChecklistNumbering.columnWidth(draft)) + 164 + 40 + (selectionMode ? 44 : 0);
   section.columns.forEach((column, index) => {
     column.width = Math.max(140, Number(column.width) || 240);
     bodyColgroup.append(createColumnElement("dynamic-col", column.width));
@@ -3084,7 +3085,7 @@ function createColumnElement(className, width = null) {
 }
 
 function getSectionTableWidth(section) {
-  return ChecklistNumbering.columnWidth(draft) + 164 + 40 + (selectionMode ? 44 : 0) + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
+  return Math.max(56, ChecklistNumbering.columnWidth(draft)) + 164 + 40 + (selectionMode ? 44 : 0) + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
 }
 
 function getStickyOffset() {
@@ -3317,6 +3318,85 @@ function updateSectionColumnLayout(sectionElement, columnIndex, columnWidth, tab
   });
 }
 
+function createEditorColumnPin(column) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "editor-column-pin";
+  button.dataset.pinColumn = column;
+  button.append(createUiIcon("pin"));
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    flushDraftFromDom();
+    draft.pinnedColumns = { ...pinnedColumns, [column]: !pinnedColumns[column] };
+    applyPinnedColumns();
+    saveLocalMutationNow();
+  });
+  return button;
+}
+
+function createNumberHeader(section) {
+  const header = createHeader("");
+  header.className = "number-header";
+  const controls = document.createElement("div");
+  controls.className = "number-header-controls";
+  const picker = document.createElement("button");
+  picker.type = "button";
+  picker.className = "numbering-mode-picker";
+  picker.setAttribute("aria-label", "Нумерация пунктов");
+  picker.setAttribute("aria-haspopup", "menu");
+  picker.setAttribute("aria-expanded", "false");
+  const options = [["section", "С начала раздела"], ["continuous", "Сквозная"],
+    ["hierarchical", "Раздел.пункт"], ["manual", "Вручную"]];
+  const mode = ChecklistNumbering.normalizeMode(draft.numberingMode);
+  picker.dataset.numberingMode = mode;
+  picker.title = `Нумерация пунктов: ${options.find(([value]) => value === mode)[1]}`;
+  const label = document.createElement("span");
+  label.textContent = "№";
+  picker.append(label, createUiIcon("chevron-down"));
+  picker.addEventListener("click", event => {
+    event.stopPropagation();
+    if (picker.getAttribute("aria-expanded") === "true") { closeFloatingMenu(); return; }
+    showFloatingMenu(picker, options.map(([value, text]) => ({ label: text, icon: "check", action() {
+      if (value !== draft.numberingMode) {
+        flushDraftFromDom();
+        ChecklistNumbering.setMode(draft, value);
+        renderSections();
+        saveLocalMutationNow();
+      }
+      elements.sections.querySelector(`[data-section-id="${CSS.escape(section.id)}"] .numbering-mode-picker`)?.focus({ preventScroll: true });
+    } })));
+    const menu = floatingMenu;
+    menu.classList.add("numbering-menu");
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Нумерация пунктов");
+    menu.numberingTrigger = picker;
+    picker.setAttribute("aria-expanded", "true");
+    const buttons = [...menu.querySelectorAll("button")];
+    buttons.forEach((button, index) => {
+      button.setAttribute("role", "menuitemradio");
+      button.setAttribute("aria-checked", String(options[index][0] === mode));
+    });
+    menu.addEventListener("keydown", keyEvent => {
+      const index = buttons.indexOf(document.activeElement);
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(keyEvent.key)) {
+        keyEvent.preventDefault(); keyEvent.stopPropagation();
+        const next = keyEvent.key === "Home" ? 0 : keyEvent.key === "End" ? buttons.length - 1
+          : (index + (keyEvent.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next].focus();
+      } else if (keyEvent.key === "Escape") {
+        keyEvent.preventDefault(); keyEvent.stopPropagation(); closeFloatingMenu(); picker.focus({ preventScroll: true });
+      }
+    });
+    menu.addEventListener("focusout", () => requestAnimationFrame(() => {
+      if (floatingMenu === menu && !menu.contains(document.activeElement)) closeFloatingMenu();
+    }));
+    buttons[options.findIndex(([value]) => value === mode)].focus({ preventScroll: true });
+  });
+  controls.append(picker, createEditorColumnPin("number"));
+  header.append(controls);
+  return header;
+}
+
 function createStatusHeader(section) {
   const th = document.createElement("th");
   th.className = "status-header";
@@ -3345,7 +3425,7 @@ function createStatusHeader(section) {
     ]);
   });
   th.addEventListener("contextmenu", event => { event.preventDefault(); menuButton.click(); });
-  th.append(label, menuButton);
+  th.append(createEditorColumnPin("status"), label, menuButton);
   return th;
 }
 
@@ -3880,6 +3960,7 @@ function createUiIcon(name) {
 }
 
 function closeFloatingMenu() {
+  floatingMenu?.numberingTrigger?.setAttribute("aria-expanded", "false");
   floatingMenu?.remove();
   floatingMenu = null;
 }
@@ -4599,8 +4680,9 @@ function loadPinnedColumns() {
 }
 
 function fillPinnedColumnsForm() {
-  document.getElementById("pinNumberColumn").checked = pinnedColumns.number;
-  document.getElementById("pinStatusColumn").checked = pinnedColumns.status;
+  const defaults = loadPinnedColumns();
+  document.getElementById("pinNumberColumn").checked = defaults.number;
+  document.getElementById("pinStatusColumn").checked = defaults.status;
 }
 
 function savePinnedColumns() {
@@ -4609,11 +4691,19 @@ function savePinnedColumns() {
     status: document.getElementById("pinStatusColumn").checked,
   };
   localStorage.setItem(PINNED_COLUMNS_KEY, JSON.stringify(next));
-  pinnedColumns = next;
-  applyPinnedColumns();
+  DEFAULT_DRAFT.pinnedColumns = next;
 }
 
 function applyPinnedColumns() {
+  pinnedColumns = window.QaReportTable.normalizePinning(draft.pinnedColumns, loadPinnedColumns());
+  elements.sections.querySelectorAll(".editor-column-pin").forEach(button => {
+    const column = button.dataset.pinColumn;
+    const pinned = pinnedColumns[column];
+    const name = column === "number" ? "№" : "Статус";
+    button.setAttribute("aria-pressed", String(pinned));
+    button.title = `${pinned ? "Открепить" : "Закрепить"} столбец «${name}»`;
+    button.setAttribute("aria-label", button.title);
+  });
   document.body.classList.toggle("pin-number-columns", pinnedColumns.number);
   document.body.classList.toggle("pin-status-columns", pinnedColumns.status);
   scheduleStickySectionUpdate();
@@ -4635,11 +4725,18 @@ function updatePinnedColumnOffsets() {
   });
 }
 
+function loadDefaultNumberingMode() {
+  try {
+    const mode = localStorage.getItem(DEFAULT_NUMBERING_KEY);
+    return ["section", "continuous", "hierarchical", "manual"].includes(mode) ? mode : "hierarchical";
+  } catch { return "hierarchical"; }
+}
+
 function fillChecklistSettingsForm() {
   defaultColumnsDraft = loadDefaultColumns();
   renderDefaultColumnsSettings();
   elements.jiraSettingsModal.querySelectorAll('[name="numberingMode"]').forEach((input) => {
-    input.checked = input.value === ChecklistNumbering.normalizeMode(draft.numberingMode);
+    input.checked = input.value === loadDefaultNumberingMode();
   });
   elements.jiraSettingsModal.querySelectorAll('[name="sectionNumberingMode"]').forEach((input) => {
     input.checked = input.value === ChecklistNumbering.normalizeSectionMode(draft.sectionNumberingMode);
@@ -4649,10 +4746,10 @@ function fillChecklistSettingsForm() {
 function saveChecklistSettings() {
   const mode = ChecklistNumbering.normalizeMode(elements.jiraSettingsModal.querySelector('[name="numberingMode"]:checked')?.value);
   const sectionMode = ChecklistNumbering.normalizeSectionMode(elements.jiraSettingsModal.querySelector('[name="sectionNumberingMode"]:checked')?.value);
-  if (draft.numberingMode === mode && draft.sectionNumberingMode === sectionMode) return;
+  localStorage.setItem(DEFAULT_NUMBERING_KEY, mode);
+  DEFAULT_DRAFT.numberingMode = mode;
+  if (draft.sectionNumberingMode === sectionMode) return;
   flushDraftFromDom();
-  // Freeze row labels before changing section numbering, so the two settings stay independent.
-  ChecklistNumbering.setMode(draft, mode);
   ChecklistNumbering.setSectionMode(draft, sectionMode);
   renderSections();
   saveLocalMutationNow();
@@ -6853,11 +6950,11 @@ function closeFeedback() {
 
 let attachmentLimits = { ...window.QaReportAttachmentLimits.defaults };
 
-function showAttachmentLimits(limits) {
+function showAttachmentLimits() {
   const hint = document.getElementById("attachmentLimitsHint");
-  hint.textContent = window.QaReportAttachmentLimits.describe(limits);
-  hint.hidden = false;
-  elements.imageButton.title = `Добавить вложение. ${hint.textContent}`;
+  hint.textContent = "";
+  hint.hidden = true;
+  elements.imageButton.title = "Добавить вложение";
 }
 
 // Local insertion uses an advisory cache; publication still fetches fresh limits.
@@ -11090,9 +11187,9 @@ draftSyncChannel?.addEventListener("message", (event) => {
   handleDraftSyncMessage(event.data).catch(() => {});
 });
 window.addEventListener("storage", (event) => {
+  if (event.key === DEFAULT_NUMBERING_KEY || event.key === null) DEFAULT_DRAFT.numberingMode = loadDefaultNumberingMode();
   if (event.key === PINNED_COLUMNS_KEY || event.key === null) {
-    pinnedColumns = loadPinnedColumns();
-    applyPinnedColumns();
+    DEFAULT_DRAFT.pinnedColumns = loadPinnedColumns();
     // Keep an open settings form in sync with the shared browser preference.
     fillPinnedColumnsForm();
   }

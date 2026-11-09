@@ -31,12 +31,13 @@ for (const file of ["app.js", "server.js"]) {
 
 function element() {
   return {
-    children: [], value: "", textContent: "", classList: { toggle() {} },
+    children: [], value: "", textContent: "", dataset: {}, classList: { toggle() {}, contains() { return false; } },
     set innerHTML(value) { this.html = value; this.children = []; },
     get innerHTML() { return this.html || ""; },
     append(...items) { this.children.push(...items); },
     setAttribute(name, value) { (this.attributes ||= {})[name] = value; },
-    addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; },
+    getAttribute(name) { return this.attributes?.[name]; },
+    addEventListener() {}, querySelector() { return element(); }, querySelectorAll() { return []; },
   };
 }
 
@@ -58,6 +59,8 @@ function harness(records = new Map(), preferences = new Map()) {
       introEditor: element(), sections: element(), historySearch: element(), historyProjectFilter: element(), historySort: element(), historyList: element(), historyUsage: element(),
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
+    personalCloud: { historyStatus: () => ({ state: "unknown", label: "Проверить облачную копию" }), refreshHistory: async () => {} },
+    updateHistoryStorage() {}, createHistoryPublications: () => element(),
     publicationInfoMarkup: () => "", clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
     getReportRecord: async id => structuredClone(records.get(id)),
     dbTransaction: async (mode, action) => action({ put: record => records.set(record.id, structuredClone(record)) }),
@@ -66,7 +69,7 @@ function harness(records = new Map(), preferences = new Map()) {
     getServerReports: async () => [], reportPublicId: report => report.publicId,
   });
   for (const name of ["copyDraftValue", "issueKeyFromUrl", "collectDocumentFields", "collectSectionsFromDom", "flushDraftFromDom",
-    "historyTimestamp", "sortHistoryReports", "historyDatesMarkup", "updateLocalReportComment", "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "createHistoryMoreMenu", "closeHistoryActionMenus", "historyPublication", "publicationInfoMarkup", "escapeHtml"]) {
+    "historyTimestamp", "sortHistoryReports", "historyDate", "historyDatesMarkup", "updateLocalReportComment", "getReportMetadata", "saveReportSnapshot", "reportIssueLabel", "getAllHistoryReports", "updateHistorySelectionUi", "setHistoryLoading", "openHistory", "closeHistory", "flushVisibleHistoryComments", "reportProjectKey", "loadProjectNames", "normalizeProjectColor", "loadProjectColors", "historyProjectKeys", "renderHistoryProjectFilter", "renderHistoryList", "createSmallButton", "createHistoryMoreMenu", "closeHistoryActionMenus", "historyPublication", "publicationInfoMarkup", "escapeHtml"]) {
     vm.runInContext(functionSource("app.js", name), ctx);
   }
   return ctx;
@@ -365,15 +368,15 @@ test("history orders newest changes by default and creation on request, preservi
   await ctx.renderHistoryList();
   assert.deepEqual(labels(), ["APP-3", "SHOP-1", "SHOP-2"]);
   const markup = ctx.elements.historyList.children[1].children[0].innerHTML;
-  assert.match(markup, /Создан <time datetime="2026-09-01T10:00:00.000Z"/);
-  assert.match(markup, /Изменён <time datetime="2026-10-08T10:00:00.000Z"/);
+  assert.match(markup, /Создан<\/span><time datetime="2026-09-01T10:00:00.000Z"/);
+  assert.match(markup, /Изменён<\/span><time datetime="2026-10-08T10:00:00.000Z"/);
   ctx.selectedHistoryReportIds.add("SHOP-1");
   ctx.elements.historyProjectFilter.value = "SHOP";
   ctx.elements.historySort.value = "created";
   await ctx.renderHistoryList();
   assert.deepEqual(labels(), ["SHOP-2", "SHOP-1"]);
   assert.equal(ctx.selectedHistoryReportIds.has("SHOP-1"), true);
-  assert.match(ctx.historyDatesMarkup({ createdAt: "invalid" }), /Создан —.*Изменён —/);
+  assert.match(ctx.historyDatesMarkup({ createdAt: "invalid" }), /Создан<\/span><span>—.*Изменён<\/span><span>—/);
 });
 
 test("metadata worker detects legacy content off the UI thread without returning attachments", async () => {
@@ -421,12 +424,11 @@ test("history uses confirmed current publication before local metadata catches u
   ctx.draft.jiraPublication = published();
   ctx.getServerReports = async () => [{ id: "report", publicId: "abc12345", jiraPublication: null }];
   await ctx.renderHistoryList();
-  const info = ctx.elements.historyList.children[0].children.at(-1);
-  assert.equal(info.className, "publication-info history-publication-info");
-  assert.match(info.innerHTML, /Комментарий в Jira/);
-  assert.match(info.innerHTML, /focusedCommentId=10001#comment-10001/);
-  assert.match(info.innerHTML, /Опубликован <time datetime="2026-10-08T08:00:00.000Z"/);
-  assert.match(info.innerHTML, /Обновлён <time datetime="2026-10-08T09:00:00.000Z"/);
+  const markup = ctx.publicationInfoMarkup(ctx.historyPublication({ id: "report", jiraPublication: null }), "report", true);
+  assert.match(markup, /Комментарий в Jira/);
+  assert.match(markup, /focusedCommentId=10001#comment-10001/);
+  assert.match(markup, /Опубликован <time datetime="2026-10-08T08:00:00.000Z"/);
+  assert.match(markup, /Обновлён <time datetime="2026-10-08T09:00:00.000Z"/);
 });
 
 test("history does not restore removed links from stale nested or cloud metadata", () => {

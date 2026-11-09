@@ -1179,14 +1179,10 @@ function sortHistoryReports(reports, mode = "updated") {
 }
 
 function historyDatesMarkup(report) {
-  return [["createdAt", "Создан"], ["updatedAt", "Изменён"]].map(([field, label]) => {
-    const timestamp = historyTimestamp(report, field);
-    if (!timestamp) return `<span>${label} —</span>`;
-    const date = new Date(timestamp);
-    const compact = date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
-    return `<span>${label} <time datetime="${date.toISOString()}" title="${date.toLocaleString("ru-RU")}">${compact}</time></span>`;
-  }).join("");
+  return historyDate(historyTimestamp(report, "createdAt"), "Создан")
+    + historyDate(historyTimestamp(report, "updatedAt"), "Изменён");
 }
+
 
 async function getAllHistoryReports() {
   return (await getAllReports().catch(() => [])).map(report => ({ ...report, source: "local" }));
@@ -4530,7 +4526,7 @@ function publicationSnapshot(parts) {
     [key, QaReportHistory.contentFingerprint({ value })]));
 }
 
-function trackerPublicationSnapshot(scope, body) {
+function trackerPublicationSnapshot(scope, body, source = draft) {
   const attachments = [];
   const content = html => {
     if (!/<(?:a\b|figure\b|img\b|video\b|audio\b|[^>]+class=["'][^"']*(?:cell-file|jira-))/i.test(html)) return html;
@@ -4549,14 +4545,14 @@ function trackerPublicationSnapshot(scope, body) {
     if (files.length) attachments.push(files);
     return template.innerHTML;
   };
-  const numbers = ChecklistNumbering.rowNumbers(draft);
-  const sections = sectionsForPublication(scope.sectionIds, draft, scope.statuses)
+  const numbers = ChecklistNumbering.rowNumbers(source);
+  const sections = sectionsForPublication(scope.sectionIds, source, scope.statuses)
     .map(section => ({ ...section, rows: section.rows.filter(hasRowContent) })).filter(section => section.rows.length);
   return publicationSnapshot({
     body,
-    metadata: [draft.environment, draft.overallStatus],
-    intro: content(draft.intro),
-    structure: sections.map(section => [ChecklistNumbering.sectionTitle(draft, section),
+    metadata: [source.environment, source.overallStatus],
+    intro: content(source.intro),
+    structure: sections.map(section => [ChecklistNumbering.sectionTitle(source, section),
       section.columns.map(column => column.title), section.rows.map(row => [row.id, numbers.get(row.id)])]),
     statuses: sections.flatMap(section => section.rows.map(row => row.status)),
     checks: sections.flatMap(section => section.rows.map(row => section.columns.map(column => content(row.cells[column.id] || "")))),
@@ -4572,10 +4568,10 @@ function schedulePublicationState() {
   publicationStateTimer = setTimeout(renderPublicationState, 180);
 }
 
-function trackerPublicationState(link, target) {
-  if (!target) return { state: "missing", label: draft.issueUrl.trim() ? "Проверьте ссылку на задачу" : "Задача не указана", action: "Указать задачу" };
+function trackerPublicationState(link, target, source = draft) {
+  if (!target) return { state: "missing", label: source.issueUrl.trim() ? "Проверьте ссылку на задачу" : "Задача не указана", action: "Указать задачу" };
   const provider = target.provider === "eva" ? "EVA" : "Jira";
-  if (publishInProgress) return { state: "busy", label: "Отправляем…", action: "Отправляем…" };
+  if (publishInProgress && source.reportId === draft.reportId) return { state: "busy", label: "Отправляем…", action: "Отправляем…" };
   if (!link) return { state: "fresh", label: "Не опубликован", action: `Опубликовать в ${provider}` };
   if (link.updateIncomplete || link.parts.some(part => !part)) {
     return { state: "partial", label: "Публикация не завершена", action: "Продолжить отправку", details: ["Часть комментариев ещё не отправлена или не обновлена."] };
@@ -4586,19 +4582,20 @@ function trackerPublicationState(link, target) {
   const dirty = { state: "dirty", label: "Есть изменения", action: `Обновить в ${provider}`, details: ["Содержимое отчёта"] };
   let body;
   try {
-    body = trackerPublicationBody(link.format, link);
+    body = trackerPublicationBody(link.format, link, source);
   } catch {
     if (link.format !== "html" || !link.contentSnapshot) return unknown;
     // EVA cannot render a new local attachment as a published link yet.
-    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, ""));
+    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, "", source));
     return changes.length ? { ...dirty, details: changes } : unknown;
   }
   const current = publicationSnapshot({ body }).body;
   if (link.contentSnapshot?.body) {
     if (current === link.contentSnapshot.body) return clean;
-    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, body));
+    const changes = api.contentChanges(link.contentSnapshot, trackerPublicationSnapshot(link, body, source));
     return { ...dirty, details: changes.length ? changes : dirty.details };
   }
+  if (source !== draft) return unknown;
   if (!window.crypto.subtle || link.parts.some(part => !part.bodyHash)) return unknown;
   const key = JSON.stringify([link.reportId, link.issueUrl, link.format, current, link.parts.map(part => part.bodyHash)]);
   if (legacyPublicationCheck?.key !== key) {
@@ -4997,7 +4994,8 @@ function updateHistorySelectionUi() {
     checkbox.disabled = busy;
     checkbox.closest(".history-item").classList.toggle("selected", checkbox.checked);
   });
-  elements.historyList.querySelectorAll(".history-item-actions button, .history-comment-field").forEach(control => {
+  elements.historyList.querySelectorAll(".history-publications").forEach(group => { group.inert = historyDeleting; });
+  elements.historyList.querySelectorAll(".history-item-actions button, .history-comment-field, .history-note-edit, .history-cloud-button").forEach(control => {
     control.disabled = historyDeleting;
   });
 }
@@ -5076,6 +5074,7 @@ async function openHistory() {
   elements.historyModal.hidden = false;
   syncBodyModalOverflow();
   await renderHistoryList({ showLoading: true, saveSnapshot: true });
+  if (!elements.historyModal.hidden) personalCloud.refreshHistory().catch(() => {});
 }
 
 async function saveHistoryCommentNow(report, commentField) {
@@ -5126,8 +5125,6 @@ function setHistoryLoading(loading) {
     <div class="history-skeleton-bar history-skeleton-comment"></div>
     <div class="history-item-actions">
       <div class="history-skeleton-bar history-skeleton-action"></div>
-      <div class="history-skeleton-bar history-skeleton-action history-skeleton-action-wide"></div>
-      <div class="history-skeleton-bar history-skeleton-action"></div>
       <div class="history-skeleton-bar history-skeleton-action"></div>
     </div>
   </div>`;
@@ -5152,6 +5149,187 @@ async function openHistoryReport(report) {
     } finally { suppressHistory = false; }
   }
   closeHistory();
+}
+
+function historyDate(value, label) {
+  const date = new Date(value);
+  const valid = value && Number.isFinite(date.getTime());
+  return `<span><span class="history-date-label">${escapeHtml(label)}</span>${valid
+    ? `<time datetime="${date.toISOString()}" title="${escapeHtml(date.toLocaleString("ru-RU"))}">${escapeHtml(date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }))}</time>` : '<span>—</span>'}</span>`;
+}
+
+function positionHistoryPopover(menu, trigger) {
+  const anchor = trigger.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+  menu.__anchorTop = anchor.top;
+  menu.style.left = `${Math.max(8, Math.min(innerWidth - bounds.width - 8, anchor.right - bounds.width))}px`;
+  menu.style.top = `${anchor.bottom + bounds.height + 6 <= innerHeight - 8 ? anchor.bottom + 6 : Math.max(8, anchor.top - bounds.height - 6)}px`;
+}
+
+function createHistoryPopover(trigger, content, hover = false) {
+  const panel = document.createElement("div");
+  panel.className = "history-details-popover";
+  panel.id = `history-details-${crypto.randomUUID()}`;
+  panel.setAttribute("popover", "manual");
+  panel.setAttribute("role", hover ? "tooltip" : "dialog");
+  panel.setAttribute("aria-label", trigger.getAttribute("aria-label") || "Публикация отчёта");
+  panel.append(content);
+  panel.__trigger = trigger;
+  trigger.setAttribute("aria-controls", panel.id);
+  trigger.setAttribute("aria-expanded", "false");
+  if (hover) trigger.setAttribute("aria-describedby", panel.id);
+  let timer;
+  const open = () => {
+    clearTimeout(timer);
+    if (panel.__closing || panel.matches(":popover-open")) return;
+    closeHistoryActionMenus();
+    panel.showPopover();
+    trigger.setAttribute("aria-expanded", "true");
+    positionHistoryPopover(panel, trigger);
+  };
+  const close = () => { timer = setTimeout(() => {
+    if (document.activeElement !== trigger && panel.matches(":popover-open")) panel.hidePopover();
+  }, 160); };
+  trigger.addEventListener("click", open);
+  if (hover) {
+    trigger.addEventListener("pointerenter", () => { if (matchMedia("(hover: hover)").matches) open(); });
+    trigger.addEventListener("pointerleave", close);
+    trigger.addEventListener("focus", open);
+    trigger.addEventListener("blur", close);
+    panel.addEventListener("pointerenter", () => clearTimeout(timer));
+    panel.addEventListener("pointerleave", close);
+  }
+  panel.addEventListener("toggle", event => trigger.setAttribute("aria-expanded", String(event.newState === "open")));
+  return panel;
+}
+
+let historyActionBusy = false;
+
+async function historyReportAction(report, action) {
+  if (historyActionBusy || historyDeleting || publishInProgress || shareReportBusy) return;
+  historyActionBusy = true;
+  elements.historyList.inert = true;
+  try {
+    await openHistoryReport(report);
+    await action();
+  } catch (error) { showToast(`Не удалось выполнить действие: ${error.message}`, 9000); }
+  finally { historyActionBusy = false; elements.historyList.inert = false; }
+}
+
+function updateHistoryStorage() {
+  for (const button of elements.historyList.querySelectorAll("[data-history-cloud]")) {
+    const report = button.__report;
+    const source = report.id === draft.reportId ? draft : report.document;
+    const status = personalCloud.historyStatus(source);
+    button.dataset.state = status.state;
+    button.title = status.label;
+    button.setAttribute("aria-label", status.label);
+    button.querySelector("use").setAttribute("href", status.state === "saved" ? "#icon-cloud-check" : "#icon-cloud-upload");
+  }
+}
+
+function createHistoryPublications(report) {
+  const source = report.id === draft.reportId ? draft : report.document;
+  const group = document.createElement("div");
+  group.className = "history-publications";
+  group.setAttribute("aria-label", "Публикации отчёта");
+  if (!source) return group;
+  const tracker = historyPublication(report);
+  const [shared] = sharedPublications(report.id);
+  const channels = [];
+  if (shared) channels.push({ type: "link", publication: shared,
+    state: sharePublicationState(shared, report.id, { source }) });
+  if (tracker) {
+    const matches = window.QaReportJiraPublication.matching(tracker, report.id, source.issueUrl);
+    let state = { state: "missing", label: "Задача изменена", details: ["Публикация связана с прежней задачей. Откройте отчёт, чтобы выбрать дальнейшее действие."] };
+    if (matches) state = tracker.contentSnapshot
+      ? trackerPublicationState(tracker, window.QaReportJiraPublication.target(source.issueUrl), source)
+      : { state: "unknown", label: "Версия не сравнена", details: ["Откройте отчёт, чтобы сравнить и обновить публикацию."] };
+    channels.push({ type: "tracker", publication: tracker, state });
+  }
+  for (const channel of channels) {
+    const { type, publication, state } = channel;
+    const provider = publication.provider === "eva" ? "EVA" : "Jira";
+    const name = type === "link" ? "Отчёт по ссылке" : `Комментарий в ${provider}`;
+    const row = document.createElement("section");
+    row.className = `history-publication-info history-publication-${type === "link" ? "shared" : "tracker"}`;
+    row.dataset.state = state.state;
+    row.setAttribute("aria-label", name);
+    const heading = document.createElement("div");
+    const label = state.state === "dirty" ? "Есть правки" : state.state === "current" ? "Актуально" : state.label;
+    heading.innerHTML = `<h4><svg class="ui-icon" aria-hidden="true"><use href="#icon-${type === "link" ? "link" : "comment"}"></use></svg>${escapeHtml(name)}</h4><div class="history-publication-status"><span>${escapeHtml(label)}</span></div>`;
+    if (state.details?.length) {
+      const details = createSmallButton("", () => {}, false, "info");
+      details.className = "history-info-button";
+      details.setAttribute("aria-label", state.state === "dirty" ? "Какие правки есть" : "Подробнее о публикации");
+      const list = document.createElement("ul");
+      for (const text of state.details) list.append(Object.assign(document.createElement("li"), { textContent: text }));
+      heading.querySelector(".history-publication-status").append(details, createHistoryPopover(details, list, true));
+    }
+    const dates = document.createElement("div");
+    dates.className = "history-publication-dates";
+    const first = type === "link" ? publication.createdAt : publication.firstPublishedAt;
+    const last = type === "link" ? publication.updatedAt : publication.lastPublishedAt;
+    dates.innerHTML = historyDate(first, "Опубликован") + historyDate(last !== first ? last : null, "Обновлён");
+    const actions = document.createElement("div");
+    actions.className = "history-publication-actions";
+    const comments = type === "tracker" ? publication.parts.flatMap((part, index) => part ? [{
+      url: window.QaReportJiraPublication.commentUrl(publication.issueUrl, part.commentId), number: index + 1,
+    }] : []) : [];
+    const urls = type === "link" ? [sharedReportUrl(publication.id, publication.replyToken)] : comments.map(part => part.url);
+    let open;
+    if (type === "tracker" && urls.length === 1) {
+      open = document.createElement("a");
+      open.href = urls[0]; open.target = "_blank"; open.rel = "noopener noreferrer";
+      open.setAttribute("aria-label", name);
+      open.innerHTML = '<svg class="ui-icon" aria-hidden="true"><use href="#icon-external"></use></svg><span>Открыть</span>';
+    } else {
+      open = createSmallButton("Открыть", () => {
+        if (type !== "link") return;
+        const latest = sharedPublications(report.id).find(value => value.id === publication.id);
+        if (latest) window.open(sharedReportUrl(latest.id, latest.replyToken), "_blank", "noopener,noreferrer");
+        else showToast("Эта публикация больше не доступна");
+      }, false, "external");
+      if (type === "tracker" && urls.length > 1) {
+        const links = document.createElement("div");
+        links.className = "history-publication-parts";
+        urls.forEach((url, index) => {
+          const link = document.createElement("a");
+          link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+          link.textContent = `${provider} · часть ${comments[index].number}`;
+          links.append(link);
+        });
+        open.setAttribute("aria-label", `Открыть части комментария в ${provider}`);
+        actions.append(createHistoryPopover(open, links));
+      }
+      open.disabled = !urls.length;
+    }
+    open.className = "history-publication-link";
+    const copy = createSmallButton("Ссылка", async () => {
+      const latest = type === "link" ? sharedPublications(report.id).find(value => value.id === publication.id) : null;
+      if (type === "link" && !latest) { showToast("Эта публикация больше не доступна"); return; }
+      await writeClipboardText(type === "link" ? sharedReportUrl(latest.id, latest.replyToken) : urls.join("\n"), "Ссылка на публикацию скопирована");
+    }, false, "copy");
+    copy.className = "history-publication-link";
+    copy.setAttribute("aria-label", type === "link" ? "Копировать ссылку на публикацию" : `Копировать ссылку на комментарий в ${provider}`);
+    copy.title = copy.getAttribute("aria-label");
+    copy.disabled = !urls.length;
+    const update = createSmallButton("Обновить", () => historyReportAction(report, async () => {
+      if (type === "tracker") {
+        if (!window.QaReportJiraPublication.sameComments(currentJiraPublication(), publication)) throw new Error("Связь с комментарием изменилась. Проверьте публикацию в отчёте.");
+        await publishToJira();
+      } else {
+        if (sharedPublications(report.id)[0]?.id !== publication.id) throw new Error("Ссылка изменилась. Откройте публикацию в отчёте.");
+        await openShareReport({ currentTarget: document.getElementById("shareReportExportButton") }, state.state === "partial" ? "" : "update");
+      }
+    }), false, "upload");
+    update.className = "history-publication-link history-publication-update";
+    update.disabled = ["current", "busy", "missing"].includes(state.state);
+    update.title = state.state === "current" ? "Публикация содержит все сохранённые правки" : "Открыть обновление этой публикации";
+    actions.append(open, copy, update);
+    row.append(heading, dates, actions);
+    group.append(row);
+  }
+  return group;
 }
 
 async function renderHistoryList({ showLoading = false, saveSnapshot = false } = {}) {
@@ -5214,7 +5392,12 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const projectKey = reportProjectKey(report);
     const projectName = names[projectKey] || projectKey || "Без проекта";
     const projectStyle = colors[projectKey] ? ` style="--project-color:${colors[projectKey]}"` : "";
-    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><p class="history-item-meta"><code>${escapeHtml(publicId)}</code><span class="history-dates">${historyDatesMarkup(report)}</span></p>`;
+    info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><div class="history-item-meta"><div class="history-record-identity"><code>${escapeHtml(publicId)}</code><span class="history-storage"><svg class="ui-icon" role="img" aria-label="В этом браузере"><title>Сохранён в этом браузере</title><use href="#icon-monitor"></use></svg></span></div><span class="history-dates">${historyDatesMarkup(report)}</span></div>`;
+    const cloudButton = createSmallButton("", () => historyReportAction(report, () => personalCloud.open()), false, "cloud-upload");
+    cloudButton.className = "history-cloud-button";
+    cloudButton.dataset.historyCloud = report.id;
+    cloudButton.__report = report;
+    info.querySelector(".history-storage").append(cloudButton);
     if (historySelectionMode) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -5230,17 +5413,28 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       info.querySelector(".history-item-heading").prepend(checkbox);
       item.classList.toggle("selected", checkbox.checked);
     }
-    const publication = publicationInfoMarkup(historyPublication(report), report.id, true);
-    let publicationInfo;
-    if (publication) {
-      item.classList.toggle("published", true);
-      publicationInfo = document.createElement("div");
-      publicationInfo.className = "publication-info history-publication-info";
-      publicationInfo.innerHTML = publication;
-    }
     const commentField = document.createElement("textarea");
     commentField.className = "history-comment-field";
     commentField.rows = 2;
+    commentField.hidden = true;
+    commentField.setAttribute("aria-label", `Заметка к отчёту ${issueLabel}`);
+    const note = document.createElement("div");
+    note.className = "history-note";
+    const editNote = createSmallButton(report.historyComment || "Добавить заметку", () => {
+      editNote.hidden = true;
+      commentField.hidden = false;
+      commentField.focus();
+      commentField.setSelectionRange(commentField.value.length, commentField.value.length);
+    }, false, "pencil");
+    editNote.className = "history-note-edit";
+    editNote.title = "Изменить заметку";
+    commentField.addEventListener("input", () => {
+      editNote.querySelector("span").textContent = commentField.value || "Добавить заметку";
+    });
+    commentField.addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.stopPropagation(); commentField.blur(); }
+    });
+    note.append(editNote, commentField);
     commentField.placeholder = "Комментарий к отчёту";
     commentField.value = report.historyComment || "";
     commentField.__saveHistoryComment = () => saveHistoryCommentNow(report, commentField);
@@ -5255,11 +5449,13 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       );
     });
     commentField.addEventListener("blur", () => {
+      commentField.hidden = true;
+      editNote.hidden = false;
       saveHistoryCommentNow(report, commentField).catch(() => setSaveStatus("Ошибка комментария"));
     });
     const actions = document.createElement("div");
     actions.className = "history-item-actions";
-    const openButton = createSmallButton("Открыть", async () => {
+    const openButton = createSmallButton("Редактор", async () => {
       openButton.disabled = true;
       try {
         await openHistoryReport(report);
@@ -5279,25 +5475,30 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     aiButton.setAttribute("aria-label", `Приём результатов от ИИ для ${issueLabel}, ${publicId}`);
     aiButton.setAttribute("aria-haspopup", "dialog");
     aiButton.setAttribute("aria-controls", "localImportModal");
-    const copyButton = createSmallButton("Копия", async () => {
-      await flushVisibleHistoryComments();
-      await saveReportSnapshot("before-copy-history");
-      const fullReport = report;
-      draft = normalizeDraft(clone(fullReport.document));
-      draft.draftId = crypto.randomUUID();
-      draft.reportId = crypto.randomUUID();
-      draft.jiraPublication = null;
-      draft.publicId = createPublicId();
-      historyCurrent = serializeDraft();
-      undoStack = [];
-      redoStack = [];
-      render();
-      updateChecklistUrl(draft.publicId);
-      saveDraft();
-      closeHistory();
-      showToast("Создана копия отчёта");
+    const copyButton = createSmallButton("Создать копию", async () => {
+      copyButton.disabled = true;
+      try {
+        await flushVisibleHistoryComments();
+        await saveReportSnapshot("before-copy-history");
+        const fullReport = await getReportRecord(report.id);
+        if (!fullReport?.document) throw new Error("Отчёт больше не доступен в истории");
+        draft = normalizeDraft(clone(fullReport.document));
+        draft.draftId = crypto.randomUUID();
+        draft.reportId = crypto.randomUUID();
+        draft.jiraPublication = null;
+        draft.publicId = createPublicId();
+        historyCurrent = serializeDraft();
+        undoStack = [];
+        redoStack = [];
+        render();
+        updateChecklistUrl(draft.publicId);
+        saveDraft();
+        closeHistory();
+        showToast("Создана копия отчёта");
+      } catch (error) { showToast(`Не удалось создать копию: ${error.message}`, 9000); }
+      finally { copyButton.disabled = false; }
     }, false, "copy");
-    const deleteButton = createSmallButton("Удалить", async () => {
+    const deleteButton = createSmallButton("Удалить из браузера", async () => {
       const confirmed = await askConfirmation(`Удалить отчёт «${report.title}»?`, {
         title: "Удаление отчёта",
         confirmText: "Удалить",
@@ -5312,18 +5513,21 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       }
       await renderHistoryList();
     }, true, "trash");
-    const linkButton = createSmallButton("Копировать ссылку", async () => {
+    const linkButton = createSmallButton("Копировать локальную ссылку", async () => {
       const id = normalizePublicId(report.publicId || report.document?.publicId);
       if (!id) { showToast("У отчёта пока нет ссылки"); return; }
       await writeClipboardText(new URL(`/report/${id}`, window.location.origin).href,
         report.source === "local" ? "Ссылка скопирована — локальный отчёт доступен в этом браузере" : "Ссылка на отчёт скопирована");
     }, false, "link");
     linkButton.title = report.source === "local" ? "Локальный отчёт: ссылка работает в этом браузере" : "Скопировать ссылку на этот отчёт";
-    actions.append(openButton, linkButton, aiButton, copyButton, createHistoryMoreMenu(report, deleteButton));
-    item.append(info, commentField, actions);
-    if (publicationInfo) item.append(publicationInfo);
+    const cloudMenuButton = createSmallButton("Сохранить в облако", () => historyReportAction(report, () => personalCloud.open()), false, "cloud-upload");
+    actions.append(openButton, aiButton, createHistoryMoreMenu(report, [linkButton, copyButton, cloudMenuButton, deleteButton]));
+    item.append(info, actions, note);
+    const publications = createHistoryPublications(report);
+    if (publications.children.length) item.append(publications);
     elements.historyList.append(item);
   });
+  updateHistoryStorage();
   window.QaLocalImport?.updateHistoryButtons();
   updateHistorySelectionUi();
 }
@@ -5338,16 +5542,16 @@ function createSmallButton(label, action, danger = false, icon = "") {
 }
 
 function closeHistoryActionMenus({ restoreFocus = false } = {}) {
-  const menus = [...document.querySelectorAll(".history-action-menu:popover-open")];
+  const menus = [...document.querySelectorAll(".history-action-menu:popover-open, .history-details-popover:popover-open")];
   for (const menu of menus) {
     menu.hidePopover();
     menu.__trigger.setAttribute("aria-expanded", "false");
-    if (restoreFocus) menu.__trigger.focus();
+    if (restoreFocus) { menu.__closing = true; menu.__trigger.focus(); menu.__closing = false; }
   }
   return menus.length > 0;
 }
 
-function createHistoryMoreMenu(report, deleteButton) {
+function createHistoryMoreMenu(report, controls) {
   const group = document.createElement("div"); group.className = "history-more";
   const trigger = document.createElement("button");
   trigger.type = "button"; trigger.className = "history-more-button";
@@ -5360,27 +5564,34 @@ function createHistoryMoreMenu(report, deleteButton) {
   menu.setAttribute("popover", "auto"); menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", "Действия с отчётом"); menu.__trigger = trigger;
   trigger.setAttribute("aria-controls", menu.id);
-  deleteButton.className = "history-menu-item danger-text";
-  deleteButton.setAttribute("role", "menuitem");
-  deleteButton.addEventListener("click", () => closeHistoryActionMenus(), { capture: true });
-  menu.append(deleteButton); group.append(trigger, menu);
+  for (const control of controls) {
+    control.className = `history-menu-item${control.classList.contains("danger-text") ? " danger-text" : ""}`;
+    control.setAttribute("role", "menuitem");
+    control.addEventListener("click", () => closeHistoryActionMenus(), { capture: true });
+    menu.append(control);
+  }
+  group.append(trigger, menu);
   trigger.addEventListener("click", () => {
     if (menu.matches(":popover-open")) { closeHistoryActionMenus(); return; }
     closeHistoryActionMenus(); menu.showPopover();
-    const anchor = trigger.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
-    menu.__anchorTop = anchor.top;
-    menu.style.left = `${Math.max(8, Math.min(innerWidth - bounds.width - 8, anchor.right - bounds.width))}px`;
-    menu.style.top = `${anchor.bottom + bounds.height + 6 <= innerHeight - 8 ? anchor.bottom + 6 : Math.max(8, anchor.top - bounds.height - 6)}px`;
-    trigger.setAttribute("aria-expanded", "true"); deleteButton.focus();
+    positionHistoryPopover(menu, trigger);
+    trigger.setAttribute("aria-expanded", "true"); controls[0].focus();
   });
   trigger.addEventListener("keydown", event => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); trigger.click(); }
   });
-  menu.addEventListener("toggle", event => {
-    trigger.setAttribute("aria-expanded", String(event.newState === "open"));
+  menu.addEventListener("toggle", event => trigger.setAttribute("aria-expanded", String(event.newState === "open")));
+  menu.addEventListener("keydown", event => {
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    const items = [...menu.querySelectorAll("button:not([hidden]):not(:disabled)")];
+    if (!items.length) return;
+    event.preventDefault();
+    const next = items.indexOf(document.activeElement) + (event.key === "ArrowDown" ? 1 : -1);
+    items[(next + items.length) % items.length].focus();
   });
   return group;
 }
+
 
 function insertHtmlAtCursor(html) {
   activeEditor.focus();
@@ -8001,7 +8212,7 @@ function sharedContentSnapshot(source, options) {
 
 let sharedContentCheck;
 
-function sharePublicationState(publication, reportId = draft.reportId, { checkPending = true } = {}) {
+function sharePublicationState(publication, reportId = draft.reportId, { checkPending = true, source = draft } = {}) {
   if (checkPending && shareReportBusy && shareReportContext?.reportId === reportId) {
     return { state: "busy", label: "Отправляем…", action: "Отправляем…" };
   }
@@ -8011,13 +8222,13 @@ function sharePublicationState(publication, reportId = draft.reportId, { checkPe
   if (!publication) return { state: "fresh", label: "Не опубликован", action: "Создать ссылку" };
   const unknown = { state: "unknown", label: "Не удалось сравнить версии", action: "Скопировать ссылку" };
   const before = window.QaReportJiraPublication.normalizeContent(publication.contentSnapshot);
-  if (!before || reportId !== draft.reportId) return unknown;
+  if (!before || reportId !== source.reportId) return unknown;
   const scope = window.QaReportJiraPublication.attachmentOptions(publication);
   const key = `${localEditGeneration}:${scope.includeImages}:${scope.includeFiles}`;
-  if (sharedContentCheck?.source !== draft || sharedContentCheck?.key !== key) {
+  if (sharedContentCheck?.source !== source || sharedContentCheck?.key !== key) {
     let snapshot;
-    try { snapshot = sharedContentSnapshot(draft, sharedSnapshotOptions(draft, scope)); } catch {}
-    sharedContentCheck = { source: draft, key, snapshot };
+    try { snapshot = sharedContentSnapshot(source, sharedSnapshotOptions(source, scope)); } catch {}
+    sharedContentCheck = { source, key, snapshot };
   }
   if (!sharedContentCheck.snapshot) return unknown;
   const changes = window.QaReportJiraPublication.contentChanges(before, sharedContentCheck.snapshot);
@@ -10137,11 +10348,16 @@ elements.redoButton.addEventListener("click", redo);
 elements.historyButton.addEventListener("click", openHistory);
 elements.closeHistoryButton.addEventListener("click", closeHistory);
 elements.historyList.addEventListener("scroll", () => {
-  const menu = document.querySelector(".history-action-menu:popover-open");
+  const menu = document.querySelector(".history-action-menu:popover-open, .history-details-popover:popover-open");
   // A queued scroll event can arrive just after a visible trigger opens its menu.
   if (menu && Math.abs(menu.__trigger.getBoundingClientRect().top - menu.__anchorTop) >= 1) closeHistoryActionMenus();
 });
 window.addEventListener("resize", () => closeHistoryActionMenus());
+document.addEventListener("pointerdown", event => {
+  for (const panel of document.querySelectorAll(".history-details-popover:popover-open")) {
+    if (!panel.contains(event.target) && !panel.__trigger.contains(event.target)) panel.hidePopover();
+  }
+});
 elements.historySearch.addEventListener("input", () => {
   if (!historyLoading) renderHistoryList().catch(() => {});
 });
@@ -10726,6 +10942,9 @@ document.getElementById("openStandaloneBugReport").addEventListener("click", () 
 });
 
 const personalCloud = window.QaReportCloud.create({
+  onStatus: () => {
+    if (!elements.historyModal.hidden && !historyLoading) updateHistoryStorage();
+  },
   headers: async method => {
     if (method === "GET") return {};
     return { "X-QA-CSRF-Token": await authCsrfToken() };

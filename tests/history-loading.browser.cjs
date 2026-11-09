@@ -113,7 +113,7 @@ async function main() {
   assert.equal(await page.locator('#historySelectionToggle').isDisabled(), false);
   await page.evaluate(() => { saveReportSnapshot = window.originalSaveHistorySnapshot; getAllHistoryReports = window.originalHistoryRead; });
   await page.fill('#historySearch', '');
-  await page.waitForSelector('.history-comment-field');
+  await page.waitForSelector('.history-note-edit');
   assert.equal(await page.locator('.history-item').count(), 1);
   await screenshot('history-loaded');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -121,10 +121,11 @@ async function main() {
   assert.equal(await page.locator('#historyList').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await screenshot('mobile-history-loaded');
   await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.locator('.history-note-edit').click();
   await page.fill('.history-comment-field', 'Комментарий до повторного открытия');
   await page.click('#closeHistoryButton');
   await page.click('#historyButton');
-  await page.waitForSelector('.history-comment-field');
+  await page.waitForSelector('.history-note-edit');
   assert.equal(await page.locator('.history-comment-field').inputValue(), 'Комментарий до повторного открытия');
   await page.click('#closeHistoryButton');
 
@@ -153,7 +154,7 @@ async function main() {
   assert.equal(await page.locator('.history-empty p').innerText(), 'Не удалось загрузить историю');
   await page.evaluate(() => { getAllHistoryReports = window.originalHistoryRead; });
   await page.click('[data-retry-history]');
-  await page.waitForSelector('.history-comment-field');
+  await page.waitForSelector('.history-note-edit');
   assert.equal(await page.locator('#historyList').getAttribute('aria-busy'), 'false');
   assert.deepEqual(errors, []);
   console.log('History loading browser checks passed:', corporate ? 'corporate' : 'public');

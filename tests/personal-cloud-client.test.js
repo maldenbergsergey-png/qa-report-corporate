@@ -30,7 +30,7 @@ function harness({ hang = false, failList = false } = {}) {
   let operations = 0;
   const client = root.QaReportCloud.create({ requestTimeout: hang ? 20 : 500, headers: () => hang ? new Promise(() => {}) : {},
     capture: fixture, records: async () => [], restore() {}, loadAttachment() {}, notify() {}, blocked: () => false, operation: delta => operations += delta });
-  return { client, elements, operations: () => operations, ready: () => { hang = false; failList = false; } };
+  return { client, elements, stored, operations: () => operations, ready: () => { hang = false; failList = false; } };
 }
 
 test('an empty successful cloud list finishes loading and leaves save enabled', async () => {
@@ -74,4 +74,33 @@ test('sign-out cancels a pending account request and does not leave the next ope
   h.ready(); await h.client.open();
   assert.equal(h.elements.get('personalCloudSave').disabled, false);
   assert.equal(h.elements.get('personalCloudStatus').textContent, '');
+});
+
+
+test('history cloud state uses the verified owner and the selected report content', async () => {
+  const h = harness(), source = fixture();
+  const content = contentFingerprint(documentFields(source));
+  const savedAt = '2026-11-09T09:00:00.000Z';
+  h.stored.set('qa-report-personal-cloud-v1', JSON.stringify({
+    other: { local: { id: 'other-copy', savedAt, content } },
+    owner: { local: { id: 'own-copy', savedAt, content } },
+  }));
+  assert.equal(h.client.historyStatus(source).state, 'unknown');
+  await h.client.refreshHistory();
+  assert.equal(h.client.historyStatus(source).state, 'saved');
+  const changed = structuredClone(source);
+  changed.sections[0].rows[0].cells.check = 'Изменённая проверка';
+  assert.equal(h.client.historyStatus(changed).state, 'dirty');
+  assert.equal(h.client.historyStatus({ ...source, reportId: 'another-local' }).state, 'local');
+  h.client.reset();
+  assert.equal(h.client.historyStatus(source).state, 'unknown');
+});
+
+test('history never takes a cloud badge from another account', async () => {
+  const h = harness(), source = fixture();
+  h.stored.set('qa-report-personal-cloud-v1', JSON.stringify({ other: {
+    local: { savedAt: '2026-11-09T09:00:00Z', content: contentFingerprint(documentFields(source)) },
+  } }));
+  await h.client.refreshHistory();
+  assert.equal(h.client.historyStatus(source).state, 'local');
 });

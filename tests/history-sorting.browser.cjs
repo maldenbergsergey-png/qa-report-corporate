@@ -69,7 +69,7 @@ async function main() {
     await saveDraft({ collect: false });
   });
   const order = () => page.locator('.history-item h3').allTextContents();
-  const open = async () => { await page.click('#historyButton'); await page.waitForSelector('.history-comment-field'); };
+  const open = async () => { await page.click('#historyButton'); await page.waitForSelector('.history-note-edit'); };
   const close = () => page.click('#closeHistoryButton');
   const record = id => page.evaluate(id => getReportRecord(id), id);
   const screenshot = async name => {
@@ -111,7 +111,7 @@ async function main() {
   await close();
   await open();
   const second = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^SHOP-2$/ }) });
-  await second.getByRole('button', { name: 'Открыть', exact: true }).click();
+  await second.getByRole('button', { name: 'Редактор', exact: true }).click();
   await page.waitForFunction(() => document.getElementById('historyModal').hidden && document.getElementById('issueUrl').value === 'SHOP-2');
   await page.evaluate(() => draftWriteQueue);
   assert.equal((await record('sort-1')).updatedAt, '2026-10-06T10:00:00.000Z');
@@ -132,6 +132,7 @@ async function main() {
   assert.deepEqual(await order(), ['SHOP-2', 'SHOP-1', 'APP-3']);
   assert.equal((await record('sort-1')).updatedAt, edited.updatedAt);
   const third = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^APP-3$/ }) });
+  await third.locator('.history-note-edit').click();
   await third.locator('textarea').fill('Changed history comment');
   await page.evaluate(() => flushVisibleHistoryComments());
   const commented = await record('sort-2');
@@ -169,46 +170,15 @@ async function main() {
     await page.setViewportSize({ width: 1600, height: 1000 });
   }
   await close();
-  // Exercise the real server: no-op saves, opening, comment PATCH, actual changes
-  // and conflict checks all share the existing authenticated/owner-scoped routes.
-  const cloud = await page.evaluate(async () => {
-    const document = normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: 'server-sort', draftId: 'server-sort-draft', publicId: 'fed12345', issueUrl: 'QA-10' });
-    const post = async body => (await reportApi('/api/reports', { method: 'POST', body: JSON.stringify(body) })).report;
-    const first = await post({ document, title: 'Legacy summary', createdAt: '2026-09-01T10:00:00.000Z' });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const opened = (await reportApi('/api/reports/server-sort')).report;
-    const noOp = await post({ document: { ...document, publicId: first.publicId, revision: 99, updatedAt: new Date().toISOString(), lastSavedBy: 'new-tab' } });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const changedComment = await reportApi('/api/reports/server-sort/comment', { method: 'PATCH', body: JSON.stringify({ historyComment: 'Comment' }) });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const sameComment = await reportApi('/api/reports/server-sort/comment', { method: 'PATCH', body: JSON.stringify({ historyComment: 'Comment' }) });
-    const afterCommentSave = await post({ document: { ...document, publicId: first.publicId }, historyComment: 'Comment' });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const changed = await post({ document: { ...document, publicId: first.publicId, intro: 'Edited' }, baseContentHash: first.contentHash });
-    let conflict = false;
-    try { await post({ document: { ...document, publicId: first.publicId, intro: 'Stale edit' }, baseContentHash: first.contentHash }); }
-    catch (error) { conflict = error.status === 409; }
-    return { first, opened, noOp, changedComment, sameComment, afterCommentSave, changed, conflict };
-  });
-  assert.equal(cloud.opened.updatedAt, cloud.first.updatedAt);
-  assert.equal(cloud.noOp.updatedAt, cloud.first.updatedAt);
-  assert.equal(cloud.noOp.createdAt, cloud.first.createdAt);
-  assert.ok(cloud.changedComment.updatedAt > cloud.first.updatedAt);
-  assert.equal(cloud.sameComment.updatedAt, cloud.changedComment.updatedAt);
-  assert.equal(cloud.afterCommentSave.updatedAt, cloud.changedComment.updatedAt);
-  assert.ok(cloud.changed.updatedAt > cloud.changedComment.updatedAt);
-  assert.equal(cloud.changed.createdAt, cloud.first.createdAt);
-  assert.equal(cloud.conflict, true);
-  await page.evaluate(async () => { cloudHistoryEnabled = true; await openHistory(); });
-  const serverItem = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-10$/ }) });
-  await serverItem.getByRole('button', { name: 'Открыть', exact: true }).click();
-  await page.waitForFunction(() => document.getElementById('historyModal').hidden && document.getElementById('issueUrl').value === 'QA-10');
-  await page.evaluate(async () => { await draftWriteQueue; await Promise.allSettled([...(pendingHistoryServerSaves.get('server-sort') || [])]); });
-  const cached = await record('server-sort');
-  assert.equal(cached.createdAt, cloud.first.createdAt);
-  assert.equal(cached.updatedAt, cloud.changed.updatedAt);
-  await page.evaluate(() => openHistory());
-  assert.equal((await record('server-sort')).updatedAt, cloud.changed.updatedAt);
+  // Reloading browser history keeps creation, edit and note dates intact.
+  // Personal cloud transport and conflicts are covered by personal-cloud.browser.cjs.
+  await page.reload();
+  await page.waitForSelector('.cell-editor');
+  await open();
+  assert.equal((await record('sort-1')).createdAt, edited.createdAt);
+  assert.equal((await record('sort-1')).updatedAt, edited.updatedAt);
+  assert.equal((await record('sort-2')).updatedAt, commented.updatedAt);
+  assert.equal(await page.locator('.history-item').count(), 3);
   assert.deepEqual(errors, []);
   console.log('History sorting browser checks passed:', corporate ? 'corporate' : 'public');
 }

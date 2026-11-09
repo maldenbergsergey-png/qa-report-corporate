@@ -22,7 +22,7 @@
   }
   const currentPath = (localId, publicId) => binding?.localId === localId ? cloudPath(binding.id) : `/report/${publicId}`;
 
-  function create({ headers, capture, records, restore, loadAttachment, notify, blocked, operation, signIn, requestTimeout = 60_000 }) {
+  function create({ headers, capture, records, restore, loadAttachment, notify, blocked, operation, signIn, onStatus = () => {}, requestTimeout = 60_000 }) {
     const $ = id => document.getElementById(id);
     const dialog = $('personalCloudDialog');
     let state, ownerId = '', generation = 0, busy = false, entries = [];
@@ -175,7 +175,19 @@
           : state?.signedIn ? 'Сохранённых облачных отчётов пока нет.' : 'Ваши отчёты появятся здесь после входа.';
         list.append(empty);
       }
+      onStatus();
     }
+    function historyStatus(source) {
+      if (!source) return { state: 'unknown', label: 'Проверить облачную копию' };
+      const link = state?.signedIn ? links()[source.reportId] : null;
+      if (!state) return { state: 'unknown', label: 'Проверить облачную копию' };
+      if (!link?.savedAt) return { state: 'local', label: 'Сохранить отчёт в личное облако' };
+      const saved = new Date(link.savedAt).toLocaleString('ru-RU');
+      if (link.conflict) return { state: 'conflict', label: `В облаке есть другая версия. Последнее сохранение ${saved}` };
+      const current = link.content === fingerprint(source);
+      return { state: current ? 'saved' : 'dirty', label: `${current ? 'Личная облачная копия сохранена' : 'Есть правки для сохранения в облако'} · ${saved}` };
+    }
+
     async function refresh() {
       listLoading = true; render();
       try {
@@ -364,7 +376,7 @@
     if (routeId()) queueMicrotask(() => { void openRoute(); });
     const interval = setInterval(tick, 60_000);
     root.addEventListener('online', () => { if (routeId()) void openRoute().then(tick); else void tick(); });
-    return { open, reset, tick, openRoute, close: () => clearInterval(interval) };
+    return { open, reset, tick, openRoute, historyStatus, refreshHistory: () => run(availability, { wait: true, label: 'Проверяем облачные копии…' }), close: () => clearInterval(interval) };
   }
   root.QaReportCloud = { create, routeId, keepRoute, currentPath };
 })(window);

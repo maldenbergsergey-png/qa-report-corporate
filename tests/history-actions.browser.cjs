@@ -57,20 +57,36 @@ async function main() {
         draftId: `draft-${index}`, publicId: `abc000${index + 1}`, issueUrl: `https://jira.example/browse/QA-${index + 1}`,
         environment: 'STAGE', overallStatus: 'OK', createdAt: '2026-10-07T10:00:00.000Z',
         updatedAt: `2026-10-08T10:0${5 - index}:00.000Z` });
-      if (index === 0 || index === 2) document.jiraPublication = {
+      if (index === 0 || index === 2 || index === 4) document.jiraPublication = {
         reportId: document.reportId, issueUrl: document.issueUrl, format: 'wiki',
         firstPublishedAt: '2026-10-08T08:00:00.000Z', lastPublishedAt: '2026-10-08T09:00:00.000Z',
         parts: [{ commentId: String(10001 + index), bodyHash: 'a'.repeat(64), publishedAt: '2026-10-08T09:00:00.000Z' }] };
+      if (index === 4) {
+        document.jiraPublication.split = true;
+        document.jiraPublication.parts.push(null, { commentId: '10008', bodyHash: 'a'.repeat(64) });
+      }
+      if (document.jiraPublication) {
+        const publication = document.jiraPublication;
+        publication.contentSnapshot = trackerPublicationSnapshot(publication, trackerPublicationBody('wiki', publication, document), document);
+        if (index === 2) document.intro = '<p>Уточнённое описание проверки</p>';
+      }
       return { id: document.reportId, publicId: document.publicId, document, jiraPublication: document.jiraPublication,
         title: `QA-${index + 1}`, issueKey: `QA-${index + 1}`, issueUrl: document.issueUrl,
         createdAt: document.createdAt, updatedAt: document.updatedAt, historyComment: index === 0 ? 'Ожидает ретеста' : '' };
     });
     await dbTransaction('readwrite', store => reports.forEach(report => store.put(report)));
     applyDraftLocally(reports[0].document);
+    const sharedScope = { includeImages: true, includeFiles: true };
+    rememberSharedPublication(reports[0].id, {
+      id: 'd'.repeat(32), ownerToken: 'e'.repeat(43), replyToken: 'f'.repeat(43),
+      createdAt: '2026-10-08T07:00:00.000Z', updatedAt: '2026-10-08T09:30:00.000Z',
+      ...sharedScope,
+      contentSnapshot: sharedContentSnapshot(reports[0].document, sharedSnapshotOptions(reports[0].document, sharedScope)),
+    });
     getServerReports = async () => [];
   });
   await seed();
-  const open = async () => { await page.click('#historyButton'); await page.waitForSelector('.history-comment-field'); };
+  const open = async () => { await page.click('#historyButton'); await page.waitForSelector('.history-note-edit'); };
   const screenshot = async name => {
     if (screenshots) { fs.mkdirSync(screenshots, { recursive: true });
       await page.locator('.history-modal').screenshot({ path: path.join(screenshots, `${name}.png`), animations: 'disabled' }); }
@@ -80,15 +96,25 @@ async function main() {
   const link = first.getByRole('link', { name: 'Комментарий в Jira', exact: true });
   assert.equal(await link.getAttribute('href'), 'https://jira.example/browse/QA-1?focusedCommentId=10001#comment-10001');
   assert.equal(await link.getAttribute('target'), '_blank');
-  assert.equal(await first.locator('.history-publication-dates time').nth(0).getAttribute('datetime'), '2026-10-08T08:00:00.000Z');
-  assert.equal(await first.locator('.history-publication-dates time').nth(1).getAttribute('datetime'), '2026-10-08T09:00:00.000Z');
-  assert.equal(await page.locator('.history-publication-info').count(), 2);
-  assert.deepEqual(await first.locator('.history-action > svg use').evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['#icon-eye', '#icon-link', '#icon-robot', '#icon-copy']);
-  assert.equal(await first.getByRole('button', { name: 'Удалить', exact: true }).count(), 0);
+  assert.equal(await first.locator('.history-publication-tracker .history-publication-dates time').nth(0).getAttribute('datetime'), '2026-10-08T08:00:00.000Z');
+  assert.equal(await first.locator('.history-publication-tracker .history-publication-dates time').nth(1).getAttribute('datetime'), '2026-10-08T09:00:00.000Z');
+  assert.equal(await page.locator('.history-publication-tracker').count(), 3);
+  assert.deepEqual(await first.locator('.history-action > svg use').evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['#icon-eye', '#icon-robot']);
+  assert.equal(await first.getByRole('button', { name: 'Удалить из браузера', exact: true }).count(), 0);
+  assert.equal(await first.locator('.history-publication-link').filter({ hasText: 'Обновить' }).count(), 2);
+  assert.equal(await first.locator('.history-publication-update:disabled').count(), 2);
+  const changed = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-3$/ }) });
+  assert.equal(await changed.locator('.history-publication-tracker').getAttribute('data-state'), 'dirty');
+  await changed.getByRole('button', { name: 'Какие правки есть' }).hover();
+  await page.waitForSelector('.history-details-popover:popover-open');
+  assert.match(await page.locator('.history-details-popover:popover-open').innerText(), /Описание отчёта/);
+  await changed.getByRole('button', { name: 'Какие правки есть' }).focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#historyModal').isVisible(), true);
   // The overflow menu is reachable by keyboard and Escape closes it without closing history.
   const more = first.getByRole('button', { name: /^Другие действия/ });
   await more.focus(); await page.keyboard.press('ArrowDown');
-  assert.equal(await first.getByRole('menuitem', { name: 'Удалить', exact: true }).isVisible(), true);
+  assert.equal(await first.getByRole('menuitem', { name: 'Удалить из браузера', exact: true }).isVisible(), true);
   assert.equal(await more.getAttribute('aria-expanded'), 'true');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#historyModal').isVisible(), true);
@@ -103,18 +129,31 @@ async function main() {
   await first.scrollIntoViewIfNeeded();
   // Existing clipboard action refers to this record and preserves the open report.
   await page.evaluate(() => { window.copiedHistoryLink = ''; writeClipboardText = async text => { window.copiedHistoryLink = text; }; });
-  await first.getByRole('button', { name: 'Копировать ссылку', exact: true }).click();
+  await more.click();
+  await first.getByRole('menuitem', { name: 'Копировать локальную ссылку', exact: true }).click();
   assert.equal(await page.evaluate(() => copiedHistoryLink), `${origin}/report/abc0001`);
   assert.equal(await page.evaluate(() => draft.reportId), 'history-0');
+  await first.getByRole('button', { name: 'Копировать ссылку на комментарий в Jira', exact: true }).click();
+  assert.equal(await page.evaluate(() => copiedHistoryLink), 'https://jira.example/browse/QA-1?focusedCommentId=10001#comment-10001');
+  await first.getByRole('button', { name: 'Копировать ссылку на публикацию', exact: true }).click();
+  assert.equal(await page.evaluate(() => copiedHistoryLink), origin + '/shared-report/' + 'd'.repeat(32) + '#' + 'f'.repeat(43));
+  assert.equal(await page.evaluate(() => draft.reportId), 'history-0');
+  const split = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-5$/ }) });
+  await split.getByRole('button', { name: 'Открыть части комментария в Jira' }).click();
+  assert.deepEqual(await page.locator('.history-details-popover:popover-open a').allTextContents(), ['Jira · часть 1', 'Jira · часть 3']);
+  await page.keyboard.press('Escape');
+  await split.getByRole('button', { name: 'Копировать ссылку на комментарий в Jira', exact: true }).click();
+  assert.equal(await page.evaluate(() => copiedHistoryLink), 'https://jira.example/browse/QA-5?focusedCommentId=10005#comment-10005\nhttps://jira.example/browse/QA-5?focusedCommentId=10008#comment-10008');
+  await first.locator('.history-note-edit').click();
   await first.locator('.history-comment-field').fill('Ретест после исправления');
-  await first.getByRole('button', { name: 'Открыть', exact: true }).click();
+  await first.getByRole('button', { name: 'Редактор', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#historyModal').hidden);
   assert.equal(await page.evaluate(() => draft.reportId), 'history-0');
   assert.equal(await page.evaluate(() => draft.jiraPublication.parts[0].commentId), '10001');
   assert.equal(await page.evaluate(async () => (await getReportRecord('history-0')).historyComment), 'Ретест после исправления');
   await open();
   // Wide and narrow cards fit each theme; menus remain visible at the bottom of the list.
-  for (const width of [1600, 1000, 390]) {
+  for (const width of [1600, 1000, 390, 320]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     for (const theme of ['light', 'dark', 'graphite']) {
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
@@ -123,8 +162,12 @@ async function main() {
       assert.equal(await page.locator('.history-item').evaluateAll(cards => cards.every(card => {
         const rect = card.getBoundingClientRect();
         return [...card.querySelectorAll('.history-comment-field, .history-action, .history-more-button, .history-publication-link')]
-          .every(node => { const box = node.getBoundingClientRect(); return box.left >= rect.left && box.right <= rect.right; });
+          .filter(node => node.getClientRects().length).every(node => { const box = node.getBoundingClientRect(); return box.left >= rect.left && box.right <= rect.right; });
       })), true);
+      assert.equal(await page.locator('.history-publication-actions').evaluateAll(groups => {
+        const reference = [...groups[0].querySelectorAll('button, a')].filter(node => node.getClientRects().length).map(node => node.getBoundingClientRect().left);
+        return groups.every(group => [...group.querySelectorAll('button, a')].filter(node => node.getClientRects().length).every((node, index) => Math.abs(node.getBoundingClientRect().left - reference[index]) < 1));
+      }), true);
       await page.evaluate(() => document.activeElement?.blur());
       await screenshot(`${theme}-${width}`);
       const last = page.locator('.history-item').last();
@@ -144,29 +187,39 @@ async function main() {
   }
   await page.setViewportSize({ width: 1600, height: 1000 });
   await first.scrollIntoViewIfNeeded();
-  await first.getByRole('button', { name: 'Копия', exact: true }).click();
+  await more.click();
+  await first.getByRole('menuitem', { name: 'Создать копию', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#historyModal').hidden);
   assert.notEqual(await page.evaluate(() => draft.reportId), 'history-0');
   assert.equal(await page.evaluate(() => draft.jiraPublication), null);
   await open();
   const target = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-6$/ }) });
   await target.getByRole('button', { name: /^Другие действия/ }).click();
-  await target.getByRole('menuitem', { name: 'Удалить', exact: true }).click();
+  await target.getByRole('menuitem', { name: 'Удалить из браузера', exact: true }).click();
   assert.equal(await page.locator('#confirmModal').isVisible(), true);
   await page.click('#cancelConfirmButton');
   assert.equal(await page.evaluate(async () => Boolean(await getReportRecord('history-5'))), true);
   await target.getByRole('button', { name: /^Другие действия/ }).click();
-  await target.getByRole('menuitem', { name: 'Удалить', exact: true }).click();
+  await target.getByRole('menuitem', { name: 'Удалить из браузера', exact: true }).click();
   await page.click('#acceptConfirmButton');
   await page.waitForFunction(async () => !(await getReportRecord('history-5')));
   // A cleared binding disappears from history even with a stale cloud/document copy.
   await page.evaluate(async () => { await writeJiraPublication({ reportId: 'history-0' }, null); await renderHistoryList(); });
-  assert.equal(await first.locator('.history-publication-info').count(), 0);
+  assert.equal(await first.locator('.history-publication-tracker').count(), 0);
   await page.click('#closeHistoryButton');
   await page.reload(); await page.waitForSelector('.cell-editor');
   await page.evaluate(() => { cloudHistoryEnabled = false; getServerReports = async () => []; });
   await open();
-  assert.equal(await first.locator('.history-publication-info').count(), 0);
+  assert.equal(await first.locator('.history-publication-tracker').count(), 0);
+  await page.evaluate(() => { window.updatedHistoryReport = ''; publishToJira = async () => { window.updatedHistoryReport = draft.reportId; }; });
+  await changed.locator('.history-publication-update').click();
+  await page.waitForFunction(() => window.updatedHistoryReport === 'history-2');
+  await open();
+  const cloudTarget = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-4$/ }) });
+  await page.evaluate(() => { window.cloudHistoryReport = ''; personalCloud.open = async () => { window.cloudHistoryReport = draft.reportId; }; });
+  await cloudTarget.getByRole('button', { name: /^Другие действия/ }).click();
+  await cloudTarget.getByRole('menuitem', { name: 'Сохранить в облако', exact: true }).click();
+  await page.waitForFunction(() => window.cloudHistoryReport === 'history-3');
   assert.deepEqual(errors, []);
   console.log('Passed: linked comment and publication dates, icon actions, keyboard menu, clipboard, comments, open, copy, delete confirmation, removed binding, reload, all themes and widths.');
 }

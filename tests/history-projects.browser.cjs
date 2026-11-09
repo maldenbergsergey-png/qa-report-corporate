@@ -68,7 +68,9 @@ async function main() {
     applyDraftLocally(reports[0].document);
     window.cloudFixture = [{ id: 'cloud', publicId: 'abc0005', issueKey: 'CLOUD-5',
       title: 'Облачный чек-лист', updatedAt: '2026-10-08T08:00:00.000Z', source: 'server' }];
-    getServerReports = async () => window.cloudFixture;
+    await dbTransaction('readwrite', store => store.put({ ...window.cloudFixture[0],
+      document: normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: 'cloud', publicId: 'abc0005', issueUrl: 'CLOUD-5' }),
+    }));
   });
   const useCloud = async () => page.evaluate(() => {
     getServerReports = async () => [{ id: 'cloud', publicId: 'abc0005', issueKey: 'CLOUD-5',
@@ -81,7 +83,7 @@ async function main() {
   };
   const openHistory = async () => {
     await page.click('#historyButton');
-    await page.waitForSelector('.history-comment-field');
+    await page.waitForSelector('.history-note-edit');
   };
   const screenshot = async name => {
     if (!process.env.QA_REPORT_SCREENSHOTS) return;
@@ -110,11 +112,12 @@ async function main() {
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 1);
   assert.equal(await page.locator('.history-item h3').innerText(), 'SHOP-2');
   // Preserve a pending comment before switching projects.
+  await page.locator('.history-note-edit').click();
   await page.locator('.history-comment-field').fill('Ретест оплаты — сохранён');
   await page.selectOption('#historyProjectFilter', 'APP');
   await page.waitForSelector('.history-empty');
   await page.fill('#historySearch', '');
-  await page.waitForSelector('.history-comment-field');
+  await page.waitForSelector('.history-note-edit');
   assert.equal(await page.locator('.history-item h3').innerText(), 'APP-3');
   await page.selectOption('#historyProjectFilter', 'none');
   await page.waitForFunction(() => document.querySelector('.history-item h3')?.textContent === 'Без задачи');
@@ -213,11 +216,11 @@ async function main() {
   await page.evaluate(async () => {
     getAllHistoryReports = window.originalHistoryRead;
     window.bulkCloud = [{ id: 'cloud', publicId: 'abc0005', issueKey: 'CLOUD-5', title: 'Облачный чек-лист', updatedAt: '2026-10-08T08:00:00.000Z', source: 'server' }];
-    getServerReports = async () => window.bulkCloud;
     window.failCloudDelete = true;
-    deleteServerReport = async id => {
-      if (window.failCloudDelete) throw Error('fixture temporary failure');
-      window.bulkCloud = window.bulkCloud.filter(report => report.id !== id);
+    const originalDelete = deleteReportRecord;
+    deleteReportRecord = async id => {
+      if (id === 'cloud' && window.failCloudDelete) throw Error('fixture temporary failure');
+      await originalDelete(id);
     };
     await dbTransaction('readwrite', store => store.put({ id: 'cloud', publicId: 'abc0005', issueKey: 'CLOUD-5',
       document: normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: 'cloud', publicId: 'abc0005', issueUrl: 'CLOUD-5' }),
@@ -270,6 +273,7 @@ async function main() {
   await page.waitForFunction(() => !historyDeleting);
   assert.equal(await page.locator('[data-history-select="cloud"]').count(), 0);
   assert.equal(await page.evaluate(async () => (await getReportRecord('cloud')) === undefined), true);
+  assert.equal(await page.evaluate(() => window.bulkCloud.length), 1, 'deleting a browser copy keeps its cloud copy');
   assert.equal(await page.locator('#deleteSelectedHistoryButton').isDisabled(), true);
   await page.selectOption('#historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);

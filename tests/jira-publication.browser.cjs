@@ -194,18 +194,19 @@ let child, browser;
   assert.equal(await page.locator('#publishButton').innerText(), 'Опубликовать в Jira');
   await page.fill('#issueUrl', 'https://jira.example/browse/QA-1');
   assert.equal(await page.locator('#publishButton').innerText(), 'Открыть в Jira');
-  // Verify the real server round trip and the lighter history-list response.
+  // Publication bindings and attachment options survive the real local history round trip.
   const persisted = await page.evaluate(async () => {
     const document = structuredClone(draft), id = crypto.randomUUID();
     document.reportId = id; document.publicId = createPublicId();
     document.jiraPublication.reportId = id; document.jiraPublication.token = "should-not-persist";
     document.jiraPublication.includeImages = false; document.jiraPublication.includeFiles = true;
-    await reportApi("/api/reports", { method: "POST", body: JSON.stringify({ id, document }) });
-    const { reports } = await reportApi("/api/reports");
-    const { report } = await reportApi("/api/reports/" + id);
-    const list = reports.find(record => record.id === id);
-    await reportApi("/api/reports/" + id, { method: "DELETE" });
-    return { list: list.jiraPublication, document: report.document.jiraPublication };
+    const normalized = normalizeDraft(document);
+    await saveReportSnapshot("publication-fixture", normalized);
+    const report = await getReportRecord(id);
+    const list = (await getAllHistoryReports()).find(record => record.id === id);
+    const link = historyPublication(list);
+    await deleteReportRecord(id);
+    return { list: link, document: report.document.jiraPublication };
   });
   assert.equal(persisted.list.parts[0].commentId, '10002');
   assert.equal(persisted.list.includeImages, false);
@@ -280,7 +281,7 @@ let child, browser;
   const beforeMissing = await page.evaluate(async () => {
     cloudHistoryEnabled = true;
     await saveDraft({ collect: false });
-    await Promise.all([...(pendingHistoryServerSaves.get(draft.reportId) || [])]);
+    await draftWriteQueue;
     return { link: structuredClone(draft.jiraPublication), record: await getReportRecord(draft.reportId) };
   });
   for (const status of [403, 502]) {
@@ -311,9 +312,9 @@ let child, browser;
   assert.equal(missingRecord.document.jiraPublication, null);
   assert.equal(missingRecord.createdAt, beforeMissing.record.createdAt);
   assert.ok(Date.parse(missingRecord.updatedAt) >= detectedAfter);
-  await page.waitForFunction(async () => (await reportApi('/api/reports/' + draft.reportId)).report.document.jiraPublication === null);
-  const serverMissing = await page.evaluate(async () => (await reportApi('/api/reports')).reports.find(r => r.id === draft.reportId));
-  assert.equal(serverMissing.jiraPublication, null);
+  await page.waitForFunction(async () => (await getReportRecord(draft.reportId)).document.jiraPublication === null);
+  const historyMissing = await page.evaluate(async () => historyPublication((await getAllHistoryReports()).find(r => r.id === draft.reportId)));
+  assert.equal(historyMissing, null);
   await page.evaluate(() => openHistory());
   assert.equal(await page.locator('.history-publication-info').count(), 0);
   await page.evaluate(() => closeHistory());
@@ -337,7 +338,8 @@ let child, browser;
   assert.equal(await page.evaluate(() => draft.jiraPublication.parts[0].commentId), replacement.parts[0].commentId);
   await page.click('#publishCancelButton');
   await page.evaluate(() => openHistory());
-  await page.getByRole('button', { name: 'Копия', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Другие действия с отчётом/ }).first().click();
+  await page.getByRole('menuitem', { name: 'Создать копию', exact: true }).first().click();
   await page.waitForFunction(() => draft.jiraPublication === null);
   assert.match(await page.locator('#publishButton').innerText(), /^(Указать задачу|Опубликовать в Jira)$/);
   assert.deepEqual(errors, []);

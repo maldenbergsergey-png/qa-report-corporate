@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=158" />
+    <link rel="stylesheet" href="/styles.css?v=159" />
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -93,6 +93,12 @@
       <symbol id="icon-align-center" viewBox="0 0 24 24"><path d="M4 6h16M7 10h10M4 14h16M7 18h10" /></symbol>
       <symbol id="icon-align-right" viewBox="0 0 24 24"><path d="M4 6h16M10 10h10M4 14h16M10 18h10" /></symbol>
       <symbol id="icon-stretch" viewBox="0 0 24 24"><path d="M4 12h16M4 12l3-3M4 12l3 3M20 12l-3-3M20 12l-3 3M3 5v14M21 5v14" /></symbol>
+      <symbol id="icon-monitor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></symbol>
+      <symbol id="icon-cloud-upload" viewBox="0 0 24 24"><path d="M7 17a5 5 0 1 1 1-10 7 7 0 0 1 13 4 4 4 0 0 1-3 6M12 21V11m-4 4 4-4 4 4"/></symbol>
+      <symbol id="icon-cloud-check" viewBox="0 0 24 24"><path d="M7 17a5 5 0 1 1 1-10 7 7 0 0 1 13 4 4 4 0 0 1-3 6m-9 0 3 3 6-6"/></symbol>
+      <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+      <symbol id="icon-pencil" viewBox="0 0 24 24"><path d="m16 3 5 5-12 12-6 1 1-6ZM13 6l5 5"/></symbol>
+      <symbol id="icon-comment" viewBox="0 0 24 24"><path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3ZM7 8h10M7 12h7"/></symbol>
     </svg>
     <div class="app-shell">
       <header class="topbar">
@@ -929,7 +935,7 @@
       <section class="modal history-modal" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
         <header class="modal-header">
           <div>
-            <div class="eyebrow">Сервер и браузер</div>
+            <div class="eyebrow">Ваши чек-листы</div>
             <h2 id="historyTitle">История отчётов</h2>
           </div>
           <button class="icon-button" id="closeHistoryButton" type="button" aria-label="Закрыть историю">×</button>
@@ -952,7 +958,7 @@
         </div>
         <div class="history-list" id="historyList"></div>
         <footer class="modal-footer">
-          <span>Серверная история дополняется локальным кэшем браузера.</span>
+          <span>Здесь показаны отчёты из этого браузера. Облачные копии доступны в профиле.</span>
           <button class="button button-danger" id="deleteSelectedHistoryButton" type="button" disabled hidden>Удалить выбранные</button>
         </footer>
       </section>
@@ -1290,7 +1296,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=127"></script>
+    <script src="/release-notes.js?v=129"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1407,8 +1413,8 @@
       <header class="cloud-heading"><h2 id="corporateProfileTitle">Профиль</h2><button id="corporateProfileClose" class="button button-ghost" type="button">Закрыть</button></header>
       <p id="corporateProfileEmail"></p><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
     </dialog>
-    <script src="/personal-cloud-client.js?v=2"></script>
-    <script src="/app.js?v=172"></script>
+    <script src="/personal-cloud-client.js?v=3"></script>
+    <script src="/app.js?v=173"></script>
     <script src="/local-import-client.js?v=8"></script>
 
   </body>

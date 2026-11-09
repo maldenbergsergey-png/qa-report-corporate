@@ -11,7 +11,7 @@ p { margin: 0 0 12px; }
 .login { max-width: 440px; margin: 48px auto; }
 form label { display: grid; gap: 7px; font-size: 13px; color: #c6cfdb; }
 .login label { margin-bottom: 18px; }
-input, button { border: 1px solid #485363; border-radius: 8px; color: inherit; background: #1b1f26; font: inherit; padding: 10px 13px; min-height: 42px; }
+input, button, select { border: 1px solid #485363; border-radius: 8px; color: inherit; background: #1b1f26; font: inherit; padding: 10px 13px; min-height: 42px; }
 input { min-width: 0; }
 button { cursor: pointer; white-space: nowrap; }
 button:hover { background: #303743; }
@@ -49,3 +49,7 @@ code { font: 12px/1.6 ui-monospace,monospace; overflow-wrap: anywhere; }
 
 .storage-toggle { display: flex; align-items: center; gap: 10px; min-height: 42px; cursor: pointer; }
 .storage-toggle input { width: 18px; height: 18px; min-height: auto; padding: 0; margin: 0; accent-color: #a8cbfa; }
+.user-table { min-width: 1150px; }
+.user-table td:nth-child(2) { overflow-wrap: anywhere; }
+.user-access-status { display: block; margin-top: 5px; min-height: 20px; }
+@media(max-width: 760px) { #user-directory .section-head { display: flex; flex-wrap: wrap; gap: 8px; } #user-directory .pagination { gap: 8px; flex-wrap: wrap; } .storage-toggle { align-items: start; padding: 7px 0; } .storage-toggle input { margin-top: 3px; flex: none; } }

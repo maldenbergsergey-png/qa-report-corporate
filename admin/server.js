@@ -55,7 +55,7 @@ function deviceInfo(ua) {
   return { browser, os, device };
 }
 
-function createAdminService({ root, reportsPath, env = process.env, clock = Date.now, cloudSettings }) {
+function createAdminService({ root, reportsPath, env = process.env, clock = Date.now, cloudSettings, publicationSettings, accounts, audit = () => {} }) {
   const configFile = path.resolve(env.QA_ADMIN_CONFIG_FILE || path.join(root, 'secrets', 'admin', 'admin.json'));
   const dataDirectory = path.resolve(path.dirname(reportsPath), 'admin');
   const databaseFile = path.join(dataDirectory, 'usage.sqlite');
@@ -166,7 +166,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
   async function accountOf(request) {
     // request.user is populated by the existing corporate session gate.
     const email = request.user?.email;
-    return typeof email === 'string' && email.length <= 254 ? { id: email, name: '', email } : null;
+    return typeof email === 'string' && email.length <= 254 ? { id: email, name: accounts?.get(email).name || '', email } : null;
   }
 
   async function collect(request, response) {
@@ -262,6 +262,40 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
       const session = token && sessions.get(digest(token));
       if (!session || session.expires <= clock()) { send(response, 401, { error: 'Войдите в админку' }); return true; }
       if (request.method === 'GET' && suffix === '/session') { send(response, 200, { csrf: session.csrf }); return true; }
+      if (suffix === '/storage' && publicationSettings) {
+        if (request.method === 'GET') { send(response, 200, { ...publicationSettings.get(), ...cloudSettings?.get() }); return true; }
+        if (request.method === 'POST') {
+          if (!equal(request.headers['x-csrf-token'] || '', session.csrf)) { send(response, 403, { error: 'Обновите страницу' }); return true; }
+          const body = await bodyOf(request), fields = Object.keys(body);
+          if (!fields.length || fields.some(key => !['enabled', 'publishEnabled', 'cloudEnabled'].includes(key) || typeof body[key] !== 'boolean')) {
+            send(response, 400, { error: 'Проверьте настройки публикации и загрузки' }); return true;
+          }
+          if (!publicationSettings.get().configured) { send(response, 409, { error: 'Хранилище S3 не настроено' }); return true; }
+          if (body.cloudEnabled !== undefined) cloudSettings?.set(body.cloudEnabled);
+          const state = { ...publicationSettings.set(body), ...cloudSettings?.get() };
+          audit(request, response, 'admin_storage_updated');
+          send(response, 200, state); return true;
+        }
+      }
+      if (suffix === '/users' && request.method === 'GET' && accounts) {
+        const directory = accounts.list(Number(url.searchParams.get('page') ?? '1'), url.searchParams.get('search') || '');
+        for (const user of directory.users) user.access = { ...publicationSettings.getUser(user.id), cloudEnabled: cloudSettings.getUser(user.id) };
+        send(response, 200, directory); return true;
+      }
+      if (suffix === '/user-access' && request.method === 'POST' && accounts && publicationSettings && cloudSettings) {
+        if (!equal(request.headers['x-csrf-token'] || '', session.csrf)) { send(response, 403, { error: 'Обновите страницу' }); return true; }
+        const body = await bodyOf(request), { userId, publish, uploadsEnabled, cloudEnabled } = body;
+        if (Object.keys(body).length !== 4 || Object.keys(body).some(key => !['userId', 'publish', 'uploadsEnabled', 'cloudEnabled'].includes(key)) ||
+            typeof userId !== 'string' || !['role', 'allow', 'deny'].includes(publish) || typeof uploadsEnabled !== 'boolean' || typeof cloudEnabled !== 'boolean') {
+          send(response, 400, { error: 'Проверьте настройки пользователя' }); return true;
+        }
+        if (!accounts.has(userId)) { send(response, 404, { error: 'Пользователь не найден' }); return true; }
+        cloudSettings.setUser(userId, cloudEnabled);
+        const state = { ...publicationSettings.setUser(userId, { publish, uploadsEnabled }), cloudEnabled: cloudSettings.getUser(userId) };
+        audit(request, response, 'admin_user_access_updated', { email: userId });
+        send(response, 200, state); return true;
+      }
+      // Compatibility with previously opened admin pages.
       if (suffix === '/cloud' && cloudSettings) {
         if (request.method === 'GET') { send(response, 200, cloudSettings.get()); return true; }
         if (request.method === 'POST') {
@@ -270,6 +304,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
           if (typeof body.cloudEnabled !== 'boolean' || Object.keys(body).length !== 1) { send(response, 400, { error: 'Проверьте настройку облака' }); return true; }
           if (!cloudSettings.get().configured) { send(response, 409, { error: 'Хранилище S3 не настроено' }); return true; }
           cloudSettings.set(body.cloudEnabled);
+          audit(request, response, 'admin_storage_updated');
           send(response, 200, cloudSettings.get()); return true;
         }
       }
@@ -288,10 +323,10 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     const inside = (candidate, directory) => candidate === directory || candidate.startsWith(directory + path.sep);
     const reportsDirectory = path.resolve(path.dirname(reportsPath));
     const reportsFile = path.resolve(reportsPath);
-    const blocked = candidate => candidate === path.join(root, 'personal-cloud.js') || path.relative(root, candidate).split(path.sep).some(part => part.startsWith('.')) ||
+    const blocked = candidate => ['personal-cloud.js', 'corporate-accounts.js', 'corporate-storage.js'].some(name => candidate === path.join(root, name)) || path.relative(root, candidate).split(path.sep).some(part => part.startsWith('.')) ||
       [path.join(root, 'admin'), path.join(root, 'admin-config'), path.join(root, 'secrets'), path.join(root, 'reports-data'), dataDirectory, path.join(root, 'feedback-data')].some(dir => inside(candidate, dir)) ||
       (!inside(root, reportsDirectory) && inside(candidate, reportsDirectory)) || candidate === reportsFile || candidate.startsWith(reportsFile + '-') ||
-      candidate === configFile || candidate.startsWith(configFile + '.') || candidate === path.join(root, 'scripts', 'setup-admin.cjs');
+      candidate === configFile || candidate.startsWith(configFile + '.') || ['setup-admin.cjs', 'check-corporate-storage.cjs'].some(name => candidate === path.join(root, 'scripts', name));
     if (blocked(file)) return true;
     try { return blocked(fs.realpathSync(file)); } catch { return false; }
   }
@@ -299,7 +334,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
   return { handle, collect: async (request, response) => {
     try { await collect(request, response); }
     catch (error) { send(response, error.status || 400, { error: 'Не удалось записать посещение' }); }
-  }, isPrivateFile, close() { if (timer) clearInterval(timer); db?.close(); } };
+  }, isPrivateFile, path: config ? config.path + '/' : null, close() { if (timer) clearInterval(timer); db?.close(); } };
 }
 
 module.exports = { createAdminService, passwordHash, deviceInfo, loadConfig, validAdminPath };

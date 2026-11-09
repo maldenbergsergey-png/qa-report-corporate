@@ -8393,7 +8393,7 @@ function updateShareReportControls() {
   shareReport.Options.hidden = waiting || context?.paused || !publishing || !context?.enabled;
   shareReport.Spinner.hidden = !waiting;
   shareReport.LinkSelect.disabled = waiting;
-  shareReport.Update.hidden = waiting || !showLatest || Boolean(pending) || !context?.enabled || context.publicationPaused || context.latest.attachmentsPending;
+  shareReport.Update.hidden = waiting || !showLatest || Boolean(pending) || !context?.enabled || context.publicationPaused || context.publicationDenied || context.latest.attachmentsPending;
   if (!shareReport.Update.hidden) {
     const state = sharePublicationState(context.latest, context.reportId, { checkPending: false });
     shareReport.Update.textContent = state.state === "current" ? "Изменить состав публикации" : "Обновить отчёт по ссылке";
@@ -8409,7 +8409,7 @@ function updateShareReportControls() {
   shareReport.Publish.textContent = context?.paused ? "Продолжить загрузку" : recovering
     ? sharedAttemptScope(context.reportId, pending) && !context.archivedPending ? "Продолжить загрузку" : "Восстановить ссылку"
     : creatingNew ? "Создать ссылку" : updating ? "Обновить отчёт" : "Опубликовать отчёт";
-  shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || (context.publicationPaused && !recovering);
+  shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || context.publicationDenied || (context.publicationPaused && !recovering);
   shareReport.SignOut.hidden = shareReportBusy || !context?.accountSignedIn;
   shareReport.SignOut.disabled = Boolean(context?.accountBusy);
   shareReport.Minimize.hidden = !shareReportOperation && !context?.paused;
@@ -8459,7 +8459,9 @@ async function openShareReport(event, mode = "") {
     context.accountKey = data?.publishableKey || "";
     context.enabled = data?.ok === true && data.enabled === true && (data.requiresPublishToken === false || Boolean(context.accountKey));
     context.publicationPaused = data?.publicationPaused === true;
+    context.publicationDenied = data?.publicationDenied === true;
     setShareReportStatus(context.publicationPaused ? "Публикация и обновление по ссылке приостановлены" :
+      context.publicationDenied ? "Для вашего аккаунта отключена публикация и обновление отчётов по ссылке" :
       data?.uploadsPaused && context.enabled && !showingPublished ? "Загрузка новых вложений приостановлена" :
       context.enabled || showingPublished ? "" : data?.enabled ? "Откройте приглашение автора в этом браузере"
       : "Публикация по ссылке пока недоступна на этом сервере");
@@ -8851,6 +8853,7 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
     context.preparation = null;
     context.publicationAccountMismatch = error.code === "SHARE_PUBLICATION_ACCOUNT_MISMATCH";
     if (error.code === "REPORT_PUBLICATION_PAUSED") context.publicationPaused = true;
+    if (error.code === "REPORT_USER_PUBLICATION_DENIED") context.publicationDenied = true;
     if (context.uploadPublicationId) setShareReportStatus("Загрузка прервана", context.uploadProgress, context.progress);
     else setShareReportStatus();
     if (recovery && error.status === 404) {
@@ -10958,22 +10961,4 @@ const personalCloud = window.QaReportCloud.create({
     const next = await openPortableDocument(document);
     return next;
   },
-});
-const corporateProfile = document.getElementById("corporateProfileDialog");
-document.getElementById("corporateProfileButton").addEventListener("click", async () => {
-  closeHeaderDropdowns(); corporateProfile.showModal();
-  const label = document.getElementById("corporateProfileEmail");
-  label.textContent = "Проверяем профиль…";
-  try { label.textContent = (await reportApi("/api/auth/session")).user.email; }
-  catch { label.textContent = "Не удалось проверить профиль."; }
-});
-document.getElementById("corporateProfileClose").addEventListener("click", () => corporateProfile.close());
-corporateProfile.addEventListener("keydown", event => { if (event.key === "Escape") event.stopPropagation(); });
-corporateProfile.querySelector("[data-personal-cloud]").addEventListener("click", () => corporateProfile.close());
-document.getElementById("corporateProfileSettings").addEventListener("click", () => { corporateProfile.close(); openJiraSettings(); });
-document.getElementById("corporateProfileSignOut").addEventListener("click", async event => {
-  const button = event.currentTarget; button.disabled = true;
-  try { await reportApi("/api/auth/logout", { method: "POST", body: JSON.stringify({ csrfToken: await authCsrfToken() }) }); personalCloud.reset(); location.assign("/login"); }
-  catch { showToast("Не удалось выйти. Повторите ещё раз."); }
-  finally { button.disabled = false; }
 });

@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=6" defer></script>
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=159" />
+    <link rel="stylesheet" href="/styles.css?v=160" />
     <link rel="stylesheet" href="/report-view.css?v=8" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -220,7 +220,7 @@
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-header-file-text"></use></svg>
             <span class="whats-new-dot" id="whatsNewDot" hidden aria-hidden="true"></span>
           </button>
-          <button class="header-icon-button" id="corporateProfileButton" type="button" title="Профиль" aria-label="Профиль" aria-haspopup="dialog"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></button>
+          <button class="header-icon-button" id="corporateProfileButton" type="button" title="Профиль" aria-label="Профиль" aria-haspopup="dialog"><img data-corporate-avatar hidden alt=""><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></button>
           <button class="header-icon-button" id="settingsButton" type="button" title="Настройки" aria-label="Настройки">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
           </button>
@@ -1298,7 +1298,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=132"></script>
+    <script src="/release-notes.js?v=133"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1413,10 +1413,19 @@
     </dialog>
       <dialog id="corporateProfileDialog" class="cloud-dialog" aria-labelledby="corporateProfileTitle">
       <header class="cloud-heading"><h2 id="corporateProfileTitle">Профиль</h2><button id="corporateProfileClose" class="button button-ghost" type="button">Закрыть</button></header>
-      <p id="corporateProfileEmail"></p><section><h3>MCP-сервер</h3><p>Подключите ИИ к выбранному чек-листу одной командой.</p><button class="button button-secondary" type="button" data-mcp-open>Подключить MCP</button></section><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
+      <div class="corporate-profile-identity"><div class="corporate-profile-avatar"><img data-corporate-avatar hidden alt="Аватар профиля"><span id="corporateProfileAvatarFallback" aria-hidden="true">QA</span></div><div><p id="corporateProfileEmail"></p><p class="corporate-profile-note">Корпоративная учётная запись</p></div></div>
+      <div class="cloud-actions"><button class="button button-secondary" id="corporateProfileUploadAvatar" data-profile-edit type="button">Загрузить аватар</button><button class="button button-ghost" id="corporateProfileRemoveAvatar" data-profile-edit type="button" hidden>Убрать аватар</button></div>
+      <input id="corporateProfileAvatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+      <form id="corporateProfileNameForm" class="corporate-profile-form"><label>Имя<input id="corporateFirstName" autocomplete="given-name" maxlength="100" disabled></label><label>Фамилия<input id="corporateLastName" autocomplete="family-name" maxlength="100" disabled></label><button id="corporateProfileSave" class="button button-secondary" type="submit" disabled>Сохранить имя</button></form>
+      <p class="corporate-profile-note">Имя и аватар используются только в QA Report. Email и вход через AD не меняются.</p>
+      <p id="corporateProfileMessage" role="status" aria-live="polite"></p><button id="corporateProfileRefresh" class="button button-ghost" type="button">Обновить</button>
+      <section><h3>MCP-сервер</h3><p>Подключите ИИ к выбранному чек-листу одной командой.</p><button class="button button-secondary" type="button" data-mcp-open>Подключить MCP</button></section>
+      <div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
+      <a id="corporateProfileAdmin" class="corporate-profile-admin" hidden>Админ-панель · отдельный вход администратора</a>
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
-    <script src="/app.js?v=173"></script>
+    <script src="/app.js?v=174"></script>
+    <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=2"></script>
     <script src="/local-import-client.js?v=9"></script>
 

@@ -11,7 +11,7 @@
 </head>
 <body>
   <main>
-    <header><div><p class="eyebrow">QA REPORT / ADMIN</p><h1>Админ-панель</h1></div><button id="logout" hidden>Выйти</button></header>
+    <header><div><p class="eyebrow">QA REPORT / ADMIN</p><h1>Админ-панель</h1></div><a href="/">К QA Report</a><button id="logout" hidden>Выйти</button></header>
     <p id="message" role="status" aria-live="polite"></p>
     <section id="login-panel" class="login panel" hidden>
       <h2>Вход администратора</h2><p class="muted">Используйте отдельную учётную запись администратора.</p>
@@ -22,10 +22,21 @@
       </form>
     </section>
     <div id="dashboard" hidden>
-      <section class="panel" aria-labelledby="cloud-settings-title"><h2 id="cloud-settings-title">Личные облачные отчёты</h2>
+      <section class="panel" id="publication-storage" aria-labelledby="storage-settings-title"><h2 id="storage-settings-title">Публикация и хранилище S3</h2>
+        <label class="storage-toggle"><input id="publish-enabled" type="checkbox" disabled> Разрешить публикацию и обновление по ссылке</label>
+        <label class="storage-toggle"><input id="storage-enabled" type="checkbox" disabled> Разрешить загрузку новых вложений в S3</label>
         <label class="storage-toggle"><input id="cloud-enabled" type="checkbox" disabled> Разрешить сохранение личных отчётов в облаке</label>
         <p class="muted">Отчёты доступны только владельцу и хранятся отдельно от публикаций по ссылке. При запрете сохранения прежние копии можно открыть и удалить.</p>
+        <p class="muted">Запрет новых вложений действует на публикации, ответы, личное облако и ручную загрузку. Прежние файлы остаются доступны.</p>
         <p id="cloud-settings-status" role="status"></p>
+      </section>
+      <section class="panel" id="user-directory" aria-labelledby="users-title">
+        <div class="section-head"><h2 id="users-title">Пользователи</h2><button id="users-refresh" type="button">Обновить список</button></div>
+        <p class="muted">Здесь появляются сотрудники, вошедшие в QA Report. Права действуют только в этом приложении; вход администратора остаётся отдельным.</p>
+        <form id="users-search-form" class="search"><label class="sr-only" for="users-search">Поиск пользователя</label><input id="users-search" type="search" maxlength="100" placeholder="Имя или email"><button>Найти</button></form>
+        <div class="table-scroll"><table class="user-table"><thead><tr><th>Имя</th><th>Email</th><th>Учётная запись</th><th>Последняя активность</th><th>Публикация по ссылке</th><th>Новые вложения в S3</th><th>Личное облако</th></tr></thead><tbody id="users"></tbody></table></div>
+        <p id="users-status" class="muted" role="status"></p>
+        <div class="pagination"><button id="users-previous" type="button" disabled>← Назад</button><span id="users-page"></span><button id="users-next" type="button" disabled>Далее →</button></div>
       </section>
       <form id="filters" class="panel filters">
         <label>С даты<input id="from" type="date" required></label><label>По дату<input id="to" type="date" required></label>

@@ -31,11 +31,12 @@ const UploadRuntime = require("./jira-upload-runtime");
 const { createUploadStore } = require("./jira-upload-store");
 const uploadStore = createUploadStore(getReportsDb);
 const JiraPublication = require("./jira-publication");
-const { createReportSharing } = require("./report-sharing");
-const { createReportStorage } = require("./report-storage");
+const { createReportSharing, createPublicationSettings } = require("./report-sharing");
 
 const { createCloudSettings, createPersonalCloud } = require("./personal-cloud");
 const { createAdminService } = require("./admin/server");
+const { createCorporateAccounts } = require("./corporate-accounts");
+const { createCorporateStorage } = require("./corporate-storage");
 
 const ROOT = __dirname;
 
@@ -85,11 +86,14 @@ const localImportService = createLocalImportService({ maxFileBytes: MAX_ATTACHME
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
 const API_REVISION = 9;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
-const cloudSettings = createCloudSettings({ getDb: getReportsDb, configured: objectStorageConfigured });
-const adminService = createAdminService({ root: ROOT, reportsPath: REPORTS_DB_PATH, cloudSettings });
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
 const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1").trim();
+const corporateAccounts = createCorporateAccounts({ getDb: getReportsDb });
+const cloudSettings = createCloudSettings({ getDb: getReportsDb, configured: objectStorageConfigured });
+const publicationSettings = createPublicationSettings({ getDb: getReportsDb, configPath: objectStorageConfigured() ? "corporate-storage" : undefined });
+const adminService = createAdminService({ root: ROOT, reportsPath: REPORTS_DB_PATH, cloudSettings, publicationSettings, accounts: corporateAccounts,
+  audit: (request, response, event, fields) => audit(request, response, event, fields) });
 const CHECKLIST_IMPORT_TTL_MS = 15 * 60 * 1000;
 const apiRateLimit = new Map();
 let reportsDb;
@@ -276,6 +280,7 @@ async function handleLogin(request, response) {
     return;
   }
   loginRateLimiter.success(email, ip);
+  corporateAccounts.observe(result.email, true);
   const token = createSessionToken(result.email);
   response.setHeader("Set-Cookie", sessionCookie(token));
   audit(request, response, "login_succeeded", { email: result.email });
@@ -1454,6 +1459,10 @@ function normalizeStorageReportId(value) {
 }
 
 async function handleObjectStorageUpload(request, response) {
+  const email = requireUser(request);
+  if (!publicationSettings.get().enabled || !publicationSettings.getUser(email).uploadsEnabled) {
+    sendJson(response, 403, { error: "Загрузка новых вложений отключена администратором." }); return;
+  }
   const body = await readJson(request);
   const reportId = normalizeStorageReportId(body.reportId);
   const owner = resolveReportOwner(request);
@@ -1527,34 +1536,24 @@ const bugReportService = require("./bug-report-server").createBugReportService({
 
 const personalCloud = createPersonalCloud({
   getDb: getReportsDb, readJson, sendJson, settings: cloudSettings,
+  uploadsAllowed: owner => publicationSettings.get().enabled && publicationSettings.getUser(owner).uploadsEnabled,
   authenticate: request => requireUser(request),
   validateWrite: request => {
     if (!verifyCsrf(request, request.headers["x-qa-csrf-token"]) || request.headers["x-qa-cloud"] !== "1" ||
         !request.headers["content-type"]?.startsWith("application/json")) throw Object.assign(new Error("Недействительный защитный токен"), { status: 403 });
   },
-  storage: () => {
-    const credentials = objectStorageCredentials();
-    return createReportStorage({ activeBucket: "corporate", buckets: { corporate: {
-      endpoint: OBJECT_STORAGE_ENDPOINT, region: OBJECT_STORAGE_REGION, name: OBJECT_STORAGE_BUCKET,
-      accessKeyId: credentials.accessKey, secretAccessKey: credentials.secretKey,
-    } } });
-  },
+  storage: () => createCorporateStorage(),
 });
 
 const reportSharing = createReportSharing({
   getDb: getReportsDb, readJson, sendJson, requestOrigin,
+  publicationSettings,
   configPath: objectStorageConfigured() ? "corporate-storage" : undefined,
   publisherIdentity: request => ({ id: requireUser(request) }),
   // Base64 expands the raw batch by 4/3; 50 MiB still fits the 72 MiB JSON request.
   uploadLimits: { fileBytes: 50 * 1024 * 1024, batchBytes: 50 * 1024 * 1024, requestBytes: 72 * 1024 * 1024 },
   authorEmail: id => id,
-  storageLoader: () => {
-    const credentials = objectStorageCredentials();
-    return createReportStorage({ activeBucket: "corporate", buckets: { corporate: {
-      endpoint: OBJECT_STORAGE_ENDPOINT, region: OBJECT_STORAGE_REGION, name: OBJECT_STORAGE_BUCKET,
-      accessKeyId: credentials.accessKey, secretAccessKey: credentials.secretKey,
-    } } });
-  },
+  storageLoader: () => createCorporateStorage(),
   cleanupIntervalMs: 30_000,
   async showPage(request, response) {
     const html = await fs.promises.readFile(path.join(ROOT, "shared-report.html"));
@@ -1606,6 +1605,7 @@ const server = http.createServer(async (request, response) => {
     // A device key grants access only to its speech/AI queue, never to session-protected APIs.
     if (await dictationService.machine(request, response)) return;
     request.user = sessionFromRequest(request);
+    if (request.user && (requestPath === "/" || requestPath.startsWith("/api/"))) corporateAccounts.observe(request.user.email);
     if (request.method === "GET" && requestPath === "/api/auth/session") {
       if (!request.user) sendJson(response, 401, { error: "Unauthorized" });
       else sendJson(response, 200, { user: { email: request.user.email }, expires: new Date(request.user.exp * 1000).toISOString() });
@@ -1624,6 +1624,20 @@ const server = http.createServer(async (request, response) => {
         response.writeHead(302, { Location: `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`, "Cache-Control": "no-store" });
         response.end();
       }
+      return;
+    }
+    if (requestPath === "/api/profile") {
+      const email = requireUser(request);
+      if (request.method === "GET") {
+        sendJson(response, 200, { user: corporateAccounts.get(email), adminPath: adminService.path });
+      } else if (request.method === "POST") {
+        if (!verifyCsrf(request, request.headers["x-qa-csrf-token"]) || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { error: "Недействительный защитный токен" }); return;
+        }
+        const user = corporateAccounts.update(email, await readJson(request, 384 * 1024));
+        audit(request, response, "profile_updated");
+        sendJson(response, 200, { user });
+      } else sendJson(response, 405, { error: "Метод не поддерживается" });
       return;
     }
     if (await personalCloud.handle(request, response, requestPath)) {

@@ -91,19 +91,12 @@ test("saving a non-Jira task from the editor preserves its URL and shows its key
   assert.equal(historyLabel(reloaded), "QA-123");
 });
 
-test("previously saved local and cloud entries recover their label without resaving", async () => {
-  for (const cloud of [false, true]) {
-    const record = { id: "old", publicId: "abc12345", title: "Без задачи — STAGE", issueKey: "",
-      issueUrl: "https://tasks.example.test/project/Task/QA-123", updatedAt: "2026-09-11T12:00:00Z" };
-    const records = new Map([[record.id, record]]);
-    const before = JSON.stringify(record);
-    const ctx = harness(cloud ? new Map() : records);
-    if (cloud) ctx.getServerReports = async () => [{ ...record, source: "server" }];
-    ctx.elements.historySearch.value = "qa-123";
-    await ctx.renderHistoryList();
-    assert.equal(historyLabel(ctx), "QA-123");
-    assert.equal(JSON.stringify(records.get(record.id)), before);
-  }
+test("previously saved local entries recover their label without resaving", async () => {
+  const record = { id: "old", publicId: "abc12345", title: "Без задачи — STAGE", issueKey: "", issueUrl: "https://tasks.example.test/project/Task/QA-123", updatedAt: "2026-09-11T12:00:00Z" };
+  const records = new Map([[record.id, record]]), before = JSON.stringify(record), ctx = harness(records);
+  ctx.elements.historySearch.value = "qa-123";
+  await ctx.renderHistoryList();
+  assert.equal(historyLabel(ctx), "QA-123"); assert.equal(JSON.stringify(records.get(record.id)), before);
 });
 
 test("history uses the document's task when summary metadata is stale, including search and clearing", async () => {
@@ -315,25 +308,16 @@ test("bulk delete confirms the full selection, including hidden records, and kee
   assert.deepEqual([...ctx.selectedHistoryReportIds], ["APP-2"]);
 });
 
-test("deleting a cloud report waits for in-flight saves and also removes its local copy", async () => {
-  const ctx = harness();
-  vm.runInContext(functionSource("app.js", "deleteHistoryReport"), ctx);
-  const saving = deferred();
-  ctx.draftWriteQueue = Promise.resolve();
-  ctx.pendingHistoryServerSaves.set("cloud", new Set([saving.promise]));
-  ctx.selectedHistoryReportIds.add("cloud");
-  const deleted = [];
-  ctx.deleteServerReport = async id => deleted.push(`server:${id}`);
-  ctx.deleteReportRecord = async id => deleted.push(`local:${id}`);
-  const deletion = ctx.deleteHistoryReport({ id: "cloud", source: "server" });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(deleted, []);
-  saving.resolve();
-  await deletion;
-  assert.deepEqual(deleted, ["server:cloud", "local:cloud"]);
+test("deleting local history waits for the local write and never deletes the cloud copy", async () => {
+  const ctx = harness(); vm.runInContext(functionSource("app.js", "deleteHistoryReport"), ctx);
+  const saving = deferred(); ctx.draftWriteQueue = saving.promise;
+  ctx.selectedHistoryReportIds.add("copy");
+  const deleted = []; ctx.deleteReportRecord = async id => deleted.push(id);
+  const deletion = ctx.deleteHistoryReport({ id: "copy", source: "local" });
+  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(deleted, []);
+  saving.resolve(); await deletion; assert.deepEqual(deleted, ["copy"]);
   assert.equal(ctx.selectedHistoryReportIds.size, 0);
 });
-
 
 test("viewing and saving unchanged or legacy content preserves history dates; actual edits advance them", async () => {
   const createdAt = "2026-09-01T10:00:00.000Z", updatedAt = "2026-09-20T10:00:00.000Z";
@@ -418,15 +402,12 @@ test("metadata worker detects legacy content off the UI thread without returning
   assert.doesNotMatch(JSON.stringify(metadata), /data:/);
 });
 
-test("pending local edits retain their modification date while cloud metadata is still older", async () => {
+test("history contains local copies only and retains local dates", async () => {
   const local = { ...historyRecord("SHOP-1"), createdAt: "2026-09-01T10:00:00Z", updatedAt: "2026-10-08T10:00:00Z" };
   const ctx = harness(new Map([[local.id, local]]));
-  ctx.getServerReports = async () => [{ ...local, createdAt: "2026-08-01T10:00:00Z", updatedAt: "2026-10-07T10:00:00Z", source: "server" }];
   const reports = await ctx.getAllHistoryReports();
-  assert.equal(reports.length, 1);
-  assert.equal(reports[0].source, "server");
-  assert.equal(reports[0].createdAt, "2026-08-01T10:00:00Z");
-  assert.equal(reports[0].updatedAt, local.updatedAt);
+  assert.equal(reports.length, 1); assert.equal(reports[0].source, "local");
+  assert.equal(reports[0].createdAt, local.createdAt); assert.equal(reports[0].updatedAt, local.updatedAt);
 });
 
 function published(reportId = "report") {
@@ -435,8 +416,8 @@ function published(reportId = "report") {
     parts: [{ commentId: "10001", bodyHash: "a".repeat(64), publishedAt: "2026-10-08T09:00:00.000Z" }] };
 }
 
-test("history uses confirmed current publication before cloud metadata catches up", async () => {
-  const ctx = harness();
+test("history uses confirmed current publication before local metadata catches up", async () => {
+  const ctx = harness(new Map([["report", historyRecord("report")]]));
   ctx.draft.jiraPublication = published();
   ctx.getServerReports = async () => [{ id: "report", publicId: "abc12345", jiraPublication: null }];
   await ctx.renderHistoryList();

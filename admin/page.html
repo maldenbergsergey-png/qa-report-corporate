@@ -11,7 +11,7 @@
 </head>
 <body>
   <main>
-    <header><div><p class="eyebrow">QA REPORT / ADMIN</p><h1>Статистика посещений</h1></div><button id="logout" hidden>Выйти</button></header>
+    <header><div><p class="eyebrow">QA REPORT / ADMIN</p><h1>Админ-панель</h1></div><button id="logout" hidden>Выйти</button></header>
     <p id="message" role="status" aria-live="polite"></p>
     <section id="login-panel" class="login panel" hidden>
       <h2>Вход администратора</h2><p class="muted">Используйте отдельную учётную запись администратора.</p>
@@ -22,6 +22,11 @@
       </form>
     </section>
     <div id="dashboard" hidden>
+      <section class="panel" aria-labelledby="cloud-settings-title"><h2 id="cloud-settings-title">Личные облачные отчёты</h2>
+        <label class="storage-toggle"><input id="cloud-enabled" type="checkbox" disabled> Разрешить сохранение личных отчётов в облаке</label>
+        <p class="muted">Отчёты доступны только владельцу и хранятся отдельно от публикаций по ссылке. При запрете сохранения прежние копии можно открыть и удалить.</p>
+        <p id="cloud-settings-status" role="status"></p>
+      </section>
       <form id="filters" class="panel filters">
         <label>С даты<input id="from" type="date" required></label><label>По дату<input id="to" type="date" required></label>
         <button class="primary">Показать</button><button id="refresh" type="button">Обновить</button>

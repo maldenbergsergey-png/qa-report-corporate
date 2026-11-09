@@ -32,6 +32,7 @@ const JiraPublication = require("./jira-publication");
 const { createReportSharing } = require("./report-sharing");
 const { createReportStorage } = require("./report-storage");
 
+const { createCloudSettings, createPersonalCloud } = require("./personal-cloud");
 const { createAdminService } = require("./admin/server");
 
 const ROOT = __dirname;
@@ -82,7 +83,8 @@ const localImportService = createLocalImportService({ maxFileBytes: MAX_ATTACHME
 const STORE_REPORT_ATTACHMENTS = process.env.QA_REPORT_STORE_ATTACHMENTS === "true";
 const API_REVISION = 9;
 const REPORTS_DB_PATH = process.env.REPORTS_DB_PATH || path.join(ROOT, "reports-data", "qa-report.sqlite");
-const adminService = createAdminService({ root: ROOT, reportsPath: REPORTS_DB_PATH });
+const cloudSettings = createCloudSettings({ getDb: getReportsDb, configured: objectStorageConfigured });
+const adminService = createAdminService({ root: ROOT, reportsPath: REPORTS_DB_PATH, cloudSettings });
 const OBJECT_STORAGE_ENDPOINT = String(process.env.QA_STORAGE_ENDPOINT || "https://minio-buckets.adv.ru").replace(/\/+$/, "");
 const OBJECT_STORAGE_BUCKET = String(process.env.QA_STORAGE_BUCKET || "qa-tools").trim();
 const OBJECT_STORAGE_REGION = String(process.env.QA_STORAGE_REGION || "us-east-1").trim();
@@ -385,13 +387,13 @@ function requestOrigin(request) {
   return `${String(proto).split(",")[0]}://${String(host).split(",")[0]}`;
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = MAX_BODY) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY) {
-      const error = new Error(`Запрос превышает лимит QA Report: ${AttachmentLimits.format(MAX_BODY)}. Размер файлов при передаче учтён.`);
+    if (size > Math.min(MAX_BODY, maxBytes)) {
+      const error = new Error(`Запрос превышает лимит QA Report: ${AttachmentLimits.format(Math.min(MAX_BODY, maxBytes))}. Размер файлов при передаче учтён.`);
       error.status = 413;
       error.code = "APP_REQUEST_TOO_LARGE";
       throw error;
@@ -1387,253 +1389,6 @@ async function handleChecklistImportPayload(request, response, checklistId) {
   });
 }
 
-async function handleReportSave(request, response) {
-  const body = await readJson(request);
-  const document = sanitizeReportDocumentForServer(body.document || {});
-  assertReportDocument(document);
-  const owner = resolveReportOwner(request);
-  const now = new Date().toISOString();
-  const id = normalizeIdentityPart(body.id || document.reportId || crypto.randomUUID()).slice(0, 120);
-  if (!id) {
-    const error = new Error("Не удалось определить идентификатор отчёта");
-    error.status = 400;
-    throw error;
-  }
-  const existing = getReportsDb()
-    .prepare(`
-      SELECT id, public_id, owner_source, owner_label, workspace_id, title, issue_url, issue_key,
-        environment, overall_status, schema_version, content_hash, history_comment, created_at, updated_at,
-        last_opened_at, reason, document_json
-      FROM reports
-      WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''
-    `)
-    .get(id, owner.source, owner.id);
-  const issueUrl = String(body.issueUrl ?? document.issueUrl ?? "").trim().slice(0, 2000);
-  const issueKey = String(body.issueKey || issueKeyFromUrl(issueUrl)).trim().slice(0, 80);
-  const environment = String(body.environment ?? document.environment ?? "").trim().slice(0, 120);
-  const overallStatus = String(body.overallStatus ?? document.overallStatus ?? "").trim().slice(0, 80);
-  const title = String(body.title || `${issueKey || issueUrl || "Без задачи"} — ${environment || "Окружение не указано"}`)
-    .trim()
-    .slice(0, 500);
-  const schemaVersion = Number(body.schemaVersion || document.schemaVersion || 3) || 3;
-  const reason = String(body.reason || "").trim().slice(0, 120);
-  const historyComment = String(body.historyComment ?? existing?.history_comment ?? "").slice(0, 1000);
-  const publicId = ensurePublicId(owner, body.publicId || document.publicId || existing?.public_id || "", id);
-  document.publicId = publicId;
-  const documentJson = JSON.stringify(document);
-  const contentHash = reportContentHash(document);
-  const baseContentHash = String(body.baseContentHash || "").trim();
-  let existingNormalizedHash = "";
-  let existingHistoryFingerprint = "";
-  if (existing?.document_json) {
-    try {
-      const previousDocument = sanitizeReportDocumentForServer(JSON.parse(existing.document_json));
-      existingNormalizedHash = reportContentHash(previousDocument);
-      existingHistoryFingerprint = historyContentFingerprint(previousDocument);
-    } catch {
-      existingNormalizedHash = existing.content_hash || "";
-    }
-  }
-  if (
-    existing?.content_hash &&
-    existing.content_hash !== contentHash &&
-    existing.content_hash !== baseContentHash &&
-    existingNormalizedHash !== contentHash &&
-    !body.force
-  ) {
-    sendJson(response, 409, {
-      error: "Серверная версия отчёта изменилась. Сохранение остановлено, чтобы не перезаписать чужие изменения.",
-      conflict: true,
-      report: reportRecordFromRow(existing, true),
-    });
-    return;
-  }
-  if (objectStorageConfigured()) {
-    await s3Request("PUT", `reports/${storageOwnerNamespace(owner)}/${id}/report.json`, {
-      body: Buffer.from(documentJson),
-      contentType: "application/json; charset=utf-8",
-    });
-  }
-  const createdAt = existing?.created_at || body.createdAt || now;
-  // Derived summary fields can be refreshed when an older report is opened.
-  const unchanged = existingHistoryFingerprint === historyContentFingerprint(document)
-    && (existing?.history_comment || "") === historyComment;
-  const updatedAt = unchanged ? existing.updated_at || createdAt : now;
-  getReportsDb()
-    .prepare(`
-      INSERT INTO reports (
-        id, public_id, owner_source, owner_id, owner_label, workspace_id, title, issue_url, issue_key,
-        environment, overall_status, schema_version, content_hash, history_comment, document_json, created_at, updated_at,
-        last_opened_at, reason, deleted_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
-      ON CONFLICT(owner_source, owner_id, id) DO UPDATE SET
-        public_id = excluded.public_id,
-        owner_source = excluded.owner_source,
-        owner_id = excluded.owner_id,
-        owner_label = excluded.owner_label,
-        workspace_id = excluded.workspace_id,
-        title = excluded.title,
-        issue_url = excluded.issue_url,
-        issue_key = excluded.issue_key,
-        environment = excluded.environment,
-        overall_status = excluded.overall_status,
-        schema_version = excluded.schema_version,
-        content_hash = excluded.content_hash,
-        history_comment = excluded.history_comment,
-        document_json = excluded.document_json,
-        updated_at = excluded.updated_at,
-        last_opened_at = excluded.last_opened_at,
-        reason = excluded.reason,
-        deleted_at = ''
-    `)
-    .run(
-      id,
-      publicId,
-      owner.source,
-      owner.id,
-      owner.label,
-      owner.workspaceId,
-      title,
-      issueUrl,
-      issueKey,
-      environment,
-      overallStatus,
-      schemaVersion,
-      contentHash,
-      historyComment,
-      documentJson,
-      createdAt,
-      updatedAt,
-      now,
-      reason,
-    );
-  sendJson(response, 200, {
-    ok: true,
-    report: {
-      id,
-      publicId,
-      ownerSource: owner.source,
-      ownerLabel: owner.label,
-      workspaceId: owner.workspaceId,
-      title,
-      issueUrl,
-      issueKey,
-      environment,
-      overallStatus,
-      schemaVersion,
-      contentHash,
-      historyComment,
-      createdAt,
-      updatedAt,
-      lastOpenedAt: now,
-      reason,
-      source: "server",
-    },
-  });
-}
-
-async function handleReportsList(request, response) {
-  const owner = resolveReportOwner(request);
-  const rows = getReportsDb()
-    .prepare(`
-      SELECT id, public_id, owner_source, owner_label, workspace_id, title, issue_url, issue_key,
-        environment, overall_status, schema_version, content_hash, history_comment, created_at, updated_at,
-        last_opened_at, reason, document_json
-      FROM reports
-      WHERE owner_source = ? AND owner_id = ? AND deleted_at = ''
-      ORDER BY updated_at DESC
-      LIMIT 200
-    `)
-    .all(owner.source, owner.id);
-  for (const row of rows) {
-    if (!row.public_id) {
-      row.public_id = ensurePublicId(owner);
-      getReportsDb()
-        .prepare("UPDATE reports SET public_id = ? WHERE id = ? AND owner_source = ? AND owner_id = ?")
-        .run(row.public_id, row.id, owner.source, owner.id);
-    }
-  }
-  sendJson(response, 200, {
-    ok: true,
-    owner: { source: owner.source, label: owner.label, workspaceId: owner.workspaceId },
-    reports: rows.map((row) => reportRecordFromRow(row, false)),
-  });
-}
-
-async function handleReportGet(request, response, reportId) {
-  const owner = resolveReportOwner(request);
-  const row = getReportsDb()
-    .prepare(`
-      SELECT id, public_id, owner_source, owner_label, workspace_id, title, issue_url, issue_key,
-        environment, overall_status, schema_version, content_hash, history_comment, created_at, updated_at,
-        last_opened_at, reason, document_json
-      FROM reports
-      WHERE (id = ? OR public_id = ?) AND owner_source = ? AND owner_id = ? AND deleted_at = ''
-    `)
-    .get(reportId, reportId, owner.source, owner.id);
-  if (!row) {
-    const error = new Error("Отчёт не найден в серверной истории");
-    error.status = 404;
-    throw error;
-  }
-  const now = new Date().toISOString();
-  if (!row.public_id) {
-    row.public_id = ensurePublicId(owner);
-    getReportsDb()
-      .prepare("UPDATE reports SET public_id = ? WHERE id = ? AND owner_source = ? AND owner_id = ?")
-      .run(row.public_id, row.id, owner.source, owner.id);
-  }
-  getReportsDb()
-    .prepare("UPDATE reports SET last_opened_at = ? WHERE id = ? AND owner_source = ? AND owner_id = ?")
-    .run(now, row.id, owner.source, owner.id);
-  row.last_opened_at = now;
-  sendJson(response, 200, { ok: true, report: reportRecordFromRow(row, true) });
-}
-
-async function handleReportCommentUpdate(request, response, reportId) {
-  const body = await readJson(request);
-  const owner = resolveReportOwner(request);
-  const historyComment = String(body.historyComment || "").slice(0, 1000);
-  const now = new Date().toISOString();
-  const result = getReportsDb()
-    .prepare(
-      "UPDATE reports SET updated_at = CASE WHEN history_comment = ? THEN updated_at ELSE ? END, history_comment = ? WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''",
-    )
-    .run(historyComment, now, historyComment, reportId, owner.source, owner.id);
-  if (!result.changes) {
-    const error = new Error("Отчёт не найден в серверной истории");
-    error.status = 404;
-    throw error;
-  }
-  const saved = getReportsDb().prepare("SELECT updated_at FROM reports WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''")
-    .get(reportId, owner.source, owner.id);
-  sendJson(response, 200, { ok: true, reportId, historyComment, updatedAt: saved.updated_at });
-}
-
-async function handleReportDelete(request, response, reportId) {
-  const owner = resolveReportOwner(request);
-  const now = new Date().toISOString();
-  const result = getReportsDb()
-    .prepare("UPDATE reports SET deleted_at = ?, updated_at = ? WHERE id = ? AND owner_source = ? AND owner_id = ? AND deleted_at = ''")
-    .run(now, now, reportId, owner.source, owner.id);
-  if (!result.changes) {
-    const error = new Error("Отчёт не найден в серверной истории");
-    error.status = 404;
-    throw error;
-  }
-  sendJson(response, 200, { ok: true, deleted: true, reportId });
-}
-
-async function handleReportsClear(request, response) {
-  const owner = resolveReportOwner(request);
-  const now = new Date().toISOString();
-  const result = getReportsDb()
-    .prepare("UPDATE reports SET deleted_at = ?, updated_at = ? WHERE owner_source = ? AND owner_id = ? AND deleted_at = ''")
-    .run(now, now, owner.source, owner.id);
-  sendJson(response, 200, { ok: true, deleted: result.changes || 0 });
-}
-
 async function handleJiraAttachments(request, response) {
   const receivedAt = performance.now();
   const body = await readJson(request);
@@ -1766,6 +1521,22 @@ const bugReportService = require("./bug-report-server").createBugReportService({
   directory: path.dirname(REPORTS_DB_PATH), audit,
 });
 
+const personalCloud = createPersonalCloud({
+  getDb: getReportsDb, readJson, sendJson, settings: cloudSettings,
+  authenticate: request => requireUser(request),
+  validateWrite: request => {
+    if (!verifyCsrf(request, request.headers["x-qa-csrf-token"]) || request.headers["x-qa-cloud"] !== "1" ||
+        !request.headers["content-type"]?.startsWith("application/json")) throw Object.assign(new Error("Недействительный защитный токен"), { status: 403 });
+  },
+  storage: () => {
+    const credentials = objectStorageCredentials();
+    return createReportStorage({ activeBucket: "corporate", buckets: { corporate: {
+      endpoint: OBJECT_STORAGE_ENDPOINT, region: OBJECT_STORAGE_REGION, name: OBJECT_STORAGE_BUCKET,
+      accessKeyId: credentials.accessKey, secretAccessKey: credentials.secretKey,
+    } } });
+  },
+});
+
 const reportSharing = createReportSharing({
   getDb: getReportsDb, readJson, sendJson, requestOrigin,
   configPath: objectStorageConfigured() ? "corporate-storage" : undefined,
@@ -1845,6 +1616,10 @@ const server = http.createServer(async (request, response) => {
       }
       return;
     }
+    if (await personalCloud.handle(request, response, requestPath)) {
+      if (!["GET", "HEAD"].includes(request.method)) audit(request, response, "personal_cloud_write", { email: request.user.email });
+      return;
+    }
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
     if (requestPath.startsWith("/api/shared-reports") || /^\/shared-report\/[a-f0-9]{32}$/.test(requestPath)) {
       if (!["GET", "HEAD"].includes(request.method) && !verifyCsrf(request, request.headers["x-qa-csrf-token"])) {
@@ -1880,30 +1655,8 @@ const server = http.createServer(async (request, response) => {
       await handleJiraImportAttachment(request, response);
       return;
     }
-    if (request.method === "GET" && requestPath === "/api/reports") {
-      await handleReportsList(request, response);
-      return;
-    }
-    if (request.method === "POST" && requestPath === "/api/reports") {
-      await handleReportSave(request, response);
-      return;
-    }
-    if (request.method === "DELETE" && requestPath === "/api/reports") {
-      await handleReportsClear(request, response);
-      return;
-    }
-    const reportMatch = requestPath.match(/^\/api\/reports\/([A-Za-z0-9_.:-]+)$/);
-    const reportCommentMatch = requestPath.match(/^\/api\/reports\/([A-Za-z0-9_.:-]+)\/comment$/);
-    if (reportCommentMatch && request.method === "PATCH") {
-      await handleReportCommentUpdate(request, response, reportCommentMatch[1]);
-      return;
-    }
-    if (reportMatch && request.method === "GET") {
-      await handleReportGet(request, response, reportMatch[1]);
-      return;
-    }
-    if (reportMatch && request.method === "DELETE") {
-      await handleReportDelete(request, response, reportMatch[1]);
+    if (requestPath === "/api/reports" || requestPath.startsWith("/api/reports/")) {
+      sendJson(response, 410, { error: "Серверная синхронизация удалена. Используйте личные облачные отчёты в профиле." });
       return;
     }
     if (request.method === "GET" && requestPath === "/api/jira/connections") {

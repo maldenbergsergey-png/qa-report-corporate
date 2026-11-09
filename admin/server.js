@@ -55,7 +55,7 @@ function deviceInfo(ua) {
   return { browser, os, device };
 }
 
-function createAdminService({ root, reportsPath, env = process.env, clock = Date.now }) {
+function createAdminService({ root, reportsPath, env = process.env, clock = Date.now, cloudSettings }) {
   const configFile = path.resolve(env.QA_ADMIN_CONFIG_FILE || path.join(root, 'secrets', 'admin', 'admin.json'));
   const dataDirectory = path.resolve(path.dirname(reportsPath), 'admin');
   const databaseFile = path.join(dataDirectory, 'usage.sqlite');
@@ -243,6 +243,17 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
       const session = token && sessions.get(digest(token));
       if (!session || session.expires <= clock()) { send(response, 401, { error: 'Войдите в админку' }); return true; }
       if (request.method === 'GET' && suffix === '/session') { send(response, 200, { csrf: session.csrf }); return true; }
+      if (suffix === '/cloud' && cloudSettings) {
+        if (request.method === 'GET') { send(response, 200, cloudSettings.get()); return true; }
+        if (request.method === 'POST') {
+          if (!equal(request.headers['x-csrf-token'] || '', session.csrf)) { send(response, 403, { error: 'Обновите страницу' }); return true; }
+          const body = await bodyOf(request);
+          if (typeof body.cloudEnabled !== 'boolean' || Object.keys(body).length !== 1) { send(response, 400, { error: 'Проверьте настройку облака' }); return true; }
+          if (!cloudSettings.get().configured) { send(response, 409, { error: 'Хранилище S3 не настроено' }); return true; }
+          cloudSettings.set(body.cloudEnabled);
+          send(response, 200, cloudSettings.get()); return true;
+        }
+      }
       if (request.method === 'GET' && suffix === '/stats') { send(response, 200, statistics(url)); return true; }
       if (request.method === 'POST' && suffix === '/logout') {
         if (!equal(request.headers['x-csrf-token'] || '', session.csrf)) { send(response, 403, { error: 'Обновите страницу' }); return true; }
@@ -258,7 +269,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     const inside = (candidate, directory) => candidate === directory || candidate.startsWith(directory + path.sep);
     const reportsDirectory = path.resolve(path.dirname(reportsPath));
     const reportsFile = path.resolve(reportsPath);
-    const blocked = candidate => path.relative(root, candidate).split(path.sep).some(part => part.startsWith('.')) ||
+    const blocked = candidate => candidate === path.join(root, 'personal-cloud.js') || path.relative(root, candidate).split(path.sep).some(part => part.startsWith('.')) ||
       [path.join(root, 'admin'), path.join(root, 'admin-config'), path.join(root, 'secrets'), path.join(root, 'reports-data'), dataDirectory, path.join(root, 'feedback-data')].some(dir => inside(candidate, dir)) ||
       (!inside(root, reportsDirectory) && inside(candidate, reportsDirectory)) || candidate === reportsFile || candidate.startsWith(reportsFile + '-') ||
       candidate === configFile || candidate.startsWith(configFile + '.') || candidate === path.join(root, 'scripts', 'setup-admin.cjs');

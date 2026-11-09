@@ -163,7 +163,7 @@
     }
     return template.innerHTML;
   }
-  async function pack(value, { load, onProgress = () => {} } = {}) {
+  async function pack(value, { load, onProgress = () => {}, cloud = false } = {}) {
     const report = documentFields(value), assets = new Map(), cache = new Map(), failures = [];
     let bytesTotal = 0, completed = 0;
     const parts = fragments(report).map(part => {
@@ -215,6 +215,7 @@
       part.owner[part.key] = part.template.innerHTML;
     }
     if (failures.length) fail(`Полная копия не создана. Не удалось включить вложения:\n${[...new Set(failures)].join("\n")}`);
+    if (cloud) return { document: report, assets };
     const documentBytes = encoder.encode(JSON.stringify(report));
     const manifest = { format: "qa-report", version: 1, createdAt: new Date().toISOString(), documentHash: await hash(documentBytes), attachments: [...assets].map(([digest, bytes]) => ({ hash: digest, size: bytes.length })) };
     const files = new Map([["manifest.json", encoder.encode(JSON.stringify(manifest))], ["report.json", documentBytes]]);
@@ -236,6 +237,10 @@
       if (!bytes || hashes.has(asset.hash) || bytes.length !== asset.size || await hash(bytes) !== asset.hash) fail("Вложение отсутствует или повреждено.");
       hashes.add(asset.hash); onProgress({ completed: ++completed, total: manifest.attachments.length });
     }
+    return restoreCloud(value, new Map([...hashes].map(hash => [hash, files.get(`attachments/${hash}`)])));
+  }
+  function restoreCloud(value, assets) {
+    const hashes = new Set(assets.keys());
     const report = documentFields(value), urls = new Map(), used = new Set();
     for (const part of fragments(report)) {
       const template = document.createElement("template"); template.innerHTML = part.owner[part.key];
@@ -245,7 +250,7 @@
         const type = node.dataset.mimeType || "";
         if (!match || !hashes.has(match[1]) || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(type)) fail("В отчёте есть вложение без локальной копии.");
         const key = `${match[1]}:${type}`;
-        if (!urls.has(key)) urls.set(key, dataUrl(files.get(`attachments/${match[1]}`), type));
+        if (!urls.has(key)) urls.set(key, dataUrl(assets.get(match[1]), type));
         node.setAttribute(attr, urls.get(key)); used.add(match[1]);
       }
       part.owner[part.key] = sanitize(template.innerHTML);
@@ -495,7 +500,7 @@
       overallStatus: report.overallStatus, intro, sections }, files: [...files.values()] };
   }
 
-  const api = { pack, unpack, zip, unzip, hash, documentFields, inspectSharedSnapshot, prepareSharedSnapshot, MAX_BYTES };
+  const api = { pack, unpack, restoreCloud, zip, unzip, hash, documentFields, inspectSharedSnapshot, prepareSharedSnapshot, MAX_BYTES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.QaReportFile = api;
 })(typeof window === "undefined" ? globalThis : window);

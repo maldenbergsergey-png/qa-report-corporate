@@ -104,16 +104,16 @@ test("replacement and inbound import keep the open report; cancel performs no sa
 });
 test("environment preferences migrate history, keep removals and separate workspaces", () => {
   const stored = new Map([["qa-report-environments-v1:a", JSON.stringify(["  QA-LOCAL  ", "qa-local", "stage"])]]);
-  const ctx = vm.createContext({ reportWorkspaceKey: "a", DEFAULT_ENVIRONMENTS: ["DEV", "STAGE", "PROD"],
+  const ctx = vm.createContext({ settingsWorkspaceKey: "a", DEFAULT_ENVIRONMENTS: ["DEV", "STAGE", "PROD"],
     localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) } });
   for (const name of ["environmentSettingsKey", "normalizeEnvironments", "loadEnvironments"]) vm.runInContext(functionSource(name), ctx);
   const choices = () => Array.from(ctx.loadEnvironments());
   assert.deepEqual(choices(), ["DEV", "STAGE", "PROD", "QA-LOCAL"]);
   stored.set("qa-report-environment-settings-v1:a", JSON.stringify(["QA-LOCAL"]));
   assert.deepEqual(choices(), ["QA-LOCAL"], "deleted presets do not return");
-  ctx.reportWorkspaceKey = "b";
+  ctx.settingsWorkspaceKey = "b";
   assert.deepEqual(choices(), ["DEV", "STAGE", "PROD"]);
-  ctx.reportWorkspaceKey = "a"; stored.set("qa-report-environment-settings-v1:a", "[]");
+  ctx.settingsWorkspaceKey = "a"; stored.set("qa-report-environment-settings-v1:a", "[]");
   assert.deepEqual(choices(), [], "an intentionally empty list survives reload");
 });
 

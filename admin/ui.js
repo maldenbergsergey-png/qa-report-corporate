@@ -60,10 +60,21 @@
     const query = new URLSearchParams({ page, search: $('search').value.trim() });
     if ($('from').value) query.set('from', $('from').value);
     if ($('to').value) query.set('to', $('to').value);
-    try { const data = await api(`stats?${query}`); render(data); showDashboard(); message(); }
+    try { const data = await api(`stats?${query}`); render(data); showDashboard(); loadCloudSettings(); message(); }
     catch (error) { message(error.message); }
     finally { loading = false; $('refresh').disabled = false; }
   }
+  async function loadCloudSettings(update) {
+    const control = $('cloud-enabled'); const status = $('cloud-settings-status');
+    control.disabled = true;
+    try {
+      const state = await api('cloud', update);
+      control.checked = Boolean(state.cloudEnabled);
+      control.disabled = !state.configured;
+      status.textContent = state.configured ? (state.cloudEnabled ? 'Сохранение в облако разрешено.' : 'Сохранение в облако отключено.') : 'Хранилище S3 не настроено.';
+    } catch (error) { status.textContent = error.message; }
+  }
+  $('cloud-enabled').addEventListener('change', event => loadCloudSettings({ cloudEnabled: event.target.checked }));
   $('login-form').addEventListener('submit', async event => {
     event.preventDefault(); $('login-submit').disabled = true; message('Проверка входа…');
     try { const data = await api('login', { username: $('username').value, password: $('password').value }); csrf = data.csrf; $('password').value = ''; page = 1; await load(); }

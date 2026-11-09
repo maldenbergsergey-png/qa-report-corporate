@@ -6,11 +6,8 @@ const HISTORY_PROJECT_NAMES_KEY = "qa-report-project-names-v1";
 const HISTORY_PROJECT_COLORS_KEY = "qa-report-project-colors-v1";
 const PINNED_COLUMNS_KEY = "qa-report-pinned-columns-v1";
 const DEFAULT_NUMBERING_KEY = "qa-report-default-numbering-v1";
-const CLOUD_HISTORY_ENABLED_KEY = "qa-report-cloud-history-enabled-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
-const SERVER_HASHES_KEY = "qa-report-server-hashes-v1";
-const DISMISSED_CLOUD_HASHES_KEY = "qa-report-dismissed-cloud-hashes-v1";
 const DB_NAME = "qa-report-editor";
 const DB_VERSION = 1;
 const REPORT_STORE = "reports";
@@ -289,17 +286,11 @@ const elements = {
   jiraSettingsModal: document.querySelector("#jiraSettingsModal"),
   closeJiraSettingsButton: document.querySelector("#closeJiraSettingsButton"),
   settingsChecklistSectionButton: document.querySelector("#settingsChecklistSectionButton"),
-  settingsHistorySectionButton: document.querySelector("#settingsHistorySectionButton"),
   settingsJiraSection: document.querySelector("#settingsJiraSection"),
-  settingsHistorySection: document.querySelector("#settingsHistorySection"),
   settingsFooter: document.querySelector("#settingsFooter"),
   jiraConnections: document.querySelector("#jiraConnections"),
   saveJiraSettingsButton: document.querySelector("#saveJiraSettingsButton"),
   settingsSaveCheck: document.querySelector("#settingsSaveCheck"),
-  cloudHistoryEnabled: document.querySelector("#cloudHistoryEnabled"),
-  reportClientId: document.querySelector("#reportClientId"),
-  reportWorkspaceKey: document.querySelector("#reportWorkspaceKey"),
-  reportIdentityState: document.querySelector("#reportIdentityState"),
   undoButton: document.querySelector("#undoButton"),
   redoButton: document.querySelector("#redoButton"),
   historyButton: document.querySelector("#historyButton"),
@@ -352,22 +343,6 @@ const elements = {
   closeFeedbackButton: document.querySelector("#closeFeedbackButton"),
   cancelFeedbackButton: document.querySelector("#cancelFeedbackButton"),
   draftSyncBanner: document.querySelector("#draftSyncBanner"),
-  cloudConflictStatus: document.querySelector("#cloudConflictStatus"),
-  versionConflictModal: document.querySelector("#versionConflictModal"),
-  closeVersionConflictFooterButton: document.querySelector("#closeVersionConflictFooterButton"),
-  localVersionPanel: document.querySelector("#localVersionPanel"),
-  cloudVersionPanel: document.querySelector("#cloudVersionPanel"),
-  localVersionSummary: document.querySelector("#localVersionSummary"),
-  cloudVersionSummary: document.querySelector("#cloudVersionSummary"),
-  localVersionPreview: document.querySelector("#localVersionPreview"),
-  cloudVersionPreview: document.querySelector("#cloudVersionPreview"),
-  selectLocalVersionButton: document.querySelector("#selectLocalVersionButton"),
-  selectCloudVersionButton: document.querySelector("#selectCloudVersionButton"),
-  saveBothVersionsButton: document.querySelector("#saveBothVersionsButton"),
-  saveVersionChoiceButton: document.querySelector("#saveVersionChoiceButton"),
-  versionCopyChoiceModal: document.querySelector("#versionCopyChoiceModal"),
-  openLocalCopyButton: document.querySelector("#openLocalCopyButton"),
-  openCloudCopyButton: document.querySelector("#openCloudCopyButton"),
 };
 
 const sanitizedDraftFields = new WeakMap();
@@ -387,12 +362,9 @@ let toastTimer;
 let activeEditor = elements.introEditor;
 let savedEditorRange = null;
 let floatingMenu = null;
-let cloudHistoryEnabled = loadCloudHistoryEnabled();
 let objectStorageConfigured = false;
 let reportClientId = loadReportClientId();
-let reportWorkspaceKey = loadReportWorkspaceKey();
-let serverReportHashes = loadServerReportHashes();
-let dismissedCloudHashes = loadDismissedCloudHashes();
+const settingsWorkspaceKey = loadReportWorkspaceKey();
 let undoStack = [];
 let redoStack = [];
 const HISTORY_MEMORY_LIMIT = 32 * 1024 * 1024;
@@ -443,10 +415,6 @@ let hasUnsavedLocalChanges = false;
 let applyingRemoteDraft = false;
 let forceLocalDraftSave = false;
 let pendingRemoteDraft = null;
-let syncRecovery = null;
-let versionConflictChoice = "";
-let pendingCopyChoice = null;
-let suppressNextServerSave = false;
 const historyCommentTimers = new Map();
 let historyRenderRequestId = 0;
 let historyLoading = false;
@@ -454,7 +422,6 @@ let historySelectionMode = false;
 let historyDeleting = false;
 let historyFilteredReports = [];
 const selectedHistoryReportIds = new Set();
-const pendingHistoryServerSaves = new Map();
 let projectSettingsRequestId = 0;
 let projectSettingsLoaded = false;
 
@@ -715,56 +682,6 @@ function draftContentSnapshot(value = draft) {
   return clone(draftContentFields(value));
 }
 
-function stripServerAttachmentsFromHtml(value) {
-  if (!value || typeof value !== "string") return value || "";
-  const template = document.createElement("template");
-  template.innerHTML = value;
-  template.content.querySelectorAll(".cell-image").forEach((figure) => {
-    if (figure.querySelector("img")?.getAttribute("src")?.startsWith("data:")) figure.remove();
-  });
-  template.content.querySelectorAll(".cell-file").forEach((card) => {
-    if (card.dataset.dataUrl?.startsWith("data:")) card.remove();
-  });
-  template.content.querySelectorAll("img, video, audio, source").forEach((node) => {
-    if (node.getAttribute("src")?.startsWith("data:")) node.remove();
-  });
-  template.content.querySelectorAll("*").forEach((node) => {
-    [...node.attributes].forEach((attribute) => {
-      if (/^data:/i.test(attribute.value)) node.removeAttribute(attribute.name);
-    });
-  });
-  return template.innerHTML;
-}
-
-function serverTextOnlyDocument(value = draft) {
-  const copy = clone(value);
-  copy.intro = stripServerAttachmentsFromHtml(copy.intro);
-  copy.sections?.forEach((section) => {
-    section.rows?.forEach((row) => {
-      Object.keys(row.cells || {}).forEach((columnId) => {
-        row.cells[columnId] = stripServerAttachmentsFromHtml(row.cells[columnId]);
-      });
-    });
-  });
-  return copy;
-}
-
-function serverTextOnlyDraftSnapshot(value = draft) {
-  return draftContentSnapshot(serverTextOnlyDocument(value));
-}
-
-function createServerReportDocument(value = draft) {
-  return normalizeDraft(serverTextOnlyDocument(value));
-}
-
-function draftContentHash(value = draft) {
-  return JSON.stringify(serverTextOnlyDraftSnapshot(value));
-}
-
-function hasMeaningfulContentDiff(left, right) {
-  return draftContentHash(left) !== draftContentHash(right);
-}
-
 function isNewerDraft(candidate, current = draft) {
   if (!candidate) return false;
   if (!current) return true;
@@ -807,14 +724,6 @@ function loadDraft() {
   }
 }
 
-function loadCloudHistoryEnabled() {
-  try {
-    return localStorage.getItem(CLOUD_HISTORY_ENABLED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
 function loadReportClientId() {
   try {
     const saved = localStorage.getItem(CLIENT_ID_KEY);
@@ -835,72 +744,9 @@ function loadReportWorkspaceKey() {
   }
 }
 
-function loadServerReportHashes() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SERVER_HASHES_KEY) || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function loadDismissedCloudHashes() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DISMISSED_CLOUD_HASHES_KEY) || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveServerReportHashes() {
-  try {
-    localStorage.setItem(SERVER_HASHES_KEY, JSON.stringify(serverReportHashes));
-  } catch {
-    // Hash-кэш нужен только для оптимистичной синхронизации. Если localStorage недоступен, сервер всё равно защитит от перезаписи.
-  }
-}
-
-function saveDismissedCloudHashes() {
-  try {
-    localStorage.setItem(DISMISSED_CLOUD_HASHES_KEY, JSON.stringify(dismissedCloudHashes));
-  } catch {
-    // Dismissed hash влияет только на повторный показ уведомления.
-  }
-}
-
-function dismissCloudHash(reportId, contentHash) {
-  if (!reportId || !contentHash) return;
-  dismissedCloudHashes[reportId] = contentHash;
-  saveDismissedCloudHashes();
-}
-
-function clearDismissedCloudHash(reportId) {
-  if (!reportId || !dismissedCloudHashes[reportId]) return;
-  delete dismissedCloudHashes[reportId];
-  saveDismissedCloudHashes();
-}
-
-function isCloudHashDismissed(reportId, contentHash) {
-  return Boolean(reportId && contentHash && dismissedCloudHashes[reportId] === contentHash);
-}
-
-function setKnownServerHash(reportId, contentHash) {
-  if (!reportId || !contentHash) return;
-  serverReportHashes[reportId] = contentHash;
-  saveServerReportHashes();
-}
-
-function forgetKnownServerHash(reportId) {
-  if (!reportId || !serverReportHashes[reportId]) return;
-  delete serverReportHashes[reportId];
-  saveServerReportHashes();
-}
-
 function reportIdentityHeaders() {
   return {
     "X-QA-Report-Client": reportClientId,
-    "X-QA-Report-Workspace": reportWorkspaceKey.trim(),
   };
 }
 
@@ -1218,67 +1064,9 @@ async function saveReportSnapshot(reason = "manual", candidate = null, { expecte
     return request;
   });
   if (conflict) throw conflict;
-  if (suppressNextServerSave) {
-    suppressNextServerSave = false;
-  } else if (!["before-import", "before-inbound-import"].includes(reason)) {
-    queueServerReportSave(record);
-  }
   if (candidate) trimReportHistory().catch(() => {});
   else await trimReportHistory();
   return record;
-}
-
-function queueServerReportSave(record) {
-  if (!cloudHistoryEnabled) return;
-  const pending = pendingHistoryServerSaves.get(record.id) || new Set();
-  pendingHistoryServerSaves.set(record.id, pending);
-  const saving = saveReportToServer(record)
-    .then((result) => {
-      if (result.report?.contentHash) {
-        setKnownServerHash(record.id, result.report.contentHash);
-        clearDismissedCloudHash(record.id);
-      }
-      if (result.report?.publicId && draft.reportId === record.id) {
-        if (draft.publicId !== result.report.publicId) {
-          draft.publicId = result.report.publicId;
-          scheduleSave({ collect: false });
-        }
-        updateChecklistUrl();
-      }
-    })
-    .catch((error) => {
-      if (error.status === 409) {
-        if (draft.reportId !== record.id) return;
-        const serverReport = error.payload?.report;
-        const serverHash = serverReport?.contentHash;
-        if (serverReport?.document) {
-          if (isSavedByThisBrowser(serverReport.document)) {
-            if (!hasUnsavedLocalChanges && serializeDraft() === historyCurrent) {
-              if (serverHash) setKnownServerHash(record.id, serverHash);
-              applyDraftLocally(serverReport.document, { status: "Сохранено" });
-            }
-            return;
-          }
-          if (!isCloudHashDismissed(record.id, serverHash)) {
-            showSyncRecovery({
-              localDraft: record.document,
-              serverDraft: serverReport.document,
-              serverHash,
-            });
-          }
-          hideDraftSyncBanner();
-        }
-        setSaveStatus("Локально сохранено");
-        if (!isCloudHashDismissed(record.id, serverHash)) {
-          showToast("Облачная версия изменилась. Локальная копия сохранена, облако не перезаписано.", 9000);
-        }
-      }
-      // Серверная история дополняет локальную. Если сервер недоступен, редактор продолжает работать.
-    }).finally(() => {
-      pending.delete(saving);
-      if (!pending.size) pendingHistoryServerSaves.delete(record.id);
-    });
-  pending.add(saving);
 }
 
 async function uploadStoragePayload(reportId, file) {
@@ -1292,134 +1080,12 @@ async function uploadStoragePayload(reportId, file) {
   return result;
 }
 
-async function migrateHtmlAttachmentsToStorage(html, reportId) {
-  const container = document.createElement("div");
-  container.innerHTML = html || "";
-  for (const image of container.querySelectorAll("img[data-attachment-id]")) {
-    if (!image.src.startsWith("data:")) continue;
-    const [header, dataBase64 = ""] = image.src.split(",");
-    if (!dataBase64) continue;
-    const type = image.dataset.mimeType || header.match(/^data:([^;]+)/)?.[1] || "image/png";
-    const result = await uploadStoragePayload(reportId, {
-      name: image.dataset.fileName || `image.${type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`,
-      type,
-      dataBase64,
-    });
-    image.src = result.url;
-    image.dataset.storageKey = result.key;
-  }
-  for (const card of container.querySelectorAll(".cell-file[data-attachment-id]")) {
-    const dataUrl = card.dataset.dataUrl || "";
-    if (!dataUrl.startsWith("data:")) continue;
-    const [header, dataBase64 = ""] = dataUrl.split(",");
-    if (!dataBase64) continue;
-    const result = await uploadStoragePayload(reportId, {
-      name: card.dataset.fileName || "file",
-      type: card.dataset.mimeType || header.match(/^data:([^;]+)/)?.[1] || "application/octet-stream",
-      dataBase64,
-    });
-    card.dataset.dataUrl = result.url;
-    card.dataset.storageKey = result.key;
-  }
-  return sanitizeRichHtml(container.innerHTML);
-}
-
-async function migrateDocumentAttachmentsToStorage(document, reportId) {
-  const copy = normalizeDraft(clone(document));
-  copy.intro = await migrateHtmlAttachmentsToStorage(copy.intro, reportId);
-  for (const section of copy.sections) {
-    for (const row of section.rows) {
-      for (const columnId of Object.keys(row.cells || {})) {
-        row.cells[columnId] = await migrateHtmlAttachmentsToStorage(row.cells[columnId], reportId);
-      }
-    }
-  }
-  return copy;
-}
-
 function isStoredObjectUrl(value) {
   try {
     return new URL(String(value || ""), window.location.origin).pathname.startsWith("/api/storage/object/");
   } catch {
     return false;
   }
-}
-
-function applyStorageReferences(sourceDocument) {
-  const references = new Map();
-  const collect = (html) => {
-    const container = document.createElement("div");
-    container.innerHTML = html || "";
-    container.querySelectorAll("img[data-attachment-id]").forEach((image) => {
-      if (isStoredObjectUrl(image.src)) references.set(image.dataset.attachmentId, { kind: "image", url: image.src });
-    });
-    container.querySelectorAll(".cell-file[data-attachment-id]").forEach((card) => {
-      if (isStoredObjectUrl(card.dataset.dataUrl)) references.set(card.dataset.attachmentId, { kind: "file", url: card.dataset.dataUrl });
-    });
-  };
-  collect(sourceDocument.intro);
-  sourceDocument.sections.forEach((section) => section.rows.forEach((row) => Object.values(row.cells).forEach(collect)));
-  const updateRoot = (root) => {
-    root.querySelectorAll("img[data-attachment-id]").forEach((image) => {
-      const reference = references.get(image.dataset.attachmentId);
-      if (reference?.kind === "image") image.src = reference.url;
-    });
-    root.querySelectorAll(".cell-file[data-attachment-id]").forEach((card) => {
-      const reference = references.get(card.dataset.attachmentId);
-      if (reference?.kind === "file") card.dataset.dataUrl = reference.url;
-    });
-  };
-  const updateHtml = (html) => {
-    const container = document.createElement("div");
-    container.innerHTML = html || "";
-    updateRoot(container);
-    return sanitizeRichHtml(container.innerHTML);
-  };
-  draft.intro = updateHtml(draft.intro);
-  draft.sections.forEach((section) => section.rows.forEach((row) => {
-    Object.keys(row.cells).forEach((columnId) => { row.cells[columnId] = updateHtml(row.cells[columnId]); });
-  }));
-  updateRoot(elements.introEditor);
-  updateRoot(elements.sections);
-  enhanceImageControls(elements.introEditor);
-  enhanceImageControls(elements.sections);
-  enhanceFileControls(elements.introEditor);
-  enhanceFileControls(elements.sections);
-}
-
-async function saveReportToServer(record, { force = false } = {}) {
-  const backend = await checkBackendCompatibility();
-  const documentForCloud = backend.objectStorageConfigured
-    ? await migrateDocumentAttachmentsToStorage(record.document, record.id)
-    : record.document;
-  const serverDocument = createServerReportDocument(documentForCloud);
-  const result = await reportApi("/api/reports", {
-    method: "POST",
-    body: JSON.stringify({
-      id: record.id,
-      publicId: record.publicId,
-      title: record.title,
-      issueUrl: record.issueUrl,
-      issueKey: record.issueKey,
-      environment: record.environment,
-      overallStatus: record.overallStatus,
-      schemaVersion: record.schemaVersion,
-      createdAt: record.createdAt,
-      reason: record.reason,
-      historyComment: record.historyComment || "",
-      baseContentHash: serverReportHashes[record.id] || "",
-      force,
-      document: serverDocument,
-    }),
-  });
-  if (backend.objectStorageConfigured && draft.reportId === record.id) {
-    applyStorageReferences(documentForCloud);
-    collectDocumentFields();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(draft)); } catch {}
-    const localRecord = await getReportRecord(record.id);
-    if (localRecord) await dbTransaction("readwrite", (store) => store.put({ ...localRecord, document: clone(draft) }));
-  }
-  return result;
 }
 
 async function getReportRecord(id) {
@@ -1453,30 +1119,6 @@ async function getAllReports() {
     transaction.onerror = () => reject(transaction.error);
     request.onerror = () => reject(request.error);
   });
-}
-
-async function getServerReports() {
-  if (!cloudHistoryEnabled) return [];
-  try {
-    const result = await reportApi("/api/reports");
-    return (result.reports || []).map((report) => ({ ...report, source: "server" }));
-  } catch {
-    return [];
-  }
-}
-
-async function getServerReport(id, { rememberHash = true } = {}) {
-  if (!cloudHistoryEnabled) return null;
-  const result = await reportApi(`/api/reports/${encodeURIComponent(id)}`);
-  if (rememberHash && result.report?.contentHash) setKnownServerHash(result.report.id, result.report.contentHash);
-  return result.report || null;
-}
-
-async function cacheOpenedServerReport(report) {
-  const record = { ...report,
-    historyContentFingerprint: QaReportHistory.contentFingerprint(report.document),
-  };
-  await dbTransaction("readwrite", store => store.put(record));
 }
 
 function routeChecklistPublicId() {
@@ -1513,9 +1155,8 @@ async function openReportFromRoute() {
   try {
     const localReport = location?.publicId === publicId
       ? await getReportRecord(location.reportId) : await findLocalReportByPublicId(publicId);
-    const fullReport = localReport || (cloudHistoryEnabled ? await getServerReport(publicId) : null);
+    const fullReport = localReport;
     if (!fullReport?.document) throw new Error("not-found");
-    if (!localReport) await cacheOpenedServerReport(fullReport).catch(() => {});
     applyDraftLocally(fullReport.document, { status: "Сохранено" });
   } catch {
     showToast("Чек-лист по ссылке не найден. Можно создать новый.");
@@ -1546,23 +1187,7 @@ function historyDatesMarkup(report) {
 }
 
 async function getAllHistoryReports() {
-  const [serverReports, localReports] = await Promise.all([
-    getServerReports(),
-    getAllReports().catch(() => []),
-  ]);
-  const seen = new Set(serverReports.map((report) => report.id));
-  const localById = new Map(localReports.map(report => [report.id, report]));
-  return [
-    ...serverReports.map(report => {
-      const local = localById.get(report.id);
-      // A local edit may still be uploading when the history list is requested.
-      return local && historyTimestamp(local, "updatedAt") > historyTimestamp(report, "updatedAt")
-        ? { ...report, updatedAt: local.updatedAt, jiraPublication: local.document?.jiraPublication } : report;
-    }),
-    ...localReports
-      .filter((report) => !seen.has(report.id))
-      .map((report) => ({ ...report, source: "local" })),
-  ].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return (await getAllReports().catch(() => [])).map(report => ({ ...report, source: "local" }));
 }
 
 async function getFreshestStoredDraft() {
@@ -1586,12 +1211,6 @@ async function deleteReportRecord(id) {
   await dbTransaction("readwrite", (store) => store.delete(id));
 }
 
-async function deleteServerReport(id) {
-  if (!cloudHistoryEnabled) return;
-  await reportApi(`/api/reports/${encodeURIComponent(id)}`, { method: "DELETE" });
-  forgetKnownServerHash(id);
-}
-
 async function updateLocalReportComment(id, historyComment) {
   const record = await getReportRecord(id);
   if (!record) return;
@@ -1601,21 +1220,6 @@ async function updateLocalReportComment(id, historyComment) {
   record.updatedAt = new Date().toISOString();
   await dbTransaction("readwrite", (store) => store.put(record));
   return record;
-}
-
-async function updateServerReportComment(id, historyComment) {
-  if (!cloudHistoryEnabled) return;
-  return reportApi(`/api/reports/${encodeURIComponent(id)}/comment`, {
-    method: "PATCH",
-    body: JSON.stringify({ historyComment }),
-  });
-}
-
-async function clearServerReports() {
-  if (!cloudHistoryEnabled) return;
-  await reportApi("/api/reports", { method: "DELETE" });
-  serverReportHashes = {};
-  saveServerReportHashes();
 }
 
 async function trimReportHistory() {
@@ -1654,15 +1258,6 @@ async function saveDraft({ collect = true } = {}) {
       if (hasUnsavedLocalChanges || serializeDraft() !== historyCurrent) {
         if (isSavedByThisBrowser(stored)) {
           applyRemoteDraft(stored);
-          return false;
-        }
-        if (cloudHistoryEnabled) {
-          showSyncRecovery({
-            localDraft: draft,
-            serverDraft: stored,
-            serverHash: "",
-          });
-          setSaveStatus("Есть облачная версия");
           return false;
         }
       } else {
@@ -1770,15 +1365,6 @@ function flushPendingDraftSave() {
         applyRemoteDraft(stored);
         return false;
       }
-      if (cloudHistoryEnabled) {
-        showSyncRecovery({
-          localDraft: draft,
-          serverDraft: stored,
-          serverHash: "",
-        });
-        setSaveStatus("Есть облачная версия");
-        return false;
-      }
     }
     draft = normalizeDraft(draft);
     draft.revision = (Number(draft.revision) || 0) + 1;
@@ -1815,39 +1401,6 @@ function hideDraftSyncBanner() {
   if (elements.draftSyncBanner) elements.draftSyncBanner.hidden = true;
 }
 
-function showSyncRecovery({ localDraft, serverDraft, serverHash }) {
-  if (!localDraft || !serverDraft) return;
-  const safeServerDraft = preserveKnownColumnMetadata(serverDraft, localDraft);
-  if (!hasMeaningfulContentDiff(localDraft, safeServerDraft)) {
-    if (serverHash) setKnownServerHash(draft.reportId, serverHash);
-    hideSyncRecovery();
-    return;
-  }
-  syncRecovery = {
-    localDraft: normalizeDraft(localDraft),
-    serverDraft: safeServerDraft,
-    serverHash: serverHash || serverReportHashes[draft.reportId] || "",
-  };
-  updateCloudConflictStatus();
-  if (!elements.versionConflictModal.hidden) renderVersionConflictModal();
-}
-
-function updateCloudConflictStatus() {
-  elements.cloudConflictStatus.hidden = !syncRecovery;
-}
-
-function hideSyncRecovery() {
-  syncRecovery = null;
-  updateCloudConflictStatus();
-  closeVersionConflictModal();
-}
-
-function formatVersionTime(value) {
-  const timestamp = Date.parse(value || "");
-  if (!timestamp) return "нет данных";
-  return new Date(timestamp).toLocaleString("ru-RU");
-}
-
 function countDraftAttachments(value) {
   const draftValue = normalizeDraft(value);
   let count = 0;
@@ -1863,136 +1416,8 @@ function countDraftAttachments(value) {
   return count;
 }
 
-function getDraftStats(value) {
-  const draftValue = normalizeDraft(value);
-  return {
-    updatedAt: formatVersionTime(draftValue.updatedAt),
-    revision: Number(draftValue.revision) || 0,
-    sections: draftValue.sections.length,
-    rows: draftValue.sections.reduce((sum, section) => sum + section.rows.length, 0),
-    attachments: countDraftAttachments(draftValue),
-  };
-}
-
-function renderVersionSummary(target, stats) {
-  target.innerHTML = [
-    ["Изменена", stats.updatedAt],
-    ["Revision", stats.revision],
-    ["Разделы", stats.sections],
-    ["Строки", stats.rows],
-    ["Вложения", stats.attachments],
-  ]
-    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`)
-    .join("");
-}
-
 function cellText(value) {
   return htmlToText(value || "").replace(/\s+/g, " ").trim();
-}
-
-function getVersionDiffItems(localDraft, cloudDraft) {
-  const local = normalizeDraft(localDraft);
-  const cloud = normalizeDraft(cloudDraft);
-  const items = [];
-  if ((local.issueUrl || "") !== (cloud.issueUrl || "")) items.push("Отличается ссылка на задачу.");
-  if ((local.environment || "") !== (cloud.environment || "")) items.push("Отличается окружение.");
-  if ((local.overallStatus || "") !== (cloud.overallStatus || "")) items.push("Отличается итоговый статус.");
-  if (cellText(local.intro) !== cellText(cloud.intro)) items.push("Отличается вводный текст.");
-  if (local.sections.length !== cloud.sections.length) {
-    items.push(`Количество разделов: локально ${local.sections.length}, в облаке ${cloud.sections.length}.`);
-  }
-  const sectionCount = Math.max(local.sections.length, cloud.sections.length);
-  for (let sectionIndex = 0; sectionIndex < sectionCount; sectionIndex += 1) {
-    const localSection = local.sections[sectionIndex];
-    const cloudSection = cloud.sections[sectionIndex];
-    if (!localSection || !cloudSection) continue;
-    const sectionName = localSection.title || cloudSection.title || `Раздел ${sectionIndex + 1}`;
-    if ((localSection.title || "") !== (cloudSection.title || "")) {
-      items.push(`Раздел ${sectionIndex + 1}: отличается название.`);
-    }
-    if (localSection.rows.length !== cloudSection.rows.length) {
-      items.push(
-        `${sectionName}: строк локально ${localSection.rows.length}, в облаке ${cloudSection.rows.length}.`,
-      );
-    }
-    const rowCount = Math.max(localSection.rows.length, cloudSection.rows.length);
-    let changedRows = 0;
-    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
-      const localRow = localSection.rows[rowIndex];
-      const cloudRow = cloudSection.rows[rowIndex];
-      if (!localRow || !cloudRow) {
-        changedRows += 1;
-        continue;
-      }
-      const localRowSnapshot = JSON.stringify({
-        status: localRow.status,
-        cells: Object.fromEntries(Object.entries(localRow.cells || {}).map(([key, value]) => [key, cellText(value)])),
-      });
-      const cloudRowSnapshot = JSON.stringify({
-        status: cloudRow.status,
-        cells: Object.fromEntries(Object.entries(cloudRow.cells || {}).map(([key, value]) => [key, cellText(value)])),
-      });
-      if (localRowSnapshot !== cloudRowSnapshot) changedRows += 1;
-    }
-    if (changedRows) items.push(`${sectionName}: отличается строк ${changedRows}.`);
-  }
-  return items.slice(0, 8);
-}
-
-function renderVersionConflictModal() {
-  if (!syncRecovery) return;
-  collectDocumentFields();
-  syncRecovery.localDraft = normalizeDraft(draft);
-  if (!hasMeaningfulContentDiff(syncRecovery.localDraft, syncRecovery.serverDraft)) {
-    elements.localVersionSummary.innerHTML = "<div><dt>Статус</dt><dd>Отличий не найдено</dd></div>";
-    elements.cloudVersionSummary.innerHTML = "<div><dt>Статус</dt><dd>Отличий не найдено</dd></div>";
-    elements.localVersionPreview.innerHTML = '<div class="history-empty">Отличий не найдено</div>';
-    elements.cloudVersionPreview.innerHTML = '<div class="history-empty">Отличий не найдено</div>';
-    versionConflictChoice = "";
-    updateVersionConflictSelection();
-    return;
-  }
-  versionConflictChoice = "";
-  renderVersionSummary(elements.localVersionSummary, getDraftStats(syncRecovery.localDraft));
-  renderVersionSummary(elements.cloudVersionSummary, getDraftStats(syncRecovery.serverDraft));
-  elements.localVersionPreview.innerHTML = generateVisualPreview(syncRecovery.localDraft, syncRecovery.serverDraft);
-  elements.cloudVersionPreview.innerHTML = generateVisualPreview(syncRecovery.serverDraft, syncRecovery.localDraft);
-  updateVersionConflictSelection();
-}
-
-function setVersionConflictChoice(choice) {
-  if (!syncRecovery) return;
-  versionConflictChoice = choice;
-  updateVersionConflictSelection();
-}
-
-function updateVersionConflictSelection() {
-  const localSelected = versionConflictChoice === "local" || versionConflictChoice === "both";
-  const cloudSelected = versionConflictChoice === "cloud" || versionConflictChoice === "both";
-  elements.localVersionPanel.classList.toggle("selected", localSelected);
-  elements.cloudVersionPanel.classList.toggle("selected", cloudSelected);
-  elements.selectLocalVersionButton.classList.toggle("active", versionConflictChoice === "local");
-  elements.selectCloudVersionButton.classList.toggle("active", versionConflictChoice === "cloud");
-  elements.saveBothVersionsButton.classList.toggle("active", versionConflictChoice === "both");
-  elements.saveVersionChoiceButton.disabled = !versionConflictChoice;
-}
-
-function openVersionConflictModal() {
-  if (!syncRecovery) return;
-  renderVersionConflictModal();
-  elements.versionConflictModal.hidden = false;
-  syncBodyModalOverflow();
-}
-
-function closeVersionConflictModal() {
-  elements.versionConflictModal.hidden = true;
-  syncBodyModalOverflow();
-}
-
-function closeVersionCopyChoiceModal() {
-  elements.versionCopyChoiceModal.hidden = true;
-  pendingCopyChoice = null;
-  syncBodyModalOverflow();
 }
 
 function applyDraftLocally(nextDraft, { status = "Сохранено" } = {}) {
@@ -2018,20 +1443,6 @@ function applyRemoteDraft(remoteDraft) {
   applyDraftLocally(remoteDraft);
 }
 
-function applyServerReport(report, { silent = false, keepRecovery = true } = {}) {
-  const localDraft = clone(draft);
-  if (report?.contentHash) setKnownServerHash(report.id, report.contentHash);
-  applyDraftLocally(report.document);
-  if (keepRecovery) {
-    showSyncRecovery({
-      localDraft,
-      serverDraft: report.document,
-      serverHash: report.contentHash || "",
-    });
-  }
-  if (!silent) showToast("Подтянута свежая облачная версия");
-}
-
 function keepCurrentDraft() {
   if (pendingRemoteDraft) {
     draft.revision = Math.max(Number(draft.revision) || 0, Number(pendingRemoteDraft.revision) || 0);
@@ -2040,165 +1451,6 @@ function keepCurrentDraft() {
   hideDraftSyncBanner();
   forceLocalDraftSave = true;
   saveDraft();
-}
-
-function applyCloudVersionFromRecovery() {
-  if (!syncRecovery) return;
-  const { serverDraft, serverHash } = syncRecovery;
-  const reportId = serverDraft.reportId || draft.reportId;
-  if (serverHash) {
-    setKnownServerHash(reportId, serverHash);
-    clearDismissedCloudHash(reportId);
-  }
-  applyDraftLocally(serverDraft, { status: "Сохранено" });
-  hideSyncRecovery();
-  suppressNextServerSave = true;
-  saveReportSnapshot("cloud-sync").catch(() => {});
-  showToast("Облачная версия подтянута");
-}
-
-function keepLocalVersionFromRecovery() {
-  if (!syncRecovery) return;
-  dismissCloudHash(draft.reportId, syncRecovery.serverHash);
-  hideSyncRecovery();
-  setSaveStatus("Локальная версия");
-  showToast("Оставлена локальная версия");
-}
-
-async function overwriteCloudWithLocalVersion() {
-  if (!syncRecovery) return;
-  flushDraftFromDom();
-  const now = new Date().toISOString();
-  draft = normalizeDraft({
-    ...draft,
-    revision: (Number(draft.revision) || 0) + 1,
-    updatedAt: now,
-    lastSavedBy: tabId,
-    lastSavedClientId: reportClientId,
-  });
-  const existing = await getReportRecord(draft.reportId);
-  const issueKey = issueKeyFromUrl(draft.issueUrl);
-  const record = {
-    id: draft.reportId,
-    title: `${reportIssueLabel(draft)} — ${draft.environment}`,
-    issueUrl: draft.issueUrl,
-    issueKey,
-    environment: draft.environment,
-    overallStatus: draft.overallStatus,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    lastOpenedAt: now,
-    reason: "overwrite-cloud",
-    historyComment: existing?.historyComment || "",
-    document: clone(draft),
-    schemaVersion: 3,
-  };
-  await dbTransaction("readwrite", (store) => store.put(record));
-  const result = await saveReportToServer(record, { force: true });
-  if (result.report?.contentHash) {
-    setKnownServerHash(record.id, result.report.contentHash);
-    clearDismissedCloudHash(record.id);
-  }
-  historyCurrent = serializeDraft();
-  hasUnsavedLocalChanges = false;
-  broadcastDraftUpdate();
-  hideSyncRecovery();
-  setSaveStatus("Сохранено");
-  showToast("Локальная версия сохранена в облако");
-}
-
-function createConflictCopy(sourceDraft, label, historyComment) {
-  const copy = normalizeDraft(clone(sourceDraft));
-  copy.draftId = crypto.randomUUID();
-  copy.reportId = crypto.randomUUID();
-  copy.jiraPublication = null;
-  copy.publicId = createPublicId();
-  copy.revision = 0;
-  copy.updatedAt = new Date(0).toISOString();
-  copy.lastSavedBy = "";
-  copy.lastSavedClientId = "";
-  return { draft: copy, label, historyComment };
-}
-
-async function saveDraftCopyToHistory(copyItem) {
-  const copyDraft = normalizeDraft(copyItem.draft);
-  const now = new Date().toISOString();
-  copyDraft.updatedAt = now;
-  copyDraft.lastSavedBy = tabId;
-  copyDraft.lastSavedClientId = reportClientId;
-  const issueKey = issueKeyFromUrl(copyDraft.issueUrl);
-  const record = {
-    id: copyDraft.reportId,
-    publicId: copyDraft.publicId,
-    title: `${reportIssueLabel(copyDraft)} — ${copyDraft.environment}`,
-    issueUrl: copyDraft.issueUrl,
-    issueKey,
-    environment: copyDraft.environment,
-    overallStatus: copyDraft.overallStatus,
-    createdAt: now,
-    updatedAt: now,
-    lastOpenedAt: now,
-    reason: "version-copy",
-    historyComment: copyItem.historyComment,
-    document: clone(copyDraft),
-    schemaVersion: 3,
-  };
-  await dbTransaction("readwrite", (store) => store.put(record));
-  await saveReportToServer(record, { force: true }).then((result) => {
-    if (result.report?.contentHash) setKnownServerHash(record.id, result.report.contentHash);
-  });
-  return { ...copyItem, draft: copyDraft, record };
-}
-
-async function saveBothVersionsFromConflict() {
-  if (!syncRecovery) return;
-  flushDraftFromDom();
-  const localCopy = createConflictCopy(draft, "local-copy", "Локальная версия");
-  const savedLocal = await saveDraftCopyToHistory(localCopy);
-  const cloudDraft = normalizeDraft(syncRecovery.serverDraft);
-  const cloudId = cloudDraft.reportId || draft.reportId;
-  if (syncRecovery.serverHash) setKnownServerHash(cloudId, syncRecovery.serverHash);
-  dismissCloudHash(cloudId, syncRecovery.serverHash);
-  hideSyncRecovery();
-  pendingCopyChoice = {
-    local: savedLocal,
-    cloud: {
-      draft: cloudDraft,
-      record: {
-        id: cloudId,
-        publicId: cloudDraft.publicId,
-        contentHash: syncRecovery.serverHash || serverReportHashes[cloudId] || "",
-      },
-    },
-  };
-  elements.versionCopyChoiceModal.hidden = false;
-  syncBodyModalOverflow();
-  showToast("Локальная версия сохранена отдельной копией");
-}
-
-async function openSavedConflictCopy(which) {
-  if (!pendingCopyChoice?.[which]) return;
-  const selected = pendingCopyChoice[which];
-  applyDraftLocally(selected.draft, { status: "Сохранено" });
-  setKnownServerHash(selected.record.id, serverReportHashes[selected.record.id] || "");
-  closeVersionCopyChoiceModal();
-  await saveReportSnapshot("open-version-copy").catch(() => {});
-  showToast(which === "local" ? "Открыта локальная версия" : "Открыта версия из облака");
-}
-
-async function saveVersionConflictChoice() {
-  if (!versionConflictChoice) return;
-  if (versionConflictChoice === "cloud") {
-    applyCloudVersionFromRecovery();
-    return;
-  }
-  if (versionConflictChoice === "local") {
-    await overwriteCloudWithLocalVersion();
-    return;
-  }
-  if (versionConflictChoice === "both") {
-    await saveBothVersionsFromConflict();
-  }
 }
 
 function handleRemoteDraftUpdate(remoteDraft) {
@@ -2213,52 +1465,6 @@ async function checkStoredDraftFreshness() {
   flushDraftFromDom();
   const stored = await getFreshestStoredDraft();
   if (stored) handleRemoteDraftUpdate(stored);
-  await checkServerDraftFreshness();
-}
-
-async function checkServerDraftFreshness() {
-  if (!cloudHistoryEnabled) {
-    hideSyncRecovery();
-    return;
-  }
-  if (!draft?.reportId) return;
-  try {
-    const knownHash = serverReportHashes[draft.reportId] || "";
-    const report = await getServerReport(draft.reportId, { rememberHash: false });
-    if (!report?.document || !isSameDraftLineage(report.document)) return;
-    const serverDraft = normalizeDraft(report.document);
-    if (!hasMeaningfulContentDiff(draft, serverDraft)) {
-      if (report.contentHash) setKnownServerHash(draft.reportId, report.contentHash);
-      return;
-    }
-    if (!report.contentHash || report.contentHash === knownHash) return;
-    if (isCloudHashDismissed(draft.reportId, report.contentHash)) return;
-    if (!isNewerDraft(serverDraft)) return;
-    if (isSavedByThisBrowser(serverDraft)) {
-      if (!hasUnsavedLocalChanges && serializeDraft() === historyCurrent) {
-        setKnownServerHash(draft.reportId, report.contentHash);
-        applyDraftLocally(serverDraft, { status: "Сохранено" });
-      }
-      return;
-    }
-    if (hasUnsavedLocalChanges || serializeDraft() !== historyCurrent) {
-      showSyncRecovery({
-        localDraft: draft,
-        serverDraft,
-        serverHash: report.contentHash || "",
-      });
-      setSaveStatus("Есть облачная версия");
-      return;
-    }
-    showSyncRecovery({
-      localDraft: draft,
-      serverDraft,
-      serverHash: report.contentHash || "",
-    });
-    setSaveStatus("Есть облачная версия");
-  } catch {
-    // Проверка облачной свежести не блокирует локальную работу.
-  }
 }
 
 function scheduleSave({ collect = true } = {}) {
@@ -2770,8 +1976,6 @@ async function saveSelectionCopy(before, next) {
     transaction.oncomplete = resolve;
     transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить чек-листы в истории. Проверьте свободное место в браузере и повторите копирование."));
   });
-  queueServerReportSave(sourceRecord);
-  queueServerReportSave(copyRecord);
 }
 
 async function copySelectedRowsToNewChecklist() {
@@ -4581,24 +3785,6 @@ function previewEditorHtml(html) {
   return container.innerHTML;
 }
 
-function setReportIdentityState(message, type = "") {
-  elements.reportIdentityState.textContent = message;
-  elements.reportIdentityState.className = `connection-state ${type}`.trim();
-}
-
-function updateCloudHistorySettingsState() {
-  const enabled = elements.cloudHistoryEnabled ? Boolean(elements.cloudHistoryEnabled.checked) : cloudHistoryEnabled;
-  if (elements.cloudHistoryEnabled) elements.cloudHistoryEnabled.checked = enabled;
-  if (elements.reportWorkspaceKey) elements.reportWorkspaceKey.disabled = !enabled;
-  const workspaceKey = elements.reportWorkspaceKey?.value?.trim() || reportWorkspaceKey.trim();
-  const message = !enabled
-    ? "Чек-листы сохраняются только локально в этом браузере."
-    : workspaceKey
-      ? `Синхронизация включена. Пространство: ${workspaceKey}.`
-      : "Синхронизация включена для вашей корпоративной учётной записи.";
-  setReportIdentityState(message);
-}
-
 function setSettingsSavedState(saved) {
   elements.saveJiraSettingsButton.classList.toggle("is-saved", saved);
   elements.settingsSaveCheck.hidden = !saved;
@@ -4609,50 +3795,8 @@ function markSettingsDirty() {
   setSettingsSavedState(false);
 }
 
-function fillReportIdentityForm() {
-  elements.cloudHistoryEnabled.checked = cloudHistoryEnabled;
-  elements.reportClientId.value = reportClientId;
-  elements.reportWorkspaceKey.value = reportWorkspaceKey;
-  updateCloudHistorySettingsState();
-}
-
-function saveReportIdentitySettings() {
-  const wasCloudEnabled = cloudHistoryEnabled;
-  const previousWorkspaceKey = reportWorkspaceKey;
-  cloudHistoryEnabled = Boolean(elements.cloudHistoryEnabled.checked);
-  localStorage.setItem(CLOUD_HISTORY_ENABLED_KEY, String(cloudHistoryEnabled));
-  reportWorkspaceKey = elements.reportWorkspaceKey.value.trim();
-  if (reportWorkspaceKey) {
-    localStorage.setItem(WORKSPACE_KEY_STORAGE_KEY, reportWorkspaceKey);
-  } else {
-    localStorage.removeItem(WORKSPACE_KEY_STORAGE_KEY);
-  }
-  const workspaceChanged = previousWorkspaceKey !== reportWorkspaceKey;
-  if (!cloudHistoryEnabled) {
-    hideSyncRecovery();
-    serverReportHashes = {};
-    dismissedCloudHashes = {};
-    saveServerReportHashes();
-    saveDismissedCloudHashes();
-  } else if (!wasCloudEnabled || workspaceChanged) {
-    if (workspaceChanged) {
-      serverReportHashes = {};
-      dismissedCloudHashes = {};
-      saveServerReportHashes();
-      saveDismissedCloudHashes();
-    }
-    saveReportSnapshot(workspaceChanged ? "change-cloud-workspace" : "enable-cloud-history").catch(() => {});
-  }
-  updateCloudHistorySettingsState();
-  elements.reportIdentityState.classList.add("success");
-  enhanceImageControls(elements.introEditor);
-  enhanceImageControls(elements.sections);
-  enhanceFileControls(elements.introEditor);
-  enhanceFileControls(elements.sections);
-}
-
 function setSettingsSection(section) {
-  const selected = ["checklist", "columns", "projects", "environments", "connect", "jira", "history", "appearance"].includes(section) ? section : "checklist";
+  const selected = ["checklist", "columns", "projects", "environments", "connect", "jira", "appearance"].includes(section) ? section : "checklist";
   if (selected === "projects" && !projectSettingsLoaded) fillProjectSettingsForm();
   elements.jiraSettingsModal.querySelectorAll("[data-settings-section]").forEach((button) => {
     const active = button.dataset.settingsSection === selected;
@@ -4832,20 +3976,12 @@ async function disconnectJira(instanceId) {
 }
 
 function openJiraSettings() {
-  fillReportIdentityForm();
   fillChecklistSettingsForm();
   fillEnvironmentSettingsForm();
   fillPinnedColumnsForm();
   resetProjectSettingsForm();
   setSettingsSection("checklist");
   setSettingsSavedState(false);
-  setReportIdentityState(
-    !cloudHistoryEnabled
-      ? "Чек-листы сохраняются только локально в этом браузере."
-      : reportWorkspaceKey.trim()
-        ? `Синхронизация включена. Пространство: ${reportWorkspaceKey.trim()}.`
-        : "Синхронизация включена для вашей корпоративной учётной записи.",
-  );
   elements.jiraSettingsModal.hidden = false;
   syncBodyModalOverflow();
   loadJiraConnections();
@@ -4861,8 +3997,7 @@ function saveJiraSettings() {
   try {
     saveProjectSettings();
     saveEnvironmentSettings();
-    saveReportIdentitySettings();
-    if (environmentSettingsWorkspace !== reportWorkspaceKey) fillEnvironmentSettingsForm();
+    if (environmentSettingsWorkspace !== settingsWorkspaceKey) fillEnvironmentSettingsForm();
     renderEnvironmentOptions();
     saveDefaultColumnsSettings();
     saveChecklistSettings();
@@ -5375,7 +4510,7 @@ function publicationInfoMarkup(value, reportId, history = false, includeLinks = 
 function historyPublication(report) {
   const api = window.QaReportJiraPublication;
   // The open report already knows a confirmed publication or its removal,
-  // even while the cloud's lightweight history response is catching up.
+  // while the local history metadata is catching up.
   const value = report.id === draft.reportId && Object.hasOwn(draft, "jiraPublication")
     ? draft.jiraPublication : Object.hasOwn(report, "jiraPublication")
       ? report.jiraPublication : report.document?.jiraPublication;
@@ -5584,7 +4719,6 @@ async function writeJiraPublication(context, link, expected = null) {
     record.document.lastSavedBy = tabId; record.document.lastSavedClientId = reportClientId;
     record.historyContentFingerprint = QaReportHistory.contentFingerprint(record.document);
     await dbTransaction("readwrite", store => store.put(record));
-    queueServerReportSave(record);
   }
   return true;
 }
@@ -5878,9 +5012,6 @@ async function setHistorySelectionMode(enabled) {
 async function deleteHistoryReport(report) {
   if (report.id === draft.reportId) clearTimeout(saveTimer);
   await draftWriteQueue.catch(() => {});
-  await Promise.allSettled([...(pendingHistoryServerSaves.get(report.id) || [])]);
-  if (report.source === "server") await deleteServerReport(report.id);
-  // A cloud entry can also have a local copy; remove both so it cannot reappear.
   await deleteReportRecord(report.id);
   selectedHistoryReportIds.delete(report.id);
   if (report.id !== draft.reportId) return;
@@ -5951,14 +5082,7 @@ async function saveHistoryCommentNow(report, commentField) {
   historyCommentTimers.delete(key);
   const value = commentField.value;
   if (value === (report.historyComment || "")) return;
-  const action =
-    report.source === "server"
-      ? updateServerReportComment(report.id, value)
-      : updateLocalReportComment(report.id, value);
-  const saved = await action;
-  if (report.source === "server") {
-    await updateLocalReportComment(report.id, value).catch(() => {});
-  }
+  const saved = await updateLocalReportComment(report.id, value);
   report.historyComment = value;
   if (saved?.updatedAt) report.updatedAt = saved.updatedAt;
   const dates = commentField.closest(".history-item")?.querySelector(".history-dates");
@@ -6012,9 +5136,8 @@ async function openHistoryReport(report) {
   await flushVisibleHistoryComments();
   await saveReportSnapshot("before-open-history");
   if (report.id !== draft.reportId) {
-    const fullReport = report.source === "server" ? await getServerReport(report.id) : await getReportRecord(report.id);
+    const fullReport = await getReportRecord(report.id);
     if (!fullReport?.document) throw new Error("Отчёт больше не доступен в истории");
-    if (report.source === "server") await cacheOpenedServerReport(fullReport).catch(() => {});
     suppressHistory = true;
     try {
       draft = normalizeDraft(clone(fullReport.document));
@@ -6066,9 +5189,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
   const availableIds = new Set(reports.map(report => report.id));
   for (const id of selectedHistoryReportIds) if (!availableIds.has(id)) selectedHistoryReportIds.delete(id);
   historyFilteredReports = filtered;
-  const serverCount = reports.filter((report) => report.source === "server").length;
-  const localCount = reports.length - serverCount;
-  elements.historyUsage.textContent = `${selectedProject || query ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · Облако: ${serverCount} · Локально: ${localCount}`;
+  elements.historyUsage.textContent = `${selectedProject || query ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · В этом браузере`;
   elements.historyList.innerHTML = "";
   updateHistorySelectionUi();
   if (!filtered.length) {
@@ -6159,7 +5280,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const copyButton = createSmallButton("Копия", async () => {
       await flushVisibleHistoryComments();
       await saveReportSnapshot("before-copy-history");
-      const fullReport = report.source === "server" ? await getServerReport(report.id) : report;
+      const fullReport = report;
       draft = normalizeDraft(clone(fullReport.document));
       draft.draftId = crypto.randomUUID();
       draft.reportId = crypto.randomUUID();
@@ -7459,7 +6580,7 @@ function enhanceFileControls(root = document) {
     const nameNode = card.querySelector(".file-card-name");
     if (nameNode) nameNode.title = name;
     const stored = isStoredObjectUrl(card.dataset.dataUrl);
-    if (stored || (cloudHistoryEnabled && objectStorageConfigured)) card.append(createStorageStatusBadge(stored));
+    if (stored) card.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel file-controls";
     controls.dataset.editorUi = "true";
@@ -7558,7 +6679,7 @@ function enhanceImageControls(root = document) {
     figure.tabIndex = 0;
     figure.setAttribute("aria-label", "Открыть изображение");
     const stored = isStoredObjectUrl(image.src);
-    if (stored || (cloudHistoryEnabled && objectStorageConfigured)) figure.append(createStorageStatusBadge(stored));
+    if (stored) figure.append(createStorageStatusBadge(stored));
     const controls = document.createElement("span");
     controls.className = "object-action-panel image-controls";
     controls.dataset.editorUi = "true";
@@ -9662,7 +8783,12 @@ function portableHistoryRecord(value, reason, existing = {}) {
 async function openReportFile(file, onProgress) {
   if (!file) return;
   const imported = await window.QaReportFile.unpack(file, { onProgress });
-  const next = normalizeDraft({ ...imported.document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
+  await openPortableDocument(imported.document);
+
+  return `Открыта отдельная копия: ${imported.count} вложений. Предыдущий отчёт сохранён в истории. Новые правки сохраняются в браузере; для обновления резервного файла скачайте полную копию ещё раз.`;
+}
+async function openPortableDocument(document) {
+  const next = normalizeDraft({ ...document, draftId: crypto.randomUUID(), reportId: crypto.randomUUID(),
     publicId: createPublicId(), jiraPublication: null, revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId });
   const db = await openDatabase();
   clearTimeout(saveTimer); clearTimeout(historyTimer); flushDraftFromDom();
@@ -9678,15 +8804,16 @@ async function openReportFile(file, onProgress) {
       } catch { transaction.abort(); }
     };
     transaction.oncomplete = resolve;
-    transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить копию в браузере. Возможно, недостаточно места. Текущий отчёт остаётся открытым; исходный файл .report сохранён у вас."));
+    transaction.onerror = transaction.onabort = () => reject(new Error("Не удалось сохранить копию в браузере. Возможно, недостаточно места. Текущий отчёт остаётся открытым."));
   });
   flushDraftFromDom();
   if (draft.reportId !== before.reportId || serializeDraft() !== beforeContent) {
     throw new Error("Текущий отчёт изменился во время открытия. Импортированная копия сохранена в истории; текущий отчёт остаётся открытым.");
   }
   applyDraftLocally(next); broadcastDraftUpdate();
-  return `Открыта отдельная копия: ${imported.count} вложений. Предыдущий отчёт сохранён в истории. Новые правки сохраняются в браузере; для обновления резервного файла скачайте полную копию ещё раз.`;
+  return next;
 }
+
 document.getElementById("exportReportButton").addEventListener("click", exportReportFile);
 document.getElementById("reportFileInput").addEventListener("change", event => selectReportFiles(event.target.files));
 document.getElementById("chooseReportFileButton").addEventListener("click", () => {
@@ -9845,7 +8972,6 @@ async function resetDraft() {
     return;
   }
   hideDraftSyncBanner();
-  hideSyncRecovery();
   draft = normalizeDraft(clone(DEFAULT_DRAFT));
   draft.draftId = crypto.randomUUID();
   draft.reportId = crypto.randomUUID();
@@ -9984,7 +9110,7 @@ let environmentSettingsDraft = [];
 let environmentSettingsWorkspace = "";
 
 function environmentSettingsKey() {
-  return "qa-report-environment-settings-v1:" + (reportWorkspaceKey || "local");
+  return "qa-report-environment-settings-v1:" + (settingsWorkspaceKey || "local");
 }
 
 function normalizeEnvironments(values) {
@@ -9999,7 +9125,7 @@ function loadEnvironments() {
     if (Array.isArray(saved)) return normalizeEnvironments(saved);
   } catch {}
   let previous = [];
-  try { previous = normalizeEnvironments(JSON.parse(localStorage.getItem("qa-report-environments-v1:" + (reportWorkspaceKey || "local")))); } catch {}
+  try { previous = normalizeEnvironments(JSON.parse(localStorage.getItem("qa-report-environments-v1:" + (settingsWorkspaceKey || "local")))); } catch {}
   return normalizeEnvironments([...DEFAULT_ENVIRONMENTS, ...previous]);
 }
 
@@ -10139,7 +9265,7 @@ function renderEnvironmentSettings() {
 
 function fillEnvironmentSettingsForm() {
   environmentSettingsDraft = loadEnvironments();
-  environmentSettingsWorkspace = reportWorkspaceKey;
+  environmentSettingsWorkspace = settingsWorkspaceKey;
   document.getElementById("newEnvironmentName").value = "";
   setEnvironmentSettingsError(); renderEnvironmentSettings();
 }
@@ -11094,26 +10220,12 @@ document.getElementById("acceptHtmlCopyScopeButton").addEventListener("click", c
 elements.closePublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
 elements.cancelPublishScopeButton.addEventListener("click", () => resolvePublishScope(false));
 elements.acceptPublishScopeButton.addEventListener("click", () => resolvePublishScope(true));
-elements.cloudConflictStatus.addEventListener("click", openVersionConflictModal);
-elements.closeVersionConflictFooterButton.addEventListener("click", closeVersionConflictModal);
-elements.selectLocalVersionButton.addEventListener("click", () => setVersionConflictChoice("local"));
-elements.selectCloudVersionButton.addEventListener("click", () => setVersionConflictChoice("cloud"));
-elements.saveBothVersionsButton.addEventListener("click", () => setVersionConflictChoice("both"));
-elements.saveVersionChoiceButton.addEventListener("click", () => {
-  saveVersionConflictChoice().catch((error) => {
-    showToast(`Не удалось сохранить выбор: ${error.message}`, 9000);
-  });
-});
-elements.openLocalCopyButton.addEventListener("click", () => openSavedConflictCopy("local"));
-elements.openCloudCopyButton.addEventListener("click", () => openSavedConflictCopy("cloud"));
 document.querySelectorAll('.settings-sidebar [data-settings-section]').forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });
 
 elements.jiraSettingsModal.addEventListener("input", markSettingsDirty);
 elements.jiraSettingsModal.addEventListener("change", markSettingsDirty);
-elements.cloudHistoryEnabled.addEventListener("change", () => updateCloudHistorySettingsState());
-elements.reportWorkspaceKey.addEventListener("input", () => updateCloudHistorySettingsState());
 elements.themeToggle.addEventListener("click", (e) => {
   e.stopPropagation();
   const menu = document.getElementById("themeMenu");
@@ -11609,4 +10721,37 @@ window.QaReportBugUI.init({
 });
 document.getElementById("openStandaloneBugReport").addEventListener("click", () => {
   closeHeaderDropdowns(); window.QaReportBugUI.openStandalone(elements.reportMenuButton);
+});
+
+const personalCloud = window.QaReportCloud.create({
+  headers: async method => {
+    if (method === "GET") return {};
+    return { "X-QA-CSRF-Token": await authCsrfToken() };
+  },
+  capture: (collect = true) => { if (collect) flushDraftFromDom(); return copyDraftValue(draft); },
+  records: getAllReports, loadAttachment: reportAttachmentLoader, notify: showToast,
+  blocked: () => Boolean(importBusy || reportFileBusy || pwaPendingOperations || publishInProgress),
+  operation: delta => { pwaPendingOperations += delta; },
+  restore: async document => {
+    const next = await openPortableDocument(document);
+    return next;
+  },
+});
+const corporateProfile = document.getElementById("corporateProfileDialog");
+document.getElementById("corporateProfileButton").addEventListener("click", async () => {
+  closeHeaderDropdowns(); corporateProfile.showModal();
+  const label = document.getElementById("corporateProfileEmail");
+  label.textContent = "Проверяем профиль…";
+  try { label.textContent = (await reportApi("/api/auth/session")).user.email; }
+  catch { label.textContent = "Не удалось проверить профиль."; }
+});
+document.getElementById("corporateProfileClose").addEventListener("click", () => corporateProfile.close());
+corporateProfile.addEventListener("keydown", event => { if (event.key === "Escape") event.stopPropagation(); });
+corporateProfile.querySelector("[data-personal-cloud]").addEventListener("click", () => corporateProfile.close());
+document.getElementById("corporateProfileSettings").addEventListener("click", () => { corporateProfile.close(); openJiraSettings(); });
+document.getElementById("corporateProfileSignOut").addEventListener("click", async event => {
+  const button = event.currentTarget; button.disabled = true;
+  try { await reportApi("/api/auth/logout", { method: "POST", body: JSON.stringify({ csrfToken: await authCsrfToken() }) }); personalCloud.reset(); location.assign("/login"); }
+  catch { showToast("Не удалось выйти. Повторите ещё раз."); }
+  finally { button.disabled = false; }
 });

@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=156" />
+    <link rel="stylesheet" href="/styles.css?v=157" />
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -178,6 +178,7 @@
               </button>
               <div class="header-dropdown-divider" role="separator"></div>
               <div class="header-menu-label">Файлы</div>
+              <button class="header-dropdown-item" type="button" role="menuitem" data-personal-cloud>Сохранить в личное облако</button>
               <button class="header-dropdown-item" id="exportReportButton" type="button" role="menuitem">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-header-file"></use></svg>
                 <span>Сохранить копию (.report)</span>
@@ -212,20 +213,13 @@
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-header-file-text"></use></svg>
             <span class="whats-new-dot" id="whatsNewDot" hidden aria-hidden="true"></span>
           </button>
+          <button class="header-icon-button" id="corporateProfileButton" type="button" title="Профиль" aria-label="Профиль" aria-haspopup="dialog"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></button>
           <button class="header-icon-button" id="settingsButton" type="button" title="Настройки" aria-label="Настройки">
             <svg class="ui-icon" aria-hidden="true"><use href="#icon-settings"></use></svg>
           </button>
         </div>
       </header>
 
-      <button class="cloud-conflict-popover" id="cloudConflictStatus" type="button" title="Открыть сравнение локальной и облачной версии" hidden>
-        <svg class="ui-icon" aria-hidden="true"><use href="#icon-cloud-alert"></use></svg>
-        <span>
-          <strong>Есть изменения в облаке</strong>
-          <small>Локальная и облачная версии отличаются</small>
-        </span>
-        <b>Сравнить</b>
-      </button>
 
       <main class="workspace">
         <section class="report-card">
@@ -1107,7 +1101,6 @@
             <div class="settings-nav-group">
               <div class="settings-nav-heading">Данные</div>
               <button class="settings-nav-item" type="button" data-settings-section="projects"><svg class="ui-icon" aria-hidden="true"><use href="#icon-layers"></use></svg><span>Проекты</span></button>
-              <button class="settings-nav-item" id="settingsHistorySectionButton" type="button" data-settings-section="history"><svg class="ui-icon" aria-hidden="true"><use href="#icon-history"></use></svg><span>Синхронизация</span></button>
             </div>
             <div class="settings-nav-group">
               <div class="settings-nav-heading">Интеграции</div>
@@ -1238,31 +1231,6 @@
                 <div class="connection-state">Загружаем доступные Jira…</div>
               </div>
             </section>
-            <section class="settings-section" id="settingsHistorySection" data-settings-panel="history" hidden>
-              <header class="settings-page-header"><h3>Синхронизация</h3><p>Настройте хранение и синхронизацию чек-листов.</p></header>
-              <div class="settings-note">
-                Включите синхронизацию, чтобы открывать одну историю чек-листов в разных браузерах.
-              </div>
-              <label class="settings-toggle-card">
-                <input id="cloudHistoryEnabled" type="checkbox" />
-                <span>
-                  <strong>Сохранять чек-листы в облачном хранилище</strong>
-                  <small>Если включено, чек-листы будут синхронизироваться через серверное хранилище. Если выключено, используется только локальное хранилище браузера.</small>
-                </span>
-              </label>
-              <label class="field" hidden>
-                <span>ID этого браузера</span>
-                <input id="reportClientId" type="text" readonly />
-              </label>
-              <label class="field">
-                <span>Ключ пространства</span>
-                <input id="reportWorkspaceKey" type="text" autocomplete="off" placeholder="Например, qa-team или project-advinta" />
-              </label>
-              <p class="settings-curl-hint">
-                Введите одинаковый ключ в разных браузерах — в них появится одна общая история. Ключ действует только внутри вашей корпоративной учётной записи. Если оставить поле пустым, используется ваше основное личное пространство.
-              </p>
-              <div class="connection-state" id="reportIdentityState">Чек-листы сохраняются только локально в этом браузере.</div>
-            </section>
           </div>
         </div>
         <footer class="modal-footer settings-footer" id="settingsFooter">
@@ -1274,66 +1242,7 @@
       </section>
     </div>
 
-    <div class="modal-backdrop" id="versionConflictModal" hidden>
-      <section class="modal version-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="versionConflictTitle">
-        <header class="modal-header">
-          <div>
-            <div class="eyebrow">Конфликт версий</div>
-            <h2 id="versionConflictTitle">Локальная и облачная версии отличаются</h2>
-          </div>
-        </header>
-        <div class="version-conflict-body">
-          <div class="version-choice-bar">
-            <button class="button button-secondary" id="selectLocalVersionButton" type="button">Выбрать локальную версию</button>
-            <button class="button button-secondary" id="saveBothVersionsButton" type="button">Сохранить обе версии</button>
-            <button class="button button-secondary" id="selectCloudVersionButton" type="button">Выбрать облачную версию</button>
-          </div>
-          <div class="version-compare-grid">
-            <section class="version-compare-panel" id="localVersionPanel">
-              <header>
-                <div>
-                  <div class="version-summary-label">Локальная версия</div>
-                  <dl id="localVersionSummary"></dl>
-                </div>
-              </header>
-              <div class="version-preview" id="localVersionPreview"></div>
-            </section>
-            <section class="version-compare-panel" id="cloudVersionPanel">
-              <header>
-                <div>
-                  <div class="version-summary-label">Облачная версия</div>
-                  <dl id="cloudVersionSummary"></dl>
-                </div>
-              </header>
-              <div class="version-preview" id="cloudVersionPreview"></div>
-            </section>
-          </div>
-        </div>
-        <footer class="modal-footer">
-          <button class="button button-secondary" id="closeVersionConflictFooterButton" type="button">Закрыть</button>
-          <button class="button button-primary" id="saveVersionChoiceButton" type="button" disabled>Сохранить изменения</button>
-        </footer>
-      </section>
-    </div>
 
-    <div class="modal-backdrop version-copy-choice-backdrop" id="versionCopyChoiceModal" hidden>
-      <section class="modal version-copy-choice-modal" role="dialog" aria-modal="true" aria-labelledby="versionCopyChoiceTitle">
-        <header class="modal-header">
-          <div>
-            <div class="eyebrow">Две копии</div>
-            <h2 id="versionCopyChoiceTitle">Сохранены две копии чек-листа</h2>
-          </div>
-        </header>
-        <div class="version-copy-choice-body">
-          <p>Какую версию открыть сейчас?</p>
-          <div class="version-copy-choice-actions">
-            <button class="button button-primary" id="openLocalCopyButton" type="button">Открыть локальную версию</button>
-            <button class="button button-secondary" id="openCloudCopyButton" type="button">Открыть версию из облака</button>
-          </div>
-          <p class="settings-curl-hint">Невыбранная версия сохранится в истории как отдельный чек-лист.</p>
-        </div>
-      </section>
-    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <template id="sectionTemplate">
@@ -1375,7 +1284,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=124"></script>
+    <script src="/release-notes.js?v=125"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1383,7 +1292,7 @@
     <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=7"></script>
+    <script src="/report-file.js?v=8"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
@@ -1475,7 +1384,25 @@
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
     <script src="/report-view.js?v=10"></script>
-    <script src="/app.js?v=170"></script>
+    <dialog id="personalCloudDialog" class="cloud-dialog" aria-labelledby="personalCloudTitle" aria-describedby="personalCloudHint">
+      <header class="cloud-heading"><div><h2 id="personalCloudTitle">Мои облачные отчёты</h2><p id="personalCloudAccount"></p></div><button id="personalCloudClose" class="button button-ghost" type="button" aria-label="Закрыть облачные отчёты">Закрыть</button></header>
+      <p id="personalCloudHint">Откройте отчёт на другом устройстве через свой профиль. Работа идёт в браузере; новые правки выбранных отчётов сохраняются в облако раз в минуту.</p>
+      <section class="cloud-current" aria-label="Текущий отчёт">
+        <p id="personalCloudCurrent"></p>
+        <div class="cloud-actions"><button id="personalCloudSave" class="button button-primary" type="button" disabled>Сохранить текущий отчёт</button><button id="personalCloudCopy" class="button button-secondary" type="button" hidden>Сохранить отдельной копией</button></div>
+        <label class="cloud-auto"><input id="personalCloudAuto" type="checkbox" disabled> Сохранять изменения раз в минуту</label>
+      </section>
+      <p id="personalCloudStatus" role="status" aria-live="polite"></p>
+      <div class="cloud-heading"><h3>Сохранённые отчёты</h3><button id="personalCloudRefresh" class="button button-ghost" type="button">Обновить список</button></div>
+      <div id="personalCloudList" class="cloud-list"></div>
+    </dialog>
+      <dialog id="corporateProfileDialog" class="cloud-dialog" aria-labelledby="corporateProfileTitle">
+      <header class="cloud-heading"><h2 id="corporateProfileTitle">Профиль</h2><button id="corporateProfileClose" class="button button-ghost" type="button">Закрыть</button></header>
+      <p id="corporateProfileEmail"></p><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
+    </dialog>
+    <script src="/personal-cloud-client.js?v=1"></script>
+    <script src="/app.js?v=171"></script>
     <script src="/local-import-client.js?v=8"></script>
+
   </body>
 </html>

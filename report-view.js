@@ -123,7 +123,6 @@
       for (const [key, selector] of [["point", ".point-index"], ["qa", ".qa-status"]]) {
         const header = table.tHead.querySelector(selector);
         const heading = element("span", "report-column-heading");
-        heading.append(element("span", "", header.textContent));
         const button = element("button", "column-pin");
         button.type = "button";
         button.dataset.pinColumn = key;
@@ -137,7 +136,7 @@
           svg.append(path);
         }
         button.append(svg);
-        heading.append(button);
+        heading.append(button, element("span", "", header.textContent));
         header.replaceChildren(heading);
       }
       render(table);

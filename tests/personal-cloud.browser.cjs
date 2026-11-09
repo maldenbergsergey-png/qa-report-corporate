@@ -16,6 +16,7 @@ let child, browser, service;
 const db = new DatabaseSync(':memory:');
 const settings = createCloudSettings({ getDb: () => db, configured: () => true }); settings.set(true);
 const objects = new Map(), errors = [], requests = [];
+let holdRequest, failList = false;
 async function main() {
   const listener = http.createServer(); await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
@@ -49,24 +50,27 @@ async function main() {
       if (url.origin !== origin) return route.abort();
       if (!corporate && url.pathname === '/api/shared-reports/account') return route.fulfill({ json: { publishableKey: 'pk_test_fixture' } });
       if (!corporate && url.pathname === '/report-account-dialog.js') return route.fulfill({ contentType: 'text/javascript', body: `
-        export async function observeProfile(key, callback) { callback({ id: '${owner}', firstName: 'Тест', lastName: 'Автор', email: '${owner}@example.test', avatar: null }); }
+        export async function observeProfile(key, callback) { window.cloudTestObserver = callback; callback(${owner ? JSON.stringify({ id: 'PLACEHOLDER', firstName: 'Тест', lastName: 'Автор', email: 'qa@example.test', avatar: null }).replace('PLACEHOLDER', owner) : 'null'}); }
         export async function sessionToken() { return 'fixture-session'; }
+        export async function signOut() { window.cloudTestObserver?.(null); }
       ` });
       if (!corporate && url.pathname === '/api/profile/admin') return route.fulfill({ json: { path: '/owner/' } });
 
       if (!url.pathname.startsWith('/api/cloud-reports')) return route.continue();
       requests.push([owner, req.method(), url.pathname]);
+      if (failList && req.method() === 'GET' && url.pathname === '/api/cloud-reports') { failList = false; return route.abort('failed'); }
+      if (holdRequest?.matches(req.method(), url.pathname)) { const held = holdRequest; holdRequest = undefined; held.started(); await held.promise; }
       const chunks = [], response = new Writable({ write(chunk, _, done) { chunks.push(Buffer.from(chunk)); done(); } });
       response.writeHead = (status, headers) => { response.status = status; response.headers = headers; };
       try {
-        await service.handle({ session: owner, method: req.method(), headers: req.headers(), body: req.postDataJSON() || {} }, response, url.pathname);
+        await service.handle({ session: owner || null, method: req.method(), headers: req.headers(), body: req.postDataJSON() || {} }, response, url.pathname);
         await route.fulfill({ status: response.status || 200, headers: response.headers || { 'Content-Type': 'application/json' },
           body: response.json ? JSON.stringify(response.json) : Buffer.concat(chunks) });
       } catch (error) { await route.fulfill({ status: error.status || 400, json: { error: error.message } }); }
     });
     const page = await ctx.newPage(); page.on('pageerror', error => { errors.push(error.message); console.error('PAGE ERROR', error.stack); }); page.setDefaultTimeout(12_000);
     await page.goto(origin); await page.waitForSelector('.cell-editor');
-    return { ctx, page };
+    return { ctx, page, setOwner: value => { owner = value; } };
   }
   const a = await context();
   assert.equal(await a.page.locator('[data-settings-section="history"], [data-settings-section="files"], #googleStorageEnabled, #yandexStorageEnabled').count(), 0);
@@ -81,6 +85,8 @@ async function main() {
     render(); await saveDraft();
     await personalCloud.open();
   });
+  assert.equal(await a.page.locator('#personalCloudStatus').textContent(), '');
+  assert.match(await a.page.locator('#personalCloudReportTitle').textContent(), /Личный чек-лист/);
   await a.page.click('#personalCloudSave');
   await a.page.waitForFunction(() => document.getElementById('personalCloudStatus').textContent === 'Отчёт сохранён в личном облаке.');
   assert.equal(db.prepare('SELECT revision FROM personal_cloud_reports').get().revision, 1); assert.equal(objects.size, 1);
@@ -137,8 +143,113 @@ async function main() {
     await a.page.locator('#personalCloudDialog').screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, `cloud-${corporate ? 'corporate' : 'public'}-mobile.png`) });
   }
   assert.equal(await a.page.evaluate(() => document.getElementById('personalCloudDialog').scrollWidth <= document.getElementById('personalCloudDialog').clientWidth + 1), true);
+
+  // An empty successful list and repeated refresh never leave a loading message behind.
+  await c.page.goto(origin); await c.page.waitForSelector('.cell-editor');
+  await c.page.evaluate(() => personalCloud.open());
+  await c.page.click('#personalCloudRefresh');
+  await c.page.waitForFunction(() => document.getElementById('personalCloudDialog').getAttribute('aria-busy') === 'false');
+  assert.equal(await c.page.locator('#personalCloudStatus').textContent(), '');
+  assert.equal(await c.page.locator('.cloud-report').count(), 0);
+  failList = true;
+  await c.page.click('#personalCloudRefresh');
+  await c.page.waitForFunction(() => document.getElementById('personalCloudStatus').dataset.state === 'error');
+  assert.equal(await c.page.locator('#personalCloudRefresh').isEnabled(), true);
+  await c.page.click('#personalCloudRefresh');
+  await c.page.waitForFunction(() => document.getElementById('personalCloudDialog').getAttribute('aria-busy') === 'false');
+  assert.equal(await c.page.locator('#personalCloudStatus').textContent(), '');
+
+  // Clipboard URLs identify the authenticated cloud record, not the downloaded local copy.
+  await a.ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await a.page.locator('.cloud-report').first().getByRole('button', { name: 'Копировать ссылку' }).click();
+  const copied = await a.page.evaluate(() => navigator.clipboard.readText());
+  assert.equal(copied, origin + '/cloud-report/' + originalId);
+  const d = await context();
+  await d.page.goto(copied);
+  await d.page.waitForFunction(() => document.documentElement.dataset.cloudAccess === 'granted');
+  assert.equal(d.page.url(), copied);
+  assert.match(await d.page.locator('.cell-editor').first().innerHTML(), /Второе устройство офлайн/);
+  const localUrl = await d.page.evaluate(async () => {
+    draft.sections[0].rows[0].cells.check = '<p>Локальная копия после выхода</p>'; render(); await saveDraft();
+    return location.origin + '/report/' + draft.publicId;
+  });
+  // Returning from the browser's page cache locks first and validates access without replacing local edits.
+  let releaseAccess, startedAccess;
+  const heldAccess = new Promise(resolve => releaseAccess = resolve), accessStarted = new Promise(resolve => startedAccess = resolve);
+  holdRequest = { matches: (method, url) => method === 'GET' && url.endsWith('/access'), promise: heldAccess, started: startedAccess };
+  await d.page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  await accessStarted;
+  assert.equal(await d.page.locator('#reportWorkspace').isVisible(), false);
+  releaseAccess();
+  await d.page.waitForFunction(() => document.documentElement.dataset.cloudAccess === 'granted');
+  assert.match(await d.page.locator('.cell-editor').first().innerHTML(), /Локальная копия после выхода/);
+  if (corporate) {
+    await d.page.click('#corporateProfileButton');
+    await d.page.click('#corporateProfileSignOut');
+    d.setOwner('');
+    await d.page.waitForURL('**/login');
+    await d.page.goto(copied); await d.page.waitForURL('**/login?callbackUrl=*');
+    assert.equal(await d.page.locator('.cell-editor').count(), 0);
+    // Reopening with another valid corporate session still cannot use the cached local copy.
+    d.setOwner('owner-b');
+    const { createSessionToken } = require('../auth');
+    await d.ctx.addCookies([{ name: 'query-port-session', value: createSessionToken('owner-b@example.test', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
+  } else {
+    d.setOwner('');
+    await d.page.click('#profileButton');
+    await d.page.locator('#profileMenu [data-profile-sign-out]').click();
+    await d.page.waitForFunction(() => document.documentElement.dataset.cloudAccess === 'locked' && !document.getElementById('cloudReportSignIn').hidden);
+    assert.equal(await d.page.locator('#reportWorkspace').isVisible(), false);
+    await d.page.reload();
+    await d.page.waitForFunction(() => !document.getElementById('cloudReportSignIn').hidden);
+    assert.equal(d.page.url(), copied);
+    assert.equal(await d.page.locator('#reportWorkspace').isVisible(), false);
+    await d.page.goto(localUrl); await d.page.waitForSelector('.cell-editor');
+    assert.match(await d.page.locator('.cell-editor').first().innerHTML(), /Локальная копия после выхода/);
+    d.setOwner('owner-b');
+  }
+  await d.page.goto(copied);
+  await d.page.waitForFunction(() => document.getElementById('personalCloudStatus').dataset.state === 'error');
+  assert.equal(await d.page.locator('#reportWorkspace').isVisible(), false);
+  assert.match(await d.page.locator('#cloudReportAccessStatus').textContent(), /Нет доступа/);
+  assert.equal(await d.page.locator('#cloudReportSignIn').isVisible(), false);
+  assert.equal(d.page.url(), copied);
+
+  // A committed attachment moves on to document saving; 100% cannot masquerade as completion.
+  await a.page.evaluate(() => { history.replaceState({}, '', '/report/' + draft.publicId); window.dispatchEvent(new PopStateEvent('popstate')); });
+  let releaseSave, startedSave;
+  const heldSave = new Promise(resolve => releaseSave = resolve), saveStarted = new Promise(resolve => startedSave = resolve);
+  holdRequest = { matches: method => method === 'PUT', promise: heldSave, started: startedSave };
+  await a.page.click('#personalCloudSave'); await saveStarted;
+  assert.equal(await a.page.locator('#personalCloudStatus').textContent(), 'Сохраняем текст отчёта…');
+  assert.equal(await a.page.locator('#personalCloudDialog').getAttribute('aria-busy'), 'true');
+  releaseSave();
+  await a.page.waitForFunction(() => document.getElementById('personalCloudStatus').textContent === 'Отчёт сохранён в личном облаке.' && document.getElementById('personalCloudDialog').getAttribute('aria-busy') === 'false');
+  assert.equal(await a.page.locator('#personalCloudSave').isEnabled(), true);
+
+  // Opening the dialog while a background save checks the account queues one real refresh.
+  await a.page.click('#personalCloudClose');
+  await a.page.evaluate(() => { history.replaceState({}, '', '/report/' + draft.publicId); window.dispatchEvent(new PopStateEvent('popstate')); });
+  let releaseAccount, startedAccount;
+  const heldAccount = new Promise(resolve => releaseAccount = resolve), accountStarted = new Promise(resolve => startedAccount = resolve);
+  holdRequest = { matches: (method, url) => method === 'GET' && url.endsWith('/availability'), promise: heldAccount, started: startedAccount };
+  const ticking = a.page.evaluate(() => personalCloud.tick());
+  await accountStarted;
+  const opening = a.page.evaluate(() => personalCloud.open());
+  releaseAccount(); await Promise.all([ticking, opening]);
+  assert.equal(await a.page.locator('#personalCloudDialog').getAttribute('aria-busy'), 'false');
+  assert.equal(await a.page.locator('#personalCloudStatus').textContent(), '');
+  assert.ok(await a.page.locator('.cloud-report').count() >= 1);
+  if (process.env.QA_REPORT_SCREENSHOTS) {
+    await a.page.locator('#personalCloudDialog').screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, `cloud-${corporate ? 'corporate' : 'public'}-links.png`) });
+    await d.page.screenshot({ path: path.join(process.env.QA_REPORT_SCREENSHOTS, `cloud-${corporate ? 'corporate' : 'public'}-denied.png`), fullPage: true });
+  }
+
   assert.deepEqual(errors, []);
-  console.log(`${corporate ? 'Corporate' : 'Public'}: two-device cloud save/open, attachments, offline edits, revision conflict, independent copy, access isolation, deletion and mobile layout passed`);
+  console.log(`${corporate ? 'Corporate' : 'Public'}: two-device cloud save/open, attachments, offline edits, revision conflict, independent copy, access isolation, deletion, mobile layout, copied cloud links, signed-out cache isolation and completed loading states passed`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   await browser?.close(); await service?.close(); db.close(); child?.kill(); fs.rmSync(temp, { recursive: true, force: true });

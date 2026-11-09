@@ -73,9 +73,11 @@ test('account ownership isolates list, document, mutation, deletion and direct a
   const doc = document(); doc.intro = `<figure class="cell-file" data-mime-type="text/plain" data-data-url="report-asset:${hash}">private.txt</figure>`;
   assert.equal((await h.save(id, doc)).status, 200);
   assert.equal((await h.call('', 'GET', {}, 'owner-b')).json.reports.length, 0);
-  for (const [route, method, body] of [[`/${id}`, 'GET', {}], [`/${id}`, 'PUT', { document: doc, revision: 1, title: 'hijack' }], [`/${id}`, 'DELETE', {}], [`/${id}/files/${hash}`, 'GET', {}], [`/${id}/files/${hash}`, 'POST', { offset: 0, size: 1, data: 'YQ==' }], [`/${id}/files`, 'POST', { files: [] }]]) {
+  for (const [route, method, body] of [[`/${id}/access`, 'GET', {}], [`/${id}`, 'GET', {}], [`/${id}`, 'PUT', { document: doc, revision: 1, title: 'hijack' }], [`/${id}`, 'DELETE', {}], [`/${id}/files/${hash}`, 'GET', {}], [`/${id}/files/${hash}`, 'POST', { offset: 0, size: 1, data: 'YQ==' }], [`/${id}/files`, 'POST', { files: [] }]]) {
     assert.equal((await h.call(route, method, body, 'owner-b')).status, 403, `${method} ${route}`);
   }
+  assert.deepEqual((await h.call(`/${id}/access`)).json, { ok: true });
+  assert.equal((await h.call(`/${id}/access`, 'GET', {}, null)).status, 401);
   const downloaded = await h.call(`/${id}/files/${hash}`);
   assert.equal(downloaded.status, 200); assert.deepEqual(downloaded.bytes, bytes);
   assert.equal(downloaded.headers['Cache-Control'], 'no-store');

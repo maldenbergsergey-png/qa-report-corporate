@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=5" defer></script>
     <script src="/usage.js?v=1" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=157" />
+    <link rel="stylesheet" href="/styles.css?v=158" />
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -221,7 +221,13 @@
       </header>
 
 
-      <main class="workspace">
+    <section id="cloudReportAccess" class="cloud-access" aria-labelledby="cloudReportAccessTitle" hidden>
+      <h1 id="cloudReportAccessTitle">Личный облачный отчёт</h1>
+      <p id="cloudReportAccessStatus" role="status" aria-live="polite">Проверяем доступ к облачному отчёту…</p>
+      <div class="cloud-actions"><button id="cloudReportSignIn" class="button button-primary" type="button" hidden>Войти в профиль</button><button id="cloudReportRetry" class="button button-secondary" type="button">Повторить</button><a id="cloudReportLocal" class="button button-ghost" href="/">К локальному отчёту</a></div>
+      <p class="cloud-access-note">Локальные копии остаются в истории этого браузера. Для облачной ссылки нужен вход в аккаунт владельца.</p>
+    </section>
+      <main class="workspace" id="reportWorkspace">
         <section class="report-card">
           <div class="report-heading">
             <div><div class="eyebrow">Отчёт о тестировании</div><h1>Чек-лист</h1></div>
@@ -1284,7 +1290,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=125"></script>
+    <script src="/release-notes.js?v=126"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1388,6 +1394,7 @@
       <header class="cloud-heading"><div><h2 id="personalCloudTitle">Мои облачные отчёты</h2><p id="personalCloudAccount"></p></div><button id="personalCloudClose" class="button button-ghost" type="button" aria-label="Закрыть облачные отчёты">Закрыть</button></header>
       <p id="personalCloudHint">Откройте отчёт на другом устройстве через свой профиль. Работа идёт в браузере; новые правки выбранных отчётов сохраняются в облако раз в минуту.</p>
       <section class="cloud-current" aria-label="Текущий отчёт">
+        <p class="cloud-current-title">Текущий отчёт<strong id="personalCloudReportTitle"></strong></p>
         <p id="personalCloudCurrent"></p>
         <div class="cloud-actions"><button id="personalCloudSave" class="button button-primary" type="button" disabled>Сохранить текущий отчёт</button><button id="personalCloudCopy" class="button button-secondary" type="button" hidden>Сохранить отдельной копией</button></div>
         <label class="cloud-auto"><input id="personalCloudAuto" type="checkbox" disabled> Сохранять изменения раз в минуту</label>
@@ -1400,8 +1407,8 @@
       <header class="cloud-heading"><h2 id="corporateProfileTitle">Профиль</h2><button id="corporateProfileClose" class="button button-ghost" type="button">Закрыть</button></header>
       <p id="corporateProfileEmail"></p><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
     </dialog>
-    <script src="/personal-cloud-client.js?v=1"></script>
-    <script src="/app.js?v=171"></script>
+    <script src="/personal-cloud-client.js?v=2"></script>
+    <script src="/app.js?v=172"></script>
     <script src="/local-import-client.js?v=8"></script>
 
   </body>

@@ -83,6 +83,16 @@ test('personal cloud uses real version-specific sessions, admin policy and CSRF 
   assert.equal((await call('/api/cloud-reports/' + id, 'PUT', body, invalid)).status, corporate ? 403 : 401);
   assert.equal((await call('/api/cloud-reports/' + id, 'PUT', body)).status, 200);
   assert.equal((await call('/api/cloud-reports/' + id, 'GET', undefined, b)).status, 403);
+  assert.equal((await call('/api/cloud-reports/' + id + '/access', 'GET', undefined, b)).status, 403);
+  assert.equal((await call('/api/cloud-reports/' + id + '/access', 'GET', undefined, {})).status, 401);
+  assert.deepEqual(await (await call('/api/cloud-reports/' + id + '/access')).json().then(({ ok }) => ({ ok })), { ok: true });
+  const cloudShell = await call('/cloud-report/' + id);
+  assert.equal(cloudShell.status, 200);
+  assert.equal(cloudShell.headers.get('cache-control'), 'no-store');
+  const shell = await cloudShell.text(); assert.match(shell, /cloudReportAccess/); assert.doesNotMatch(shell, /Private data/);
+  const anonymousShell = await call('/cloud-report/' + id, 'GET', undefined, {});
+  assert.equal(anonymousShell.status, corporate ? 302 : 200);
+  if (corporate) assert.ok(anonymousShell.headers.get('location').startsWith('/login?callbackUrl='));
   assert.equal((await call('/api/cloud-reports/' + id, 'PUT', body, b)).status, 403);
   assert.equal((await call('/api/cloud-reports/' + id, 'DELETE', {}, b)).status, 403);
   assert.equal((await (await call('/api/cloud-reports', 'GET', undefined, b)).json()).reports.length, 0);

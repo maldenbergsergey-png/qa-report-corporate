@@ -115,11 +115,17 @@ function createPersonalCloud({ getDb, readJson, sendJson, authenticate, validate
       sendJson(response, 201, { report: { id, revision: 0 } });
       return true;
     }
-    const match = /^\/api\/cloud-reports\/([^/]+)(?:\/files(?:\/([a-f0-9]{64}))?)?$/.exec(pathname);
+    const match = /^\/api\/cloud-reports\/([^/]+)(?:\/(files|access)(?:\/([a-f0-9]{64}))?)?$/.exec(pathname);
     if (!match || !uuid.test(match[1])) fail(404, 'Облачный отчёт не найден.');
-    const [, id, fileHash] = match;
+    const [, id, action, fileHash] = match;
     const row = owned(id, owner);
-    const filesRoute = pathname.includes('/files');
+    if (action === 'access') {
+      if (request.method !== 'GET' || fileHash) fail(405, 'Метод не поддерживается.');
+      if (!row.revision) fail(404, 'Отчёт ещё не сохранён в облаке.');
+      sendJson(response, 200, { ok: true });
+      return true;
+    }
+    const filesRoute = action === 'files';
     if (method === 'GET' && !filesRoute) {
       if (!row.revision) fail(404, 'Отчёт ещё не сохранён в облаке.');
       sendJson(response, 200, { report: view(row, true) });

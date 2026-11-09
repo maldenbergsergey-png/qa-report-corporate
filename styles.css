@@ -6359,3 +6359,19 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 @media (max-width: 600px) { .cloud-dialog { padding: 18px; } .cloud-report { align-items: start; flex-direction: column; } .cloud-heading { align-items: start; } }
 
 .cloud-dialog [hidden] { display: none !important; }
+
+:root[data-cloud-access="locked"] #reportWorkspace { display: none !important; }
+.cloud-access { max-width: 760px; margin: 48px auto; padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.cloud-access [hidden], .cloud-access[hidden] { display: none !important; }
+.cloud-access h1 { font-size: 24px; }
+.cloud-access-note { color: var(--muted); line-height: 1.6; }
+.cloud-access a { text-decoration: none; }
+.cloud-current-title { color: var(--muted); font-size: 12px; }
+.cloud-current-title strong { display: block; margin-top: 6px; color: var(--ink); font-size: 15px; overflow-wrap: anywhere; }
+.cloud-report { flex-wrap: wrap; }
+.cloud-report > div:first-child { flex: 1 1 240px; }
+.cloud-report .cloud-actions { flex-wrap: wrap; }
+.cloud-dialog[aria-busy="true"] #personalCloudStatus[data-state="busy"]::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; border: 2px solid var(--line); border-top-color: var(--primary); border-radius: 50%; animation: cloud-progress .8s linear infinite; }
+@keyframes cloud-progress { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cloud-dialog[aria-busy="true"] #personalCloudStatus[data-state="busy"]::before { animation: none; } }
+@media (max-width: 600px) { .cloud-access { margin: 24px 16px; padding: 20px; } .cloud-report > div:first-child { flex-basis: auto; } }

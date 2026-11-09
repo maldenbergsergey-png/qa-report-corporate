@@ -1482,7 +1482,7 @@ async function handleObjectStorageGet(request, response, reportId, kind, storedN
 
 function serveStatic(request, response) {
   const requestPath = new URL(request.url, "http://localhost").pathname;
-  const isReportRoute = /^\/report\/[a-f0-9]{7,8}$/i.test(requestPath);
+  const isReportRoute = /^\/report\/[a-f0-9]{7,8}$/i.test(requestPath) || /^\/cloud-report\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(requestPath);
   const relative = requestPath === "/login" ? "login.html" : requestPath === "/" || isReportRoute ? "index.html" : decodeURIComponent(requestPath.slice(1));
   const filePath = path.resolve(ROOT, relative);
   if (adminService.isPrivateFile(filePath)) {
@@ -1506,7 +1506,8 @@ function serveStatic(request, response) {
     }
     response.writeHead(200, {
       "Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": requestPath.startsWith("/cloud-report/") ? "no-store" : "no-cache",
+      ...(requestPath.startsWith("/cloud-report/") ? { "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer" } : {}),
     });
     response.end(data);
   });

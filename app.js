@@ -1128,6 +1128,7 @@ function routeChecklistPublicId() {
 }
 
 function updateChecklistUrl(publicId = draft.publicId, { replace = true } = {}) {
+  if (window.QaReportCloud.keepRoute(draft.reportId)) return;
   const normalized = normalizePublicId(publicId);
   if (!normalized) return;
   const next = `/report/${normalized}`;
@@ -1142,6 +1143,7 @@ async function findLocalReportByPublicId(publicId) {
 }
 
 async function openReportFromRoute() {
+  if (window.QaReportCloud.routeId()) return;
   const location = readDraftLocation();
   const publicId = routeChecklistPublicId() || (isNewerDraft(location) ? location?.publicId : "");
   if (!publicId) {
@@ -10442,7 +10444,7 @@ getLocalAttachmentLimits();
 refreshObjectStorageUi();
 if (!routeChecklistPublicId() && !isNewerDraft(readDraftLocation())) updateChecklistUrl(draft.publicId);
 updateHistoryButtons();
-if (new URL(window.location.href).searchParams.has("importToken")) {
+if (!window.QaReportCloud.routeId() && new URL(window.location.href).searchParams.has("importToken")) {
   handleInboundChecklistImport();
 } else {
   openReportFromRoute().catch(() => {}).finally(() => checkStoredDraftFreshness());
@@ -10728,6 +10730,7 @@ const personalCloud = window.QaReportCloud.create({
     if (method === "GET") return {};
     return { "X-QA-CSRF-Token": await authCsrfToken() };
   },
+  signIn: () => location.assign(`/login?callbackUrl=${encodeURIComponent(location.pathname)}`),
   capture: (collect = true) => { if (collect) flushDraftFromDom(); return copyDraftValue(draft); },
   records: getAllReports, loadAttachment: reportAttachmentLoader, notify: showToast,
   blocked: () => Boolean(importBusy || reportFileBusy || pwaPendingOperations || publishInProgress),

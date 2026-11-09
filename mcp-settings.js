@@ -5,10 +5,10 @@
   dialog.setAttribute("aria-labelledby", "mcpSettingsTitle");
   dialog.innerHTML = `<header class="modal-header"><div><div class="eyebrow">Интеграции</div><h2 id="mcpSettingsTitle">MCP-сервер</h2></div><button class="icon-button" type="button" data-close aria-label="Закрыть настройки MCP">×</button></header>
     <div class="import-body mcp-settings-body">
-      <p class="mcp-settings-intro">MCP подключает вашего ИИ-ассистента к QA Report. Доступ настраивается отдельно для каждого отчёта.</p>
+      <p class="mcp-settings-intro">MCP подключает вашего ИИ-ассистента к QA Report. Для QA доступ выдаётся к выбранному чек-листу, для разработчика — к отчёту или проекту.</p>
       <div class="mcp-settings-scenarios">
         <section><h3>Для QA</h3><p>ИИ читает чек-лист, заполняет результаты и статусы, добавляет вложения.</p><ol><li>Откройте нужный чек-лист и включите «Приём результатов от ИИ» кнопкой AI.</li><li>Вернитесь в этот раздел профиля и выберите отчёт ниже, чтобы получить команду подключения.</li></ol></section>
-        <section><h3>Для разработчика</h3><p>ИИ читает замечания, меняет статус исправления и комментарии. Результаты проверки QA сохраняются.</p><p>Откройте опубликованный отчёт по ссылке и нажмите <strong>AI</strong> в его шапке. Команда подключения будет доступна там.</p></section>
+        <section><h3>Для разработчика</h3><p>ИИ читает замечания, меняет статус исправления и комментарии. Результаты проверки QA сохраняются.</p><p>Откройте опубликованный отчёт по ссылке и нажмите <strong>AI</strong> в его шапке. Команда подключения будет доступна там. Для доступа сразу к проекту автор может выдать ключ ниже.</p></section>
       </div>
       <section class="mcp-settings-connection"><h3>Подключение к чек-листу QA</h3>
         <p data-inactive>В этой вкладке пока нет отчётов с включённым приёмом. Включите приём в нужном чек-листе — он появится в списке при следующем открытии этого окна.</p>
@@ -61,6 +61,7 @@
     selectReport();
     document.getElementById("corporateProfileDialog")?.close();
     dialog.showModal();
+    dialog.dispatchEvent(new Event("mcp-settings-open"));
     if (!sessions.length) return;
     try {
       const response = await fetch("/api/mcp/package", { cache: "no-store", credentials: "omit", redirect: "error" });

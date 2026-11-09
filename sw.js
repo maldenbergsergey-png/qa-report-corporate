@@ -1,9 +1,10 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v171';
+const CACHE_NAME = 'qa-report-corporate-assets-v172';
 const SHELL = [
+  "/project-mcp-settings.js?v=1",
   "/corporate-profile.js?v=1",
-  "/mcp-settings.css?v=2", "/mcp-settings.js?v=2", "/shared-mcp-setup.js?v=2",
+  "/mcp-settings.css?v=3", "/mcp-settings.js?v=3", "/shared-mcp-setup.js?v=3",
   "/personal-cloud-client.js?v=3",
   "/shared-table-layout.js?v=2",
   "/status-palette.css?v=1",
@@ -28,7 +29,7 @@ const SHELL = [
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
   '/report-view.css?v=8', '/report-view.js?v=11', '/styles.css?v=160', '/app.js?v=174', '/pwa.js?v=6',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=134',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=135',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

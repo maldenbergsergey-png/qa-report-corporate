@@ -5,7 +5,7 @@
 :root:is([data-theme="dark"], [data-theme="graphite"]) .mcp-settings::backdrop { background: rgba(0, 0, 0, .72); }
 .mcp-settings .modal-header { flex: 0 0 auto; gap: 16px; }
 .mcp-settings .icon-button { flex-shrink: 0; }
-.mcp-settings-body { display: block; flex: 0 1 auto; min-height: 0; }
+.mcp-settings-body { display: block; flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .mcp-settings .mcp-settings-intro { margin-top: 0; }
 .mcp-settings h3 { margin: 0 0 10px; font-size: 15px; }
 .mcp-settings p, .mcp-settings li { line-height: 1.5; overflow-wrap: anywhere; }
@@ -32,3 +32,11 @@
   .mcp-settings .modal-header, .mcp-settings-body { padding: 18px; }
   .mcp-settings .modal-footer { flex-direction: column; align-items: stretch; padding: 16px 18px; }
 }
+
+.mcp-settings [data-project-form] { display: grid; gap: 14px; margin-block: 16px; }
+.mcp-settings .mcp-project-readonly { display: flex; align-items: center; gap: 8px; }
+.mcp-settings [data-project-issued] { margin-top: 20px; }
+.mcp-settings [data-project-form] > button { justify-self: start; }
+.mcp-settings .mcp-project-key { display: flex; align-items: center; gap: 12px; padding-block: 10px; border-top: 1px solid var(--line); }
+.mcp-settings .mcp-project-key span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+.mcp-settings .mcp-project-key button { flex-shrink: 0; }

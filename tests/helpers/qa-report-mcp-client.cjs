@@ -4,7 +4,7 @@ const path = require("node:path");
 
 async function connectMcp(env, protocolVersion = "2025-11-25", script = "qa-report-mcp.cjs", launch) {
   const child = spawn(launch?.command || process.execPath, launch?.args || [path.resolve(__dirname, "../../scripts", script)], {
-    env: { ...process.env, QA_REPORT_IMPORT_URL: "", QA_REPORT_IMPORT_TOKEN: "", QA_REPORT_SHARE_URL: "", QA_REPORT_SHARE_ORIGIN: "", QA_REPORT_FILE_ROOT: "", QA_REPORT_MCP_READ_ONLY: "", ...env },
+    env: { ...process.env, QA_REPORT_PROJECT_URL: "", QA_REPORT_PROJECT_TOKEN: "", QA_REPORT_IMPORT_URL: "", QA_REPORT_IMPORT_TOKEN: "", QA_REPORT_SHARE_URL: "", QA_REPORT_SHARE_ORIGIN: "", QA_REPORT_FILE_ROOT: "", QA_REPORT_MCP_READ_ONLY: "", ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let nextId = 0, stderr = "";

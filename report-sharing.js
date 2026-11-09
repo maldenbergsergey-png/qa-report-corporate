@@ -430,7 +430,7 @@ function createPublicationSettings({ getDb, configPath }) {
 }
 
 function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLocal, publisherToken = "", configPath, storageLoader = loadReportStorage, uploadLimits = {},
-  showPage, cleanupIntervalMs = 0, reportAccount, publisherIdentity, authorEmail, publicationSettings = createPublicationSettings({ getDb, configPath }) }) {
+  showPage, cleanupIntervalMs = 0, reportAccount, publisherIdentity, authorEmail, projectAccess, publicationSettings = createPublicationSettings({ getDb, configPath }) }) {
   const maxProxiedFileBytes = uploadLimits.fileBytes ?? 512 * 1024;
   const maxProxiedBatchBytes = uploadLimits.batchBytes ?? 720 * 1024;
   const maxProxiedRequestBytes = uploadLimits.requestBytes ?? mib - 8192;
@@ -591,6 +591,8 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
     if (!tokenPattern.test(token)) fail(404, "Публикация недоступна");
     const row = publication(id);
     if (!row || row.update_of || !(row.published_at || row.ready_at)) fail(404, "Публикация недоступна");
+    const delegated = projectAccess?.(request, row);
+    if (delegated) return { row, owner: false, canReply: delegated.canReply };
     const owner = tokenMatches(token, row.owner_hash);
     const canReply = owner || tokenMatches(token, row.reply_hash);
     if (!canReply && !tokenMatches(token, row.read_hash)) fail(404, "Публикация недоступна");
@@ -1047,6 +1049,7 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   async function answer(request, id) {
     const row = authorizeAnswer(request, id);
     const body = await readJson(request, 128 * 1024);
+    projectAccess?.(request, publication(id));
     const sectionId = identifier(body?.sectionId);
     const rowId = identifier(body?.rowId);
     const { revision } = body;
@@ -1322,4 +1325,4 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   };
 }
 
-module.exports = { createReportSharing, createPublicationSettings, createAuthorInvite, revokeAuthorAccess };
+module.exports = { initializeSharing, createReportSharing, createPublicationSettings, createAuthorInvite, revokeAuthorAccess };

@@ -2130,7 +2130,7 @@ QA подключается к выбранному временному при�
 и перезапуск сервера прекращают доступ. Ключ не открывает редактор QA,
 публикацию, облачные отчёты, Jira или администрирование.
 
-Только `/api/mcp/package` и архив `/downloads/qa-report-mcp.tgz` доступны без
+Маршруты `/api/mcp/package` и архив `/downloads/qa-report-mcp.tgz` доступны без
 браузерного входа; они содержат исключительно общие исходники MCP и manifest.
 Обычные маршруты отчётов сохраняют корпоративный вход и CSRF. Временный доступ
 использует отдельный узкий `/api/mcp/shared/<report-id>`; ключ хранится в памяти
@@ -2141,3 +2141,6 @@ QA подключается к выбранному временному при�
 tests/qa-report-mcp.test.js tests/developer-report-mcp.test.js tests/auth.test.js
 tests/report-sharing-access.test.js`. Полный браузерный путь: `node
 tests/mcp-onboarding.browser.cjs` с Playwright в `QA_REPORT_PLAYWRIGHT`.
+
+Проектный доступ разработчика на 30 дней без настройки на каждый отчёт:
+[ключ проекта](docs/project-mcp.md).

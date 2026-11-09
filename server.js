@@ -1,5 +1,6 @@
 const { contentFingerprint: historyContentFingerprint } = require("./history-content");
 const http = require("node:http");
+const { createProjectMcpAccess } = require("./project-mcp-access");
 const { createMcpDownload } = require("./mcp-download");
 const { createMcpConnections } = require("./mcp-connections");
 const fs = require("node:fs");
@@ -1545,7 +1546,9 @@ const personalCloud = createPersonalCloud({
   storage: () => createCorporateStorage(),
 });
 
+let projectMcp;
 const reportSharing = createReportSharing({
+  projectAccess: (request, row) => projectMcp?.authorize(request, row),
   getDb: getReportsDb, readJson, sendJson, requestOrigin,
   publicationSettings,
   configPath: objectStorageConfigured() ? "corporate-storage" : undefined,
@@ -1566,6 +1569,14 @@ const reportSharing = createReportSharing({
   },
 });
 
+projectMcp = createProjectMcpAccess({ getDb: getReportsDb, readJson, sendJson, requestOrigin, reportSharing, audit,
+  authenticateOwner: async request => request.user?.email || null,
+  validateWrite: request => {
+    if (request.headers["x-qa-project-request"] !== "1" || !verifyCsrf(request, request.headers["x-qa-csrf-token"]) ||
+      !request.headers["content-type"]?.startsWith("application/json")) throw Object.assign(new Error("Недействительный защитный токен"), { status: 403 });
+  },
+});
+
 const mcpDownload = createMcpDownload();
 const mcpConnections = createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, audit });
 const server = http.createServer(async (request, response) => {
@@ -1579,6 +1590,7 @@ const server = http.createServer(async (request, response) => {
     // Anonymous downloads contain only the allowlisted MCP source and manifest,
     // never report data, cookies, deployment configuration or corporate secrets.
     if (await mcpDownload(request, response, requestPath)) return;
+    if (await projectMcp.machine(request, response, requestPath)) return;
     if (await mcpConnections.machine(request, response, requestPath)) return;
     if (request.method === "GET" && requestPath === "/api/health") {
       sendJson(response, 200, {
@@ -1644,6 +1656,7 @@ const server = http.createServer(async (request, response) => {
       if (!["GET", "HEAD"].includes(request.method)) audit(request, response, "personal_cloud_write", { email: request.user.email });
       return;
     }
+    if (await projectMcp.browser(request, response, requestPath)) return;
     if (await mcpConnections.browser(request, response, requestPath)) return;
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
     if (requestPath.startsWith("/api/shared-reports") || /^\/shared-report\/[a-f0-9]{32}$/.test(requestPath)) {

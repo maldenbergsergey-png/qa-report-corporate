@@ -92,7 +92,8 @@ async function request(share, suffix = "", body) {
   const headers = { Authorization: `Bearer ${share.token}` };
   if (share.mcpAccessToken) headers["X-QA-MCP-Token"] = share.mcpAccessToken;
   if (body) headers["Content-Type"] = "application/json";
-  const response = await fetch(`${share.origin}${share.mcpAccessToken ? "/api/mcp/shared/" : "/api/shared-reports/"}${share.id}${suffix}`, {
+  const endpoint = share.projectPath ? share.projectPath + (share.id ? "/" + share.id : "") : `${share.mcpAccessToken ? "/api/mcp/shared/" : "/api/shared-reports/"}${share.id}`;
+  const response = await fetch(`${share.origin}${endpoint}${suffix}`, {
     method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined,
     redirect: "error", signal: AbortSignal.timeout(20_000),
   });
@@ -170,15 +171,33 @@ function shareConfiguration(env) {
   return { share, pinnedOrigin };
 }
 
+function projectConfiguration(env) {
+  const url = parseUrl(env.QA_REPORT_PROJECT_URL);
+  if (!/^\/api\/mcp\/projects\/[a-f0-9]{32}\/reports$/.test(url.pathname) || url.hash || !/^[A-Za-z0-9_-]{43}$/.test(env.QA_REPORT_PROJECT_TOKEN || "")) throw new ToolError("Проверьте адрес и ключ проекта из профиля QA Report.");
+  return { origin: url.origin, projectPath: url.pathname, token: env.QA_REPORT_PROJECT_TOKEN };
+}
+
 function createToolRunner(env) {
-  let share, pinnedOrigin, configurationError;
-  try { ({ share, pinnedOrigin } = shareConfiguration(env)); }
+  let share, pinnedOrigin, project, configurationError;
+  try {
+    if (env.QA_REPORT_PROJECT_URL || env.QA_REPORT_PROJECT_TOKEN) project = projectConfiguration(env);
+    else ({ share, pinnedOrigin } = shareConfiguration(env));
+  }
   catch (error) { configurationError = error; }
 
   const run = async (name, args) => {
     if (configurationError) throw configurationError;
+    if (project && name === "qa_report_list_reports") {
+      const query = new URLSearchParams({ offset: String(args.offset ?? 0), limit: String(args.limit ?? 25), ...(args.query ? { query: args.query } : {}) });
+      const data = await readJson(await request(project, "?" + query));
+      if (!Array.isArray(data.reports)) throw new ToolError("QA Report не вернул список отчётов.");
+      return JSON.stringify(data).replaceAll(project.token, "[ключ доступа скрыт]");
+    }
     let active = share;
-    if (name === "qa_report_read" && args.url !== undefined) {
+    if (project) {
+      if (!/^[a-f0-9]{32}$/.test(args.reportId || "")) throw new ToolError("Выберите reportId из qa_report_list_reports.");
+      active = { ...project, id: args.reportId };
+    } else if (name === "qa_report_read" && args.url !== undefined) {
       active = parseShare(args.url);
       if (share && (active.origin !== share.origin || active.id !== share.id || active.token !== share.token)) {
         throw new ToolError("Сеанс уже подключён к другой ссылке. Для новой ссылки запустите отдельный сеанс.");
@@ -192,7 +211,7 @@ function createToolRunner(env) {
     let data;
     if (name === "qa_report_read") {
       data = await readReport(active);
-      share = active;
+      if (!project) share = active;
     } else if (name === "qa_report_save_answer") {
       const update = answerFrom(args);
       if (update.comment?.includes(active.token) || (active.mcpAccessToken && update.comment?.includes(active.mcpAccessToken))) throw new ToolError("Уберите ключ доступа из комментария перед сохранением.");
@@ -287,4 +306,4 @@ function start() {
 
 if (require.main === module) start().catch(() => { process.exitCode = 1; });
 
-module.exports = { tools, createToolRunner, shareConfiguration, ToolError };
+module.exports = { tools, createToolRunner, shareConfiguration, projectConfiguration, ToolError };

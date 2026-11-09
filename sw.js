@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v168';
+const CACHE_NAME = 'qa-report-corporate-assets-v169';
 const SHELL = [
   "/corporate-profile.js?v=1",
   "/mcp-settings.css?v=1", "/mcp-settings.js?v=1", "/shared-mcp-setup.js?v=2",

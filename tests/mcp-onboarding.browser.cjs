@@ -45,7 +45,9 @@ async function main() {
   await page.locator("#mcpSettingsDialog [data-reception]").click();
   await page.click("#startLocalImport");
   await page.waitForFunction(() => window.QaReportMcpEditor?.session());
-  await page.locator("#localImportModal [data-mcp-open]").click();
+  await page.goto(corporate ? origin : origin + "/profile");
+  if (corporate) await page.click("#corporateProfileButton");
+  await page.locator(corporate ? "#corporateProfileDialog [data-mcp-open]" : "#profilePage [data-mcp-open]").click();
   await page.waitForFunction(() => !document.querySelector("#mcpSettingsDialog [data-copy]").disabled);
   assert.match(await page.locator("#mcpSettingsDialog [data-code]").inputValue(), /^codex mcp add /);
   await page.locator("#mcpSettingsDialog [data-client]").selectOption("json");

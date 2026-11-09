@@ -1704,6 +1704,7 @@
   }
 
   function renderReport(report) {
+    window.QaReportMcpSetup.init({ shareUrl: `${location.origin}/shared-report/${reportId}#${token}`, canReply: report.canReply });
     const title = report.title?.trim() || window.QaReportTrackerLinks.parse(report.issueUrl)?.key || "Отчёт о тестировании";
     const titleNode = document.getElementById("report-title");
     titleNode.textContent = title;

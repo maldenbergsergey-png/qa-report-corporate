@@ -1,0 +1,17 @@
+.mcp-settings { box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); }
+.mcp-settings::backdrop { background: #0009; }
+.mcp-settings header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.mcp-settings h2 { margin: 0; }
+.mcp-settings p { line-height: 1.5; overflow-wrap: anywhere; }
+.mcp-settings button, .mcp-settings select, .mcp-settings input, .mcp-settings textarea { box-sizing: border-box; max-width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }
+.mcp-settings button { cursor: pointer; }
+.mcp-settings button:disabled { opacity: .55; cursor: default; }
+.mcp-settings a { color: var(--primary); }
+.mcp-settings details { margin-block: 16px; }
+.mcp-settings summary { cursor: pointer; }
+.mcp-settings-choices { display: flex; flex-wrap: wrap; gap: 16px; }
+.mcp-settings label { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mcp-settings-files { margin-top: 16px; }
+.mcp-settings textarea { display: block; width: 100%; min-height: 170px; resize: vertical; font: 13px/1.5 ui-monospace, monospace; }
+.mcp-settings [hidden] { display: none !important; }
+@media (max-width: 480px) { .mcp-settings { padding: 16px; } .mcp-settings-choices label { width: 100%; } }

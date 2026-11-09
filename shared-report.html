@@ -10,13 +10,14 @@
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
-    <link rel="stylesheet" href="/shared-report.css?v=31" />
+    <link rel="stylesheet" href="/shared-report.css?v=32" />
     <script src="/file-preview.js?v=4" defer></script>
     <script src="/shared-comment-editor.js?v=3" defer></script>
     <script src="/tracker-links.js?v=5" defer></script>
     <script src="/report-view.js?v=10" defer></script>
     <script src="/shared-table-layout.js?v=2" defer></script>
-    <script src="/shared-report.js?v=37" defer></script>
+    <script src="/shared-mcp-setup.js?v=2" defer></script>
+    <script src="/shared-report.js?v=38" defer></script>
   </head>
   <body>
     <main>
@@ -83,6 +84,7 @@
               </div>
             </div>
             <div class="toolbar-info">
+              <button id="shared-mcp-open" type="button" aria-haspopup="dialog" aria-controls="shared-mcp-dialog" hidden>Подключить ИИ</button>
               <span id="access-label" class="access-label" hidden>Только просмотр</span>
               <div class="shared-theme">
                 <button type="button" id="shared-theme-toggle" aria-label="Тема оформления" title="Тема оформления" aria-controls="shared-theme-menu" aria-expanded="false">
@@ -152,6 +154,23 @@
       <symbol id="shared-icon-resize" viewBox="0 0 20 20"><path d="M6 14 14 6M10.5 6H14v3.5M9.5 14H6v-3.5" /></symbol>
       <symbol id="shared-icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></symbol>
     </svg>
+    <dialog id="shared-mcp-dialog" class="shared-mcp-dialog" aria-labelledby="shared-mcp-title">
+      <header><h2 id="shared-mcp-title">Подключить ИИ к отчёту</h2><button id="shared-mcp-close" type="button" aria-label="Закрыть подключение">×</button></header>
+      <p id="shared-mcp-permission"></p>
+      <ol>
+        <li>Установите <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 22 или новее</a>, если он ещё не установлен.</li>
+        <li>Выберите клиент, выполните команду в терминале по подсказке ниже.</li>
+        <li>Попросите ассистента прочитать замечания и после исправлений обновить статусы и комментарии к нужным пунктам.</li>
+      </ol>
+      <div class="shared-mcp-choices">
+        <label>Клиент<select id="shared-mcp-client"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="json">Другой клиент (JSON)</option><option value="codex-config">Codex (настройки вручную)</option></select></label>
+        <label>Система<select id="shared-mcp-platform"><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label>
+      </div>
+      <p id="shared-mcp-help"></p>
+      <textarea id="shared-mcp-code" readonly spellcheck="false" aria-label="Конфигурация подключения ИИ"></textarea>
+      <p class="shared-mcp-note">Клиент запускает сервер автоматически. При первом запуске нужен интернет для загрузки сервера и зависимостей. Настройка содержит ключ доступа к этому отчёту: храните её в личных настройках и не добавляйте в репозиторий. Вкладку отчёта можно закрыть.</p>
+      <footer><button id="shared-mcp-copy" type="button" disabled>Скопировать подключение</button><button id="shared-mcp-disconnect" type="button" hidden>Отключить ИИ</button><span id="shared-mcp-state" role="status"></span></footer>
+    </dialog>
     <dialog id="shared-viewer" class="shared-viewer" aria-labelledby="shared-viewer-title">
       <header class="shared-viewer-header">
         <div>

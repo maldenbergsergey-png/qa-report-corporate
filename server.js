@@ -1,5 +1,7 @@
 const { contentFingerprint: historyContentFingerprint } = require("./history-content");
 const http = require("node:http");
+const { createMcpDownload } = require("./mcp-download");
+const { createMcpConnections } = require("./mcp-connections");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -287,6 +289,7 @@ async function handleLogout(request, response) {
     return;
   }
   audit(request, response, "session_logout");
+  mcpConnections.revokeSession(request.user);
   response.setHeader("Set-Cookie", clearSessionCookie());
   sendJson(response, 200, { ok: true });
 }
@@ -1564,6 +1567,8 @@ const reportSharing = createReportSharing({
   },
 });
 
+const mcpDownload = createMcpDownload();
+const mcpConnections = createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, audit });
 const server = http.createServer(async (request, response) => {
   applySecurityHeaders(response);
   try {
@@ -1572,6 +1577,10 @@ const server = http.createServer(async (request, response) => {
     enforceSameOrigin(request);
     enforceApiRateLimit(request, requestPath);
     if (await adminService.handle(request, response)) return;
+    // Anonymous downloads contain only the allowlisted MCP source and manifest,
+    // never report data, cookies, deployment configuration or corporate secrets.
+    if (await mcpDownload(request, response, requestPath)) return;
+    if (await mcpConnections.machine(request, response, requestPath)) return;
     if (request.method === "GET" && requestPath === "/api/health") {
       sendJson(response, 200, {
         ok: true,
@@ -1621,6 +1630,7 @@ const server = http.createServer(async (request, response) => {
       if (!["GET", "HEAD"].includes(request.method)) audit(request, response, "personal_cloud_write", { email: request.user.email });
       return;
     }
+    if (await mcpConnections.browser(request, response, requestPath)) return;
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
     if (requestPath.startsWith("/api/shared-reports") || /^\/shared-report\/[a-f0-9]{32}$/.test(requestPath)) {
       if (!["GET", "HEAD"].includes(request.method) && !verifyCsrf(request, request.headers["x-qa-csrf-token"])) {

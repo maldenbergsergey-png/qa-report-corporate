@@ -1,7 +1,8 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v166';
+const CACHE_NAME = 'qa-report-corporate-assets-v167';
 const SHELL = [
+  "/mcp-settings.css?v=1", "/mcp-settings.js?v=1", "/shared-mcp-setup.js?v=2",
   "/personal-cloud-client.js?v=3",
   "/shared-table-layout.js?v=2",
   "/status-palette.css?v=1",
@@ -20,13 +21,13 @@ const SHELL = [
   "/import-options.js?v=7", "/import-wizard.js?v=6",
   "/attachment-limits.js?v=1",
   "/jira-attachment-reuse.js?v=5",
-  "/attachment-import.js?v=6", "/local-import-client.js?v=8",
+  "/attachment-import.js?v=6", "/local-import-client.js?v=9",
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
   '/report-view.css?v=7', '/report-view.js?v=10', '/styles.css?v=159', '/app.js?v=173', '/pwa.js?v=6',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=131',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=132',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

@@ -58,6 +58,7 @@
   const sessions = new Map();
   let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
+  root.QaReportMcpEditor = { session: () => { const value = currentSession(); return value?.expiresAt > Date.now() ? value : undefined; } };
   function updateHistoryButtons() {
     for (const button of document.querySelectorAll("[data-history-ai]")) {
       const session = sessions.get(button.dataset.historyAi);

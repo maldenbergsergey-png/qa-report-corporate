@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/report-view.css?v=7" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
+    <link rel="stylesheet" href="/mcp-settings.css?v=1" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -925,6 +926,7 @@
         </div>
         <footer class="modal-footer"><div class="modal-actions">
           <button class="button" id="stopLocalImport" type="button" disabled>Остановить</button>
+          <button class="button" type="button" data-mcp-open>Подключить MCP</button>
           <button class="button" id="copyLocalImport" type="button" disabled>Скопировать промпт</button>
           <button class="button button-primary" id="startLocalImport" type="button">Включить приём</button>
         </div></footer>
@@ -1296,7 +1298,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=131"></script>
+    <script src="/release-notes.js?v=132"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1411,11 +1413,13 @@
     </dialog>
       <dialog id="corporateProfileDialog" class="cloud-dialog" aria-labelledby="corporateProfileTitle">
       <header class="cloud-heading"><h2 id="corporateProfileTitle">Профиль</h2><button id="corporateProfileClose" class="button button-ghost" type="button">Закрыть</button></header>
-      <p id="corporateProfileEmail"></p><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
+      <p id="corporateProfileEmail"></p><section><h3>MCP-сервер</h3><p>Подключите ИИ к выбранному чек-листу одной командой.</p><button class="button button-secondary" type="button" data-mcp-open>Подключить MCP</button></section><div class="cloud-actions"><button class="button button-primary" type="button" data-personal-cloud>Мои облачные отчёты</button><button class="button button-secondary" type="button" id="corporateProfileSettings">Настройки QA Report</button><button class="button button-ghost" type="button" id="corporateProfileSignOut">Выйти</button></div>
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
     <script src="/app.js?v=173"></script>
-    <script src="/local-import-client.js?v=8"></script>
+    <script src="/shared-mcp-setup.js?v=2"></script>
+    <script src="/local-import-client.js?v=9"></script>
 
+    <script src="/mcp-settings.js?v=1"></script>
   </body>
 </html>

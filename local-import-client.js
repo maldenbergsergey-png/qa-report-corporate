@@ -55,9 +55,24 @@
   const deadline = document.getElementById("localImportDeadline");
   const otherReports = document.getElementById("localImportOtherReports");
   const key = "qa-report-local-import-session-v1";
+  const managerKey = "qa-report-local-import-manager-v1";
+  function loadManager() {
+    let storage;
+    try { storage = localStorage; storage.getItem(managerKey); } catch { storage = sessionStorage; }
+    let value = storage.getItem(managerKey);
+    if (!/^[a-f0-9]{64}$/.test(value || "")) {
+      value = [...crypto.getRandomValues(new Uint8Array(32))].map(n => n.toString(16).padStart(2, "0")).join("");
+      storage.setItem(managerKey, value);
+    }
+    return value;
+  }
+  const manager = loadManager();
   const sessions = new Map();
+  const endingSessions = new WeakSet();
+  let sessionGeneration = 0; let syncing;
   let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
+  const needsPolling = () => [...sessions.values()].some(item => !item.remote || item.stopping);
   root.QaReportMcpEditor = {
     session: () => { const value = currentSession(); return value?.expiresAt > Date.now() ? value : undefined; },
     sessions: () => [...sessions.values()].filter(item => item.expiresAt > Date.now()),
@@ -85,15 +100,15 @@
   }
   function timeOf(current) { return new Date(current.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
   function assertActive(current) {
-    if (sessions.get(current.reportId) !== current || Date.now() >= current.expiresAt) throw new Error("Приём остановлен или срок подключения истёк");
+    if (sessions.get(current.reportId) !== current || current.stopping || Date.now() >= current.expiresAt) throw new Error("Приём остановлен или срок подключения истёк");
   }
   function updateControls() {
     updateHistoryButtons();
     reportLabel.textContent = `${reportIssueLabel(draft)} · ${draft.publicId}`;
     const session = currentSession();
     const active = Boolean(session);
-    start.disabled = active || starting; stop.disabled = !active; copy.disabled = !active;
-    start.textContent = starting ? "Включаем…" : active ? "Приём включён" : "Включить приём";
+    start.disabled = (active && (!session.remote || session.stopping)) || starting; stop.disabled = !active; copy.disabled = !active || session.stopping;
+    start.textContent = starting ? "Включаем…" : session?.remote && !session.stopping ? "Возобновить приём" : active ? "Приём включён" : "Включить приём";
     panel.dataset.state = active ? "on" : "off";
     trigger.classList.toggle("local-import-active", sessions.size > 0);
     indicator.dataset.state = sessions.size ? "on" : "off";
@@ -138,7 +153,7 @@
   }
   async function browserRequest(suffix, options = {}, current = currentSession()) {
     const response = await fetch(`/api/local-import/sessions${suffix}`, {
-      ...options, cache: "no-store", headers: { ...reportIdentityHeaders(), "X-QA-Import-Request": "1", ...(current ? { "X-QA-Import-Reader": current.consumerToken } : {}), ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
+      ...options, cache: "no-store", headers: { ...reportIdentityHeaders(), "X-QA-Import-Request": "1", "X-QA-Import-Manager": manager, ...(current ? { "X-QA-Import-Reader": current.consumerToken } : {}), ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
     });
     if (options.binary && response.ok) return response.blob();
     const payload = await response.json().catch(() => ({}));
@@ -146,10 +161,42 @@
     return payload;
   }
   async function endSession(current = currentSession(), note = "Приём выключен. Чтобы продолжить, включите его снова.") {
-    if (!current || sessions.get(current.reportId) !== current) return;
-    sessions.delete(current.reportId);
-    storeSessions(); updateControls(); message(note, current);
-    await browserRequest(`/${current.id}`, { method: "DELETE" }, current).catch(() => {});
+    if (!current || sessions.get(current.reportId) !== current || endingSessions.has(current)) return;
+    endingSessions.add(current); current.stopping = true; sessionGeneration++;
+    storeSessions(); updateControls();
+    try {
+      try { await browserRequest(`/${current.id}`, { method: "DELETE" }, current); }
+      catch (error) { if (![404, 410].includes(error.status)) throw error; }
+      if (sessions.get(current.reportId) === current) {
+        sessions.delete(current.reportId); sessionGeneration++;
+        storeSessions(); updateControls(); message(note, current);
+      }
+    } catch (error) {
+      message(`Не удалось завершить подключение: ${error.message}. Повторяем остановку`, current);
+      clearTimeout(timer); timer = setTimeout(poll, 2500);
+    } finally { endingSessions.delete(current); }
+  }
+  async function syncSessions() {
+    if (syncing) return syncing;
+    const generation = sessionGeneration;
+    syncing = (async () => {
+      const result = await browserRequest("", {}, null);
+      if (!Array.isArray(result.sessions) || generation !== sessionGeneration) return;
+      const known = new Map(sessions);
+      // Existing tabs keep receiving; a recovered connection is resumed explicitly.
+      for (const item of result.sessions) {
+        const previous = sessions.get(item.reportId);
+        known.set(item.reportId, previous?.id === item.id ? previous : { ...item, remote: true });
+      }
+      // A previous server may not yet know this browser's management key.
+      for (const [reportId, item] of sessions) if (!item.stopping && !result.sessions.some(remote => remote.id === item.id) && item.remote) known.delete(reportId);
+      sessions.clear(); for (const [reportId, item] of known) sessions.set(reportId, item);
+      storeSessions(); updateControls();
+      if (currentSession()?.remote && !currentSession().stopping) message("Подключение найдено на сервере. Нажмите «Возобновить приём», чтобы получать результаты в этой вкладке.");
+    })().catch(error => {
+      if (![403, 404, 405].includes(error.status)) message(`Не удалось обновить список подключений: ${error.message}`);
+    }).finally(() => { syncing = undefined; });
+    return syncing;
   }
   async function acceptBatch(batch, current) {
     const receiptId = `${current.id}:${batch.id}`;
@@ -195,6 +242,8 @@
     } finally { shell.inert = wasInert; }
   }
   async function pollSession(current) {
+    if (current.stopping) { await endSession(current); return; }
+    if (current.remote) return;
     if (Date.now() >= current.expiresAt) { await endSession(current, "Срок подключения истёк. Уже полученные файлы сохранены в браузере"); return; }
     if (publishInProgress || pwaPendingOperations || document.activeElement?.isContentEditable || document.activeElement?.matches?.("#issueUrl, #environment, #overallStatus") || document.querySelector('.modal-backdrop:not([hidden]):not(#localImportModal)')) return;
     try {
@@ -226,8 +275,11 @@
   async function poll() {
     if (busy) return;
     busy = true;
-    try { for (const current of [...sessions.values()]) if (sessions.get(current.reportId) === current) await pollSession(current); }
-    finally { busy = false; if (sessions.size) { clearTimeout(timer); timer = setTimeout(poll, 2500); } updateControls(); }
+    try { for (const current of [...sessions.values()]) if (sessions.get(current.reportId) === current) {
+      if (navigator.locks) await navigator.locks.request(`qa-report-import:${current.id}`, { ifAvailable: true }, lock => lock ? pollSession(current) : undefined);
+      else await pollSession(current);
+    } }
+    finally { busy = false; if (needsPolling()) { clearTimeout(timer); timer = setTimeout(poll, 2500); } updateControls(); }
   }
   function tick() {
     for (const current of sessions.values()) if (Date.now() >= current.expiresAt) void endSession(current, "Срок подключения истёк. Уже полученные файлы сохранены в браузере");
@@ -239,17 +291,20 @@
     updateControls();
     syncBodyModalOverflow();
     (currentSession() ? copy : starting ? document.getElementById("closeLocalImport") : start).focus();
+    return syncSessions();
   }
   Object.assign(root.QaLocalImport, { open, updateHistoryButtons });
   trigger.addEventListener("click", open);
   document.getElementById("closeLocalImport").addEventListener("click", () => { panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); });
   panel.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); } });
   start.addEventListener("click", async () => {
-    if (currentSession() || starting) return;
+    if ((currentSession() && (!currentSession().remote || currentSession().stopping)) || starting) return;
     const reportId = draft.reportId;
     starting = true; updateControls(); message("Включаем приём результатов…");
     try {
       const checkReport = () => { if (draft.reportId !== reportId) throw new Error("Открыт другой отчёт. Включите приём в нужном отчёте"); };
+      await syncSessions();
+      checkReport();
       await checkBackendCompatibility();
       checkReport();
       await saveReportSnapshot("before-local-agent");
@@ -260,13 +315,14 @@
       session.title = body.context.metadata.issueUrl.text || body.context.title;
       session.publicId = draft.publicId;
       sessions.set(session.reportId, session);
+      sessionGeneration++;
       storeSessions();
       message("Скопируйте промпт для агента и оставьте вкладку открытой. Можно переключаться между отчётами", session);
       clearTimeout(timer); timer = setTimeout(poll, 500);
     } catch (error) { message(`Не удалось включить приём: ${error.message}`); }
     finally { starting = false; updateControls(); }
   });
-  stop.addEventListener("click", () => { void endSession(); start.focus(); });
+  stop.addEventListener("click", async () => { await endSession(); start.focus(); });
   async function copyPrompt(session = currentSession()) {
     if (!session) return;
     const instruction = `Заполни указанный отчёт QA Report через временный API. Не используй это подключение для других отчётов. Подключение:\n${JSON.stringify({ reportId: session.reportId, title: session.title, ...session.connection }, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы, hash каждой ячейки и context.metadata: issueUrl (ссылка или ключ задачи), environment (окружение или адрес стенда), overallStatus (общий Итог), intro (вводный текст); у каждого поля text и hash.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf]. Полный чек-лист заменяет указанный отчёт целиком без дополнительного подтверждения, пока приём включён. Для дозагрузки результатов и файлов в существующие ячейки используй kind:"cells" с актуальными expectedHash; если меняешь весь чек-лист, отправляй его целиком, включая ранее принятые данные.\nДля изменения полей отчёта: {id,kind:"metadata",metadata:{issueUrl:{value:"https://tasks.example.test/browse/QA-123",expectedHash:"hash поля issueUrl из context.metadata"},overallStatus:{value:"НЕ ОК",expectedHash:"hash поля overallStatus"}}}. Таким же способом передавай environment и intro. intro — обычный текст с переносами строк, без HTML. Итог: OK, НЕ ОК, ПОЧТИ ОК, НЕ ПРОВЕРЕНО, ЗАБЛОКИРОВАНО, ЧАСТИЧНО ПРОВЕРЕНО, ТРЕБУЕТ УТОЧНЕНИЯ. Передавай только изменяемые поля; metadata можно добавить и в пакет cells или checklist — всё сохранится вместе. При конфликте весь пакет отклоняется.\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
@@ -287,5 +343,5 @@
   } catch { sessionStorage.removeItem(key); }
   tick();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { clearTimeout(clockTimer); tick(); clearTimeout(timer); void poll(); } });
-  if (sessions.size) timer = setTimeout(poll, 1500);
+  if (needsPolling()) timer = setTimeout(poll, 1500);
 })(typeof window === "undefined" ? globalThis : window);

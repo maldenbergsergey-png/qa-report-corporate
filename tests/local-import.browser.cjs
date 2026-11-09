@@ -28,7 +28,7 @@ async function main() {
   const origin = `http://127.0.0.1:${port}`;
   const secret = crypto.randomBytes(32).toString('hex');
   child = spawn(process.execPath, ['server.js'], { cwd: root, env: {
-    ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'development',
+    ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'development', QA_REPORT_TRUST_PROXY: 'true',
     AUTH_SECRET: secret, AUTH_SECRET_FILE: '', DEV_LOGIN_EMAIL: 'qa@example.com',
     DEV_LOGIN_PASSWORD: crypto.randomBytes(24).toString('hex'),
     REPORTS_DB_PATH: path.join(temp, 'reports.sqlite'), QA_REPORT_PUBLIC_URL: origin,
@@ -42,8 +42,9 @@ async function main() {
     child.once('exit', code => reject(Error(`Server exited: ${code}`)));
     setTimeout(() => reject(Error('Server startup timeout')), 10000).unref();
   });
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, serviceWorkers: 'block' });
+  browser = await chromium.launch({ headless: true, channel: process.env.QA_REPORT_BROWSER || undefined });
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, serviceWorkers: 'block',
+    extraHTTPHeaders: { 'X-Forwarded-For': '192.0.2.1' } });
   if (corporate) {
     const { createSessionToken } = require(path.join(root, 'auth'));
     await context.addCookies([{ name: 'query-port-session', value: createSessionToken('qa@example.com', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
@@ -90,6 +91,19 @@ async function main() {
   }
   const active = await connections();
   assert.equal(active.length, 3);
+  // A fresh tab has no reader keys in sessionStorage but can recover this browser's sessions.
+  const recovered = await context.newPage();
+  await recovered.goto(origin);
+  await recovered.waitForSelector('.cell-editor');
+  await recovered.evaluate(async () => applyDraftLocally((await getReportRecord('receiver-2')).document));
+  await recovered.click('#localImportButton');
+  await until(() => recovered.locator('.local-import-report').count().then(count => count === 2));
+  assert.equal(await recovered.locator('#startLocalImport').textContent(), 'Возобновить приём');
+  await recovered.click('#startLocalImport');
+  await recovered.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).find(item => item.reportId === 'receiver-2')?.remote !== true);
+  const recoveredConnections = await recovered.evaluate(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).map(item => [item.id, item.expiresAt]));
+  assert.deepEqual(recoveredConnections, active.map(item => [item.id, item.expiresAt]));
+  await recovered.close();
   assert.match(await page.evaluate(async () => (await getReportRecord('receiver-0')).document.intro), /Unsaved context from open report/);
   // History reflects each connection and reopening it keeps the same key and expiry.
   await page.click('#closeLocalImport');
@@ -98,6 +112,7 @@ async function main() {
   assert.equal(await page.locator('[data-history-ai][data-state="on"]').count(), 3);
   assert.equal(await page.locator('[data-history-ai="receiver-0"]').textContent(), 'AI · ON');
   const targetCard = page.locator('.history-item').filter({ has: page.locator('[data-history-ai="receiver-0"]') });
+  await targetCard.locator('.history-note-edit').click();
   await targetCard.locator('.history-comment-field').fill('Receive retest results');
   await page.locator('[data-history-ai="receiver-0"]').click();
   assert.equal(await page.locator('#copyLocalImport').isEnabled(), true);
@@ -200,14 +215,21 @@ async function main() {
   assert.equal(await page.locator('#localImportCountdown').isVisible(), false);
   assert.equal(await page.locator('#startLocalImport').isEnabled(), true);
   assert.match(await page.locator('#localImportStatus').textContent(), /истёк/);
-  // A cloud card must load its document before reception; a failed load keeps the current report.
+  // New sessions use the real server clock; restore it after the expiry simulation.
+  await page.clock.setSystemTime(new Date());
+  // The next history fixture has its own IP budget; report-owner limits stay unchanged.
+  await context.setExtraHTTPHeaders({ 'X-Forwarded-For': '192.0.2.2' });
+  // A history card must load its document before reception; a failed load keeps the current report.
   await page.click('#closeLocalImport');
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     window.cloudFixture = normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: 'cloud-receiver',
       draftId: 'cloud-draft', publicId: 'abc1004', issueUrl: 'QA-104', environment: 'STAGE' });
-    getServerReports = async () => [{ id: cloudFixture.reportId, publicId: cloudFixture.publicId,
-      title: 'QA-104', issueKey: 'QA-104', source: 'server', updatedAt: new Date().toISOString() }];
-    getServerReport = async () => { throw new Error('Synthetic history load failure'); };
+    await saveReportSnapshot('fixture', cloudFixture);
+    window.originalGetReportRecord = getReportRecord;
+    getReportRecord = async id => {
+      if (id === cloudFixture.reportId) throw new Error('Synthetic history load failure');
+      return originalGetReportRecord(id);
+    };
   });
   const previousId = await page.evaluate(() => draft.reportId);
   await page.click('#historyButton');
@@ -216,17 +238,20 @@ async function main() {
   assert.equal(await page.evaluate(() => draft.reportId), previousId);
   assert.equal(await page.locator('#localImportModal').isVisible(), false);
   assert.equal(await page.locator('#historyModal').isVisible(), true);
-  await page.evaluate(() => { getServerReport = async () => ({ id: cloudFixture.reportId, document: clone(cloudFixture) }); });
+  await page.evaluate(() => { getReportRecord = originalGetReportRecord; });
   await page.locator('[data-history-ai="cloud-receiver"]').click();
   await page.locator('#localImportModal').waitFor();
   assert.equal(await page.locator('#localImportReport').textContent(), 'QA-104 · abc1004');
   assert.equal(await page.evaluate(async () => (await getReportRecord('cloud-receiver')).document.reportId), 'cloud-receiver');
   await page.click('#startLocalImport');
-  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 1);
+  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 1).catch(async error => {
+    console.error('Receiver status:', await page.locator('#localImportStatus').textContent());
+    throw error;
+  });
   await page.click('#copyLocalImport');
   await until(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes('"reportId": "cloud-receiver"')));
   assert.deepEqual(errors, []);
-  console.log('Passed: history AI entry, local/cloud reports, failed load, unsaved text and comments, three independent connections, prompts and stop by report, unchanged expiry, delivery, reload, three themes and narrow layout.');
+  console.log('Passed: history AI entry, new-tab recovery, failed history load, unsaved text and comments, three independent connections, prompts and stop by report, unchanged expiry, delivery, reload, three themes and narrow layout.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

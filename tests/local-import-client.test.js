@@ -10,9 +10,10 @@ const checklist = (id, text) => ({ id, kind: "checklist", files: [],
   content: `||Проверка||Фактический результат||\n|Форма|${text}|` });
 
 // Run the complete browser receiver, driving its buttons and polling timer.
-function receiver(stored = []) {
+function receiver(stored = [], shared = {}) {
   const timers = new Map(), storage = new Map([["qa-report-local-import-session-v1", JSON.stringify(stored)]]), elements = new Map();
-  const records = new Map(), batches = new Map(), connections = [], deleted = [], clipboard = [];
+  const records = shared.records || new Map(), batches = shared.batches || new Map(), connections = shared.connections || [], deleted = shared.deleted || [], clipboard = [];
+  const localStorage = shared.localStorage || new Map();
   const snapshots = [], acknowledgements = [];
   let timerId = 0, now = Date.now();
   const session = { id: "session", reportId: "report", consumerToken: "reader",
@@ -39,11 +40,15 @@ function receiver(stored = []) {
       } }),
     },
     sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
+    localStorage: { getItem: key => localStorage.get(key), setItem: (key, value) => localStorage.set(key, value) },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: id => timers.delete(id),
     fetch: async (url, options) => {
+      if (url === "/api/local-import/sessions" && !options.method) return { ok: true, json: async () => ({ sessions: clone(connections.filter(item => !deleted.includes(`/api/local-import/sessions/${item.id}`) && item.expiresAt > now)) }) };
       if (url === "/api/local-import/sessions" && options.method === "POST") {
         const reportId = JSON.parse(options.body).reportId;
+        const existing = connections.find(item => item.reportId === reportId && item.expiresAt > now && !deleted.includes(`/api/local-import/sessions/${item.id}`));
+        if (existing) return { ok: true, json: async () => clone(existing) };
         const connection = { ...session, id: connections.length ? `session-${connections.length + 1}` : session.id, reportId, expiresAt: now + 5 * 3600_000 };
         connections.push(connection);
         return { ok: true, json: async () => clone(connection) };
@@ -56,7 +61,10 @@ function receiver(stored = []) {
         return { ok: true, json: async () => ({}) };
       }
       if (options.binary) return { ok: true, blob: async () => ({ size: 1 }) };
-      if (options.method === "DELETE") { deleted.push(url); return { ok: true, json: async () => ({}) }; }
+      if (options.method === "DELETE") {
+        if (ctx.deleteError) throw ctx.deleteError;
+        deleted.push(url); return { ok: true, json: async () => ({}) };
+      }
       throw new Error(`Unexpected request: ${url}`);
     },
     reportIdentityHeaders: () => ({}), checkBackendCompatibility: async () => {},
@@ -87,7 +95,7 @@ function receiver(stored = []) {
   assert.ok(start >= 0);
   vm.runInContext(app.slice(start, app.indexOf("\n}", start) + 2), ctx);
   vm.runInContext(fs.readFileSync(require.resolve("../local-import-client.js"), "utf8"), ctx);
-  return { ctx, shell, snapshots, acknowledgements, session, records, connections, deleted, clipboard, storage, element,
+  return { ctx, shell, snapshots, acknowledgements, session, records, connections, deleted, clipboard, storage, localStorage, batches, element,
     click: id => element(id).handlers.click(),
     async receive(value, reportId = "report") {
       batches.set(reportId, value);
@@ -101,6 +109,7 @@ function receiver(stored = []) {
       now += ms;
       const [id, task] = [...timers].find(([, task]) => task.delay === 1000);
       timers.delete(id); await task.callback();
+      await new Promise(resolve => setImmediate(resolve));
     },
   };
 }
@@ -313,6 +322,49 @@ test("copied prompt names its report so an agent can distinguish several connect
   await r.click("copyLocalImport");
   assert.match(r.clipboard[0], /"reportId": "report"/);
   assert.match(r.clipboard[0], /Не используй это подключение для других отчётов/);
+});
+
+test("a new tab recovers hidden connections and resumes its report without occupying another slot", async () => {
+  const first = receiver();
+  await first.click("startLocalImport");
+  first.ctx.draft = { ...clone(first.ctx.draft), reportId: "second", publicId: "second-id" };
+  await first.click("startLocalImport");
+  const before = first.connections.map(item => [item.id, item.expiresAt]);
+  const next = receiver([], first);
+  await next.click("localImportButton");
+  assert.equal(next.element("localImportOtherReports").hidden, false);
+  assert.equal(next.element("startLocalImport").textContent, "Возобновить приём");
+  assert.equal(next.element("startLocalImport").disabled, false);
+  assert.equal(JSON.parse(next.storage.get("qa-report-local-import-session-v1")).length, 2);
+  await next.click("startLocalImport");
+  assert.deepEqual(first.connections.map(item => [item.id, item.expiresAt]), before);
+  assert.equal(next.element("startLocalImport").disabled, true);
+  await next.receive(checklist("resumed", "После потери вкладки"));
+  assert.equal(next.acknowledgements[0].status, "saved");
+  assert.match(JSON.stringify(next.ctx.draft), /После потери вкладки/);
+  await next.click("copyLocalImport");
+  assert.ok(!next.clipboard[0].includes(first.localStorage.get("qa-report-local-import-manager-v1")), "the browser management secret never belongs in the agent prompt");
+  await next.click("stopLocalImport");
+  const after = receiver([], first);
+  await after.click("localImportButton");
+  assert.deepEqual(JSON.parse(after.storage.get("qa-report-local-import-session-v1")).map(item => item.reportId), ["second"]);
+});
+
+test("a failed stop keeps the connection visible and retries deletion without applying more results", async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  r.ctx.deleteError = new TypeError("Network unavailable");
+  await r.click("stopLocalImport");
+  assert.equal(JSON.parse(r.storage.get("qa-report-local-import-session-v1"))[0].stopping, true);
+  assert.match(r.element("localImportStatus").textContent, /Повторяем остановку/);
+  await r.receive(checklist("must-not-apply", "Не принимать"));
+  assert.equal(r.acknowledgements.length, 0);
+  assert.doesNotMatch(JSON.stringify(r.ctx.draft), /Не принимать/);
+  r.ctx.deleteError = null;
+  await r.receive(checklist("must-not-apply", "Не принимать"));
+  assert.equal(r.deleted.length, 1);
+  assert.deepEqual(JSON.parse(r.storage.get("qa-report-local-import-session-v1")), []);
+  assert.equal(r.element("startLocalImport").disabled, false);
 });
 
 

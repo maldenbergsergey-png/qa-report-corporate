@@ -54,6 +54,52 @@ test("three report-bound connections stay isolated and stopping one preserves th
     assert.equal((await f.create({}, "replacement-report")).status, 201);
   } finally { await f.close(); }
 });
+test("browser management key recovers three sessions, reuses a report at the limit and preserves pending files and expiry", async () => {
+  let time = 1000;
+  const f = await fixture({ now: () => time });
+  const manager = "1".repeat(64), headers = { "X-QA-Import-Manager": manager };
+  const inventory = (extra = {}) => fetch(`${f.origin}/api/local-import/sessions`, { headers: { "X-QA-Import-Request": "1", ...headers, ...extra } });
+  try {
+    await f.browser("", { method: "DELETE" });
+    const first = await (await f.create(headers, "first")).json();
+    const second = await (await f.create(headers, "second")).json();
+    const third = await (await f.create(headers, "third")).json();
+    const agent = (suffix, options = {}) => fetch(first.connection.url + suffix, { ...options, headers: { "X-QA-Import-Token": first.connection.token, ...options.headers } });
+    await agent("/files/shot", { method: "PUT", body: png });
+    await agent("/batches", { method: "POST", body: JSON.stringify(payload()) });
+    time += 3600_000;
+    const recoveredResponse = await f.create(headers, "first");
+    assert.equal(recoveredResponse.status, 200);
+    const recovered = await recoveredResponse.json();
+    assert.deepEqual(recovered, first);
+    assert.equal((await f.create(headers, "fourth")).status, 429);
+    const listed = await (await inventory()).json();
+    assert.deepEqual(listed.sessions.map(item => item.id), [first.id, second.id, third.id]);
+    assert.equal((await agent("/files/shot", { method: "PUT", body: png })).status, 409, "the pending file remains reserved");
+    assert.equal((await (await agent("/batches/batch")).json()).status, "pending");
+    time = first.expiresAt;
+    assert.deepEqual((await (await inventory()).json()).sessions, []);
+    assert.equal((await f.create(headers, "replacement")).status, 201, "expired sessions release their slots before creation");
+    assert.equal((await agent("/context")).status, 404);
+  } finally { await f.close(); }
+});
+test("inventory requires both browser secret and owner and never exposes legacy sessions", async () => {
+  const f = await fixture();
+  const headers = { "X-QA-Import-Request": "1", "X-QA-Import-Manager": "2".repeat(64) };
+  const inventory = extra => fetch(`${f.origin}/api/local-import/sessions`, { headers: { ...headers, ...extra } });
+  try {
+    await f.create(headers, "managed");
+    assert.equal((await (await inventory({})).json()).sessions.length, 1);
+    assert.deepEqual((await (await inventory({ "X-QA-Import-Manager": "3".repeat(64) })).json()).sessions, []);
+    assert.deepEqual((await (await inventory({ "X-Test-Owner": "other" })).json()).sessions, []);
+    assert.equal((await inventory({ "X-QA-Import-Manager": "" })).status, 400);
+    assert.equal((await fetch(`${f.origin}/api/local-import/sessions`, { headers: { "X-QA-Import-Request": "1" } })).status, 403);
+    assert.equal((await inventory({ Origin: "https://other.example" })).status, 403);
+    assert.equal((await inventory({ "X-QA-Import-Request": "" })).status, 403);
+    const other = await (await f.create({ ...headers, "X-Test-Owner": "other" }, "managed")).json();
+    assert.notEqual(other.id, (await (await inventory({})).json()).sessions[0].id);
+  } finally { await f.close(); }
+});
 test("default import token remains valid for five hours and expires for both producer and browser at the deadline", async () => {
   let time=1000;const f=await fixture({now:()=>time});
   try {

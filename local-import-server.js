@@ -94,6 +94,11 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     response.end(JSON.stringify(value));
   }
   const manifest = file => ({ id: file.id, name: file.name, type: file.type, size: file.bytes.length });
+  const browserSession = (session, origin) => ({ id: session.id, reportId: session.reportId,
+    title: session.context.metadata?.issueUrl?.text || session.context.title || "Отчёт",
+    consumerToken: session.consumerToken, expiresAt: session.expiresAt,
+    connection: { url: `${origin}/api/local-import/agent/${session.id}`, token: session.producerToken, expiresAt: session.expiresAt },
+    limits: { maxFileBytes, maxSessionBytes } });
   function receipt(batch) { return { id: batch.id, status: batch.status, error: batch.error || "" }; }
   function checkOrigin(request, origin) {
     if (request.headers["sec-fetch-site"] === "cross-site" || (request.headers.origin && request.headers.origin !== origin)) throw problem(403, "Запрос с другого сайта запрещён");
@@ -103,15 +108,28 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     if (!url.pathname.startsWith("/api/local-import/sessions")) return false;
     checkOrigin(request, origin);
     if (request.headers["x-qa-import-request"] !== "1") throw problem(403, "Отсутствует заголовок сессии импорта");
+    const manager = request.headers["x-qa-import-manager"];
+    if (manager !== undefined && !/^[a-f0-9]{64}$/.test(manager)) throw problem(400, "Некорректный ключ управления подключениями");
+    const managerHash = manager ? crypto.createHash("sha256").update(manager).digest("hex") : "";
+    if (url.pathname === "/api/local-import/sessions" && request.method === "GET") {
+      if (!managerHash) throw problem(403, "Нужен ключ управления подключениями");
+      cleanup();
+      json(response, 200, { sessions: [...sessions.values()].filter(session => session.owner === owner && session.managerHash === managerHash).map(session => browserSession(session, origin)) });
+      return true;
+    }
     if (url.pathname === "/api/local-import/sessions" && request.method === "POST") {
       const body = await readSmallJson(request); validateCreate(request, body); cleanup();
       if (!ID.test(body.reportId || "") || !body.context || !Array.isArray(body.context.sections)) throw problem(400, "Укажите открытый отчёт");
-      if (sessions.size >= 64 || [...sessions.values()].filter(s => s.owner === owner).length >= 3) throw problem(429, "Закройте предыдущие сессии приёма");
+      // A new tab or a lost response must not consume another slot for the same report.
+      const existing = managerHash && [...sessions.values()].find(session => session.owner === owner && session.managerHash === managerHash && session.reportId === body.reportId);
+      if (existing) { json(response, 200, browserSession(existing, origin)); return true; }
+      if ([...sessions.values()].filter(s => s.owner === owner).length >= 3) throw problem(429, "Приём уже включён в трёх отчётах. Остановите одно из подключений");
+      if (sessions.size >= 64) throw problem(429, "На сервере достигнут лимит подключений. Повторите позже");
       const contextBytes = Buffer.byteLength(JSON.stringify(body.context));
       if (allocated + contextBytes > maxGlobalBytes) throw problem(429, "Временный буфер занят. Повторите позже");
-      const session = { contextBytes, metadataBytes: contextBytes, id: crypto.randomUUID(), owner, reportId: body.reportId, context: body.context, producerToken: crypto.randomBytes(32).toString("hex"), consumerToken: crypto.randomBytes(32).toString("hex"), expiresAt: now() + ttlMs, files: new Map(), batches: new Map(), bytes: 0 };
+      const session = { contextBytes, metadataBytes: contextBytes, id: crypto.randomUUID(), owner, managerHash, reportId: body.reportId, context: body.context, producerToken: crypto.randomBytes(32).toString("hex"), consumerToken: crypto.randomBytes(32).toString("hex"), expiresAt: now() + ttlMs, files: new Map(), batches: new Map(), bytes: 0 };
       sessions.set(session.id, session); allocated += contextBytes;
-      json(response, 201, { id: session.id, reportId: session.reportId, consumerToken: session.consumerToken, expiresAt: session.expiresAt, connection: { url: `${origin}/api/local-import/agent/${session.id}`, token: session.producerToken, expiresAt: session.expiresAt }, limits: { maxFileBytes, maxSessionBytes } }); return true;
+      json(response, 201, browserSession(session, origin)); return true;
     }
     const match = url.pathname.match(/^\/api\/local-import\/sessions\/([a-zA-Z0-9_-]+)(?:\/(next|ack|files\/([a-zA-Z0-9_-]+)))?$/);
     if (!match) throw problem(404, "Маршрут импорта не найден");

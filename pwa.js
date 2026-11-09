@@ -44,7 +44,7 @@
     document.getElementById('updateAppContainer').hidden = false;
   };
   const check = () => {
-    if (!registration || document.visibilityState !== 'visible' || Date.now() - lastCheck < 60000) return;
+    if (applying || !registration || document.visibilityState !== 'visible' || Date.now() - lastCheck < 60000) return;
     lastCheck = Date.now();
     registration.update().then(reveal).catch(() => {});
   };
@@ -70,34 +70,74 @@
   document.addEventListener('visibilitychange', check);
   setInterval(check, 15 * 60 * 1000);
 
+  const waitForInstallation = worker => new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      worker.removeEventListener('statechange', changed);
+    };
+    const changed = () => {
+      if (worker.state === 'installed' || worker.state === 'activated') {
+        cleanup(); resolve();
+      } else if (worker.state === 'redundant') {
+        cleanup(); reject(new Error('Не удалось загрузить последнюю версию. Проверьте подключение и попробуйте снова.'));
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup(); reject(new Error('Загрузка обновления заняла слишком много времени. Попробуйте снова.'));
+    }, 60000);
+    worker.addEventListener('statechange', changed);
+    changed();
+  });
+  const activate = worker => new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const cleanup = () => {
+      clearTimeout(timer);
+      channel.port1.close();
+      navigator.serviceWorker.removeEventListener('controllerchange', changed);
+      worker.removeEventListener('statechange', changed);
+    };
+    const changed = () => {
+      if (navigator.serviceWorker.controller === worker && worker.state === 'activated') {
+        cleanup(); resolve();
+      } else if (worker.state === 'redundant') {
+        cleanup(); reject(new Error('Не удалось завершить обновление. Попробуйте снова.'));
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup(); reject(new Error('Не удалось завершить обновление. Попробуйте снова.'));
+    }, 15000);
+    navigator.serviceWorker.addEventListener('controllerchange', changed);
+    worker.addEventListener('statechange', changed);
+    channel.port1.onmessage = ({ data }) => {
+      if (!data.ok) { cleanup(); reject(new Error(data.message)); }
+    };
+    if (worker.state === 'installed') worker.postMessage({ type: 'APPLY_UPDATE' }, [channel.port2]);
+    changed();
+  });
+
   button.addEventListener('click', async () => {
-    if (applying || !registration?.waiting) return;
+    if (applying || !registration) return;
     applying = true;
     button.disabled = true;
     label.textContent = 'Обновляем…';
     const shell = document.querySelector('.app-shell');
     const wasInert = shell.inert;
     shell.inert = true;
-    let changed;
-    let timer;
     try {
       if (!window.preparePwaUpdate) throw new Error('Редактор ещё загружается. Попробуйте снова.');
       await window.preparePwaUpdate();
-      await new Promise((resolve, reject) => {
-        const channel = new MessageChannel();
-        const cleanup = () => {
-          clearTimeout(timer);
-          channel.port1.close();
-          navigator.serviceWorker.removeEventListener('controllerchange', changed);
-        };
-        changed = () => { cleanup(); resolve(); };
-        navigator.serviceWorker.addEventListener('controllerchange', changed);
-        timer = setTimeout(() => { cleanup(); reject(new Error('Не удалось завершить обновление. Попробуйте снова.')); }, 15000);
-        channel.port1.onmessage = ({ data }) => {
-          if (!data.ok) { cleanup(); reject(new Error(data.message)); }
-        };
-        registration.waiting.postMessage({ type: 'APPLY_UPDATE' }, [channel.port2]);
-      });
+      // Replace an older waiting build with the latest complete server build.
+      try {
+        await registration.update();
+      } catch {
+        throw new Error('Не удалось проверить последнюю версию. Проверьте подключение и попробуйте снова.');
+      }
+      if (registration.installing) await waitForInstallation(registration.installing);
+      // Let the registration publish its waiting/active reference after statechange.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const worker = registration.waiting || registration.active;
+      if (!worker) throw new Error('Не удалось подготовить обновление. Попробуйте снова.');
+      await activate(worker);
       window.location.reload();
     } catch (error) {
       announcement.textContent = error.message;

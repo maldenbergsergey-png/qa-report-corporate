@@ -1,5 +1,5 @@
 // Isolated update regression: missing packaged asset, waiting worker UI,
-// durable save before activation, and preservation of the open checklist.
+// latest-build selection, two open tabs and preservation of both checklists.
 const { chromium } = require(process.env.QA_REPORT_PLAYWRIGHT || 'playwright');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -19,8 +19,9 @@ async function main() {
   const source = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
   const storageWorkerEntry = source.match(/^ *["'](\/draft-storage-worker\.js\?v=\d+)["'],\n/m);
   assert.ok(storageWorkerEntry, 'The draft storage worker must be precached');
-  let workerSource = source.replace(/(const CACHE_NAME = ['"])([^'"]+)/, '$1$2-test-baseline')
-    .replace(storageWorkerEntry[0], '');
+  const buildSource = label => source.replace(/(const CACHE_NAME = ['"])([^'"]+)/, `$1$2-test-${label}`);
+  let buildLabel = 'baseline';
+  let workerSource = buildSource(buildLabel).replace(storageWorkerEntry[0], '');
   let missingWorker = false;
   let missingRequests = 0;
   proxy = http.createServer((request, response) => {
@@ -34,7 +35,18 @@ async function main() {
     }
     const upstream = http.request({ hostname: '127.0.0.1', port: upstreamPort,
       path: request.url, method: request.method, headers: request.headers }, incoming => {
-      response.writeHead(incoming.statusCode, incoming.headers); incoming.pipe(response);
+      if (url.pathname === '/release-notes.js') {
+        const label = buildLabel;
+        const chunks = [];
+        incoming.on('data', chunk => chunks.push(chunk));
+        incoming.on('end', () => {
+          const headers = { ...incoming.headers }; delete headers['content-length'];
+          response.writeHead(incoming.statusCode, headers);
+          response.end(`window.testShellBuild = ${JSON.stringify(label)};\n` + Buffer.concat(chunks));
+        });
+      } else {
+        response.writeHead(incoming.statusCode, incoming.headers); incoming.pipe(response);
+      }
     });
     upstream.on('error', error => { response.writeHead(502); response.end(error.message); });
     request.pipe(upstream);
@@ -80,10 +92,23 @@ async function main() {
   });
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   const original = await page.evaluate(() => ({ reportId: draft.reportId, publicId: draft.publicId }));
+  const other = await context.newPage();
+  other.on('pageerror', error => errors.push(error.message));
+  await other.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  await other.goto(origin);
+  await other.waitForSelector('#settingsButton');
+  await other.evaluate(async () => {
+    cloudHistoryEnabled = false;
+    applyDraftLocally(normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: crypto.randomUUID(),
+      draftId: crypto.randomUUID(), publicId: 'a1b2c3d4' }));
+    await saveDraft();
+    window.testTabToken = 'still-open';
+  });
+  const otherId = await other.evaluate(() => draft.reportId);
 
   // Reproduce the incomplete Docker image. Failed install keeps the working
   // controller and its old cache; an unavailable update is never announced.
-  missingWorker = true; workerSource = source + '\n// incomplete build\n';
+  missingWorker = true; buildLabel = 'incomplete'; workerSource = buildSource(buildLabel);
   await page.evaluate(async () => { window.testUpdateState = ''; await testRegistration.update(); });
   await page.waitForFunction(() => window.testUpdateState === 'redundant');
   assert.equal(missingRequests > 0, true);
@@ -93,10 +118,16 @@ async function main() {
 
   // Correct the packaged asset and retry. The actual user-facing button must
   // appear, then save late edits before replacing the controller and reloading.
-  missingWorker = false; workerSource = source + '\n// corrected build\n';
+  missingWorker = false; buildLabel = 'intermediate'; workerSource = buildSource(buildLabel);
   await page.evaluate(async () => { window.testUpdateState = ''; await testRegistration.update(); });
   await page.waitForFunction(() => Boolean(testRegistration.waiting));
   await page.locator('#updateAppContainer').waitFor({ state: 'visible' });
+  // The button advertises an intermediate build. Two more releases arrive
+  // before the click; the click must replace it with the latest complete one.
+  buildLabel = 'next'; workerSource = buildSource(buildLabel);
+  buildLabel = 'latest'; workerSource = buildSource(buildLabel);
+  await other.locator('#introEditor').fill('Second tab keeps its pending edits');
+  await other.evaluate(() => { clearTimeout(saveTimer); });
   await page.locator('#introEditor').fill('Unsaved checklist text before PWA update');
   const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
   await page.locator('#updateAppButton').click();
@@ -111,8 +142,18 @@ async function main() {
     for (const key of keys) if (!key.endsWith('-test-baseline') && await (await caches.open(key)).match(workerUrl)) return true;
     return false;
   }, storageWorkerEntry[1]), true);
+  assert.equal(await page.evaluate(() => window.testShellBuild), 'latest');
+  const keys = await page.evaluate(() => caches.keys());
+  assert.equal(keys.some(key => key.endsWith('-test-latest')), true);
+  assert.equal(keys.some(key => /-test-(baseline|intermediate|next)$/.test(key)), false);
+  assert.equal(await page.locator('#updateAppContainer').isVisible(), false);
+  assert.equal(await other.evaluate(() => window.testTabToken), 'still-open');
+  assert.equal(await other.evaluate(() => draft.reportId), otherId);
+  assert.equal(await other.locator('#introEditor').innerText(), 'Second tab keeps its pending edits');
+  await other.evaluate(async () => { await saveDraft(); await saveReportSnapshot('test-after-update'); });
+  assert.equal(await other.evaluate(async () => htmlToText((await getReportRecord(draft.reportId)).document.intro)), 'Second tab keeps its pending edits');
   assert.deepEqual(errors, []);
-  console.log('PASS: missing Docker asset blocks installation safely; corrected build reveals update; activation preserves unsaved text and checklist IDs');
+  console.log('PASS: incomplete build is rejected; one click loads the latest build across skipped releases with two tabs open; both checklists and edits survive');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   await browser?.close();

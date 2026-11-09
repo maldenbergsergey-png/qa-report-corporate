@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v165';
+const CACHE_NAME = 'qa-report-corporate-assets-v166';
 const SHELL = [
   "/personal-cloud-client.js?v=3",
   "/shared-table-layout.js?v=2",
@@ -24,9 +24,9 @@ const SHELL = [
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=7', '/report-view.js?v=10', '/styles.css?v=159', '/app.js?v=173', '/pwa.js?v=5',
+  '/report-view.css?v=7', '/report-view.js?v=10', '/styles.css?v=159', '/app.js?v=173', '/pwa.js?v=6',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=130',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=131',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {
@@ -72,11 +72,6 @@ self.addEventListener('fetch', event => {
 self.addEventListener('message', event => {
   if (event.data?.type !== 'APPLY_UPDATE' || !event.ports[0]) return;
   event.waitUntil((async () => {
-    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (windows.some(client => client.url.startsWith(self.registration.scope) && client.id !== event.source?.id)) {
-      event.ports[0].postMessage({ ok: false, message: 'Закройте другие окна и вкладки QA Report, затем нажмите «Обновить» снова.' });
-      return;
-    }
     event.ports[0].postMessage({ ok: true });
     await self.skipWaiting();
   })());

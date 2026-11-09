@@ -64,12 +64,12 @@ test('failed download prevents installation', async () => {
   const w = worker(async () => new Response(null, { status: 403 }));
   await assert.rejects(dispatch(w, 'install', {})); assert.equal(w.stored.size, 0);
 });
-for (const other of [false, true]) test(`update ${other ? 'blocks multiple windows' : 'allows sole window'}`, async () => {
+for (const other of [false, true]) test(`update ${other ? 'allows multiple windows' : 'allows sole window'}`, async () => {
   const windows = [{ id: 'a', url: 'https://qa.test/' }];
   if (other) windows.push({ id: 'b', url: 'https://qa.test/report/abcd1234' });
   const w = worker(async () => new Response(''), windows); let reply;
   await dispatch(w, 'message', { data: { type: 'APPLY_UPDATE' }, source: { id: 'a' }, ports: [{ postMessage: data => reply = data }] });
-  assert.equal(reply.ok, !other); assert.equal(w.activated(), !other);
+  assert.equal(reply.ok, true); assert.equal(w.activated(), true);
 });
 
 test('Docker image includes every asset required to install the PWA, including workers', () => {

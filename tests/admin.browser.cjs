@@ -67,6 +67,8 @@ async function main() {
   assert.deepEqual(await page.locator('#summary strong').allTextContents(), ['2', '2', '1', '1']);
   assert.equal(await page.locator('#visitors > tr').count(), 2);
   assert.match(await page.locator('#visitors').textContent(), /Android/);
+  assert.equal(await page.getByRole('columnheader', { name: 'Аккаунты', exact: true }).count(), 1);
+  assert.match(await page.locator('.visitor-accounts').first().textContent(), corporate ? /fixture@example\.test/ : /Не определён/);
   assert.match(await page.locator('#visitors').textContent(), /127\.0\.0\.1/);
   await page.locator('#search').fill('203.0.113.200'); await page.locator('#search-form button').click();
   await page.locator('#visitors-empty').waitFor({ state: 'visible' });

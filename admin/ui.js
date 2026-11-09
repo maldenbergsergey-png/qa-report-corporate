@@ -39,6 +39,16 @@
     $('visitors').replaceChildren();
     for (const visitor of data.visitors) {
       const row = document.createElement('tr'); const id = cell(row, ''); const code = document.createElement('code'); code.textContent = visitor.id; id.append(code);
+      const accounts = cell(row, ''); accounts.className = 'visitor-accounts';
+      if (!visitor.accounts?.length) accounts.textContent = 'Не определён';
+      for (const account of visitor.accounts || []) {
+        const entry = document.createElement('div'); entry.className = 'account';
+        const name = document.createElement('div'); name.textContent = account.name || account.email || account.id;
+        entry.append(name);
+        if (account.name && account.email) { const email = document.createElement('div'); email.className = 'muted'; email.textContent = account.email; entry.append(email); }
+        entry.title = `Аккаунт подтверждён: ${date(account.lastSeen)}`;
+        accounts.append(entry);
+      }
       cell(row, number(visitor.visits)); cell(row, `${date(visitor.firstSeen)} / ${date(visitor.lastSeen)}`);
       const devices = cell(row, '');
       for (const item of visitor.devices) {

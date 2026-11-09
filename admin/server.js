@@ -80,11 +80,14 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     fs.mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
     db = new DatabaseSync(databaseFile);
     fs.chmodSync(databaseFile, 0o600);
+    db.function('usage_lower', { deterministic: true }, value => String(value || '').toLowerCase());
     db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS visitors (id TEXT PRIMARY KEY, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS activity (visitor_id TEXT REFERENCES visitors(id) ON DELETE CASCADE, mode TEXT, last_seen INTEGER NOT NULL, PRIMARY KEY(visitor_id, mode));
       CREATE TABLE IF NOT EXISTS usage_daily (day TEXT, visitor_id TEXT REFERENCES visitors(id) ON DELETE CASCADE, mode TEXT, ip TEXT, browser TEXT, os TEXT, device TEXT, visits INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY(day, visitor_id, mode, ip, browser, os, device));
-      CREATE INDEX IF NOT EXISTS usage_visitor_day ON usage_daily(visitor_id, day);`);
+      CREATE INDEX IF NOT EXISTS usage_visitor_day ON usage_daily(visitor_id, day);
+      CREATE TABLE IF NOT EXISTS visitor_accounts (visitor_id TEXT REFERENCES visitors(id) ON DELETE CASCADE, account_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, last_day TEXT NOT NULL, PRIMARY KEY(visitor_id, account_id));
+      CREATE INDEX IF NOT EXISTS visitor_accounts_id ON visitor_accounts(account_id);`);
     return db;
   }
 
@@ -95,6 +98,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     if (!config || (lastCleanup && now - lastCleanup < 3600000)) return;
     const store = database();
     store.prepare('DELETE FROM usage_daily WHERE day < ?').run(dayOf(now - 89 * DAY));
+    store.prepare('DELETE FROM visitor_accounts WHERE last_day < ?').run(dayOf(now - 89 * DAY));
     store.exec('DELETE FROM visitors WHERE NOT EXISTS (SELECT 1 FROM usage_daily WHERE visitor_id = visitors.id)');
     lastCleanup = now;
   }
@@ -159,6 +163,12 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     return next;
   }
 
+  async function accountOf(request) {
+    // request.user is populated by the existing corporate session gate.
+    const email = request.user?.email;
+    return typeof email === 'string' && email.length <= 254 ? { id: email, name: '', email } : null;
+  }
+
   async function collect(request, response) {
     if (!config) { response.writeHead(204, { 'Cache-Control': 'no-store' }); response.end(); return; }
     if (request.method !== 'POST') { send(response, 405, { error: 'Метод не поддерживается' }); return; }
@@ -167,7 +177,9 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
     if (!rate(`usage:${ipOf(request)}`, 600, 5 * 60000)) { send(response, 429, { error: 'Повторите позже' }); return; }
     const body = await bodyOf(request);
     if (!['browser', 'pwa'].includes(body.mode)) { send(response, 400, { error: 'Неизвестный режим' }); return; }
-    const id = visitorId(request, response); const now = clock(); const day = dayOf(now);
+    const id = visitorId(request, response);
+    const account = await accountOf(request);
+    const now = clock(); const day = dayOf(now);
     const { browser, os, device } = deviceInfo(String(request.headers['user-agent'] || '').slice(0, 1000));
     const store = database();
     store.exec('BEGIN IMMEDIATE');
@@ -175,6 +187,9 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
       const previous = store.prepare('SELECT last_seen FROM activity WHERE visitor_id = ? AND mode = ?').get(id, body.mode);
       const visits = !previous || now - previous.last_seen >= VISIT_GAP || dayOf(previous.last_seen) !== day ? 1 : 0;
       store.prepare('INSERT INTO visitors VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen').run(id, now, now);
+      if (account) store.prepare(`INSERT INTO visitor_accounts VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(visitor_id, account_id) DO UPDATE SET name = excluded.name, email = excluded.email, last_seen = excluded.last_seen, last_day = excluded.last_day`)
+        .run(id, account.id, account.name, account.email, now, now, day);
       store.prepare('INSERT INTO activity VALUES (?, ?, ?) ON CONFLICT(visitor_id, mode) DO UPDATE SET last_seen = excluded.last_seen').run(id, body.mode, now);
       store.prepare(`INSERT INTO usage_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(day, visitor_id, mode, ip, browser, os, device) DO UPDATE SET visits = visits + excluded.visits, last_seen = excluded.last_seen`)
@@ -198,11 +213,15 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
       COUNT(DISTINCT CASE WHEN mode = 'pwa' THEN visitor_id END) AS pwa, COUNT(DISTINCT CASE WHEN mode = 'browser' THEN visitor_id END) AS browser
       FROM usage_daily WHERE day BETWEEN ? AND ?`).get(from, to);
     const daily = store.prepare('SELECT day, COUNT(DISTINCT visitor_id) AS visitors, SUM(visits) AS visits FROM usage_daily WHERE day BETWEEN ? AND ? GROUP BY day ORDER BY day DESC').all(from, to);
-    const filter = `day BETWEEN ? AND ? AND (instr(visitor_id, ?) > 0 OR instr(ip, ?) > 0)`;
-    const args = [from, to, search, search];
+    const filter = `day BETWEEN ? AND ? AND (instr(visitor_id, ?) > 0 OR instr(ip, ?) > 0 OR EXISTS (
+      SELECT 1 FROM visitor_accounts a WHERE a.visitor_id = usage_daily.visitor_id AND
+      (instr(usage_lower(a.account_id), usage_lower(?)) > 0 OR instr(usage_lower(a.name), usage_lower(?)) > 0 OR instr(usage_lower(a.email), usage_lower(?)) > 0)))`;
+    const args = [from, to, search, search, search, search, search];
     const total = store.prepare(`SELECT COUNT(DISTINCT visitor_id) AS count FROM usage_daily WHERE ${filter}`).get(...args).count;
     const visitors = store.prepare(`SELECT visitor_id AS id, SUM(visits) AS visits, MIN(first_seen) AS firstSeen, MAX(last_seen) AS lastSeen FROM usage_daily WHERE ${filter} GROUP BY visitor_id ORDER BY lastSeen DESC, visitor_id LIMIT 50 OFFSET ?`).all(...args, (page - 1) * 50);
     for (const visitor of visitors) {
+      visitor.accounts = store.prepare(`SELECT account_id AS id, name, email, first_seen AS firstSeen, last_seen AS lastSeen
+        FROM visitor_accounts WHERE visitor_id = ? ORDER BY last_seen DESC, account_id`).all(visitor.id);
       visitor.devices = store.prepare(`SELECT mode, ip, browser, os, device, SUM(visits) AS visits FROM usage_daily WHERE visitor_id = ? AND day BETWEEN ? AND ? GROUP BY mode, ip, browser, os, device ORDER BY MAX(last_seen) DESC`).all(visitor.id, from, to);
     }
     return { from, to, today, earliest, timezone, retentionDays: 90, summary, daily, visitors, total, page, pageSize: 50 };

@@ -14,7 +14,7 @@ const adminPath = '/owner';
 const configPromise = passwordHash(password, 'b'.repeat(32)).then(hash => ({ version: 1, path: adminPath, username: 'owner', passwordSalt: 'b'.repeat(32), passwordHash: hash, visitorSecret: 'c'.repeat(64) }));
 const cookie = response => response.headers.get('set-cookie')?.split(';')[0] || '';
 
-async function fixture(t, { configured = true, production = false, trustProxy = false } = {}) {
+async function fixture(t, { configured = true, production = false, trustProxy = false, identities = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-admin-'));
   const configFile = path.join(dir, 'credentials.json');
   if (configured) fs.writeFileSync(configFile, JSON.stringify(await configPromise));
@@ -22,13 +22,25 @@ async function fixture(t, { configured = true, production = false, trustProxy = 
   let service;
   const server = http.createServer(async (request, response) => {
     if (await service.handle(request, response)) return;
-    if (request.url === '/api/usage/visit') return service.collect(request, response);
+    if (request.url === '/api/usage/visit') {
+      if (fs.existsSync(path.join(root, 'auth.js'))) request.user = identities[request.headers['x-fixture-session']];
+      return service.collect(request, response);
+    }
     response.writeHead(404); response.end();
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const env = { NODE_ENV: production ? 'production' : 'development', QA_ADMIN_CONFIG_FILE: configFile, QA_REPORT_PUBLIC_URL: production ? 'https://admin.example.test' : origin, QA_REPORT_TRUST_PROXY: String(trustProxy) };
-  service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now });
+  fs.writeFileSync(path.join(dir, 'clerk-secret-key'), 'sk_test_fixture');
+  const identityOptions = {
+    reportAccount: { async session(request) { return identities[request.headers['x-fixture-session']]; } },
+    directoryFetcher: async url => {
+      const account = Object.values(identities).find(value => url.pathname.endsWith('/' + value.id));
+      return account ? Response.json({ id: account.id, first_name: account.name, primary_email_address_id: 'primary',
+        email_addresses: [{ id: 'primary', email_address: account.email }] }) : new Response(null, { status: 404 });
+    },
+  };
+  service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions });
   t.after(async () => { await new Promise(resolve => server.close(resolve)); service.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   async function request(route, { method = 'GET', body, headers = {} } = {}) {
     return fetch(origin + route, { method, redirect: 'manual', headers: {
@@ -45,7 +57,7 @@ async function fixture(t, { configured = true, production = false, trustProxy = 
     return request('/api/usage/visit', { method: 'POST', body: { mode: 'browser' }, ...options });
   }
   return { service, dir, configFile, request, login, signal,
-    restart() { service.close(); service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now }); },
+    restart() { service.close(); service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions }); },
     setTime(value) { now = typeof value === 'string' ? Date.parse(value) : value; }, advance(ms) { now += ms; } };
 }
 
@@ -273,13 +285,55 @@ test('real app preserves ordinary authorization while serving independent admin 
   assert.equal((await fetch(origin + adminPath + '/stats', { headers: { 'X-QA-Admin': '1', Cookie: userCookie } })).status, 401);
   const login = await fetch(origin + adminPath + '/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-QA-Admin': '1' }, body: JSON.stringify({ username: 'owner', password }) });
   assert.equal(login.status, 200);
-  assert.equal((await fetch(origin + adminPath + '/stats', { headers: { 'X-QA-Admin': '1', Cookie: cookie(login) } })).status, 200);
+  const response = await fetch(origin + adminPath + '/stats', { headers: { 'X-QA-Admin': '1', Cookie: cookie(login) } });
+  assert.equal(response.status, 200);
+  const recorded = await response.json();
+  assert.ok(recorded.visitors.every(visitor => corporate ? visitor.accounts[0].email === 'user@example.test' : visitor.accounts.length === 0));
   if (corporate) {
     assert.equal((await fetch(origin + '/api/auth/session', { headers: { Cookie: cookie(login) } })).status, 401);
     assert.equal((await visit({ Cookie: cookie(login) })).status, 401);
     assert.equal((await fetch(origin + '/api/auth/session', { headers: { Cookie: userCookie } })).status, 200);
   }
   const html = await (await fetch(origin, { headers: { Cookie: userCookie } })).text();
-  assert.match(html, /usage\.js\?v=1/); assert.doesNotMatch(html, new RegExp(adminPath));
+  assert.match(html, /usage\.js\?v=2/); assert.doesNotMatch(html, new RegExp(adminPath));
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'release-notes.js'), 'utf8'), /админк|статистик[аи] посещени/i);
+});
+
+
+test('verified accounts link browsers across IPs, survive logout and restart, and never replace other accounts', async t => {
+  const identities = {
+    alice: { id: 'user_alice', name: 'Анна Тестовая', email: 'alice@example.test' },
+    bob: { id: 'user_bob', name: 'Борис Тестовый', email: 'bob@example.test' },
+  };
+  const f = await fixture(t, { trustProxy: true, identities });
+  const first = await f.signal({ headers: { 'X-Fixture-Session': 'alice', 'X-Forwarded-For': '203.0.113.1' } });
+  const firstCookie = cookie(first);
+  await f.signal({ headers: { Cookie: firstCookie, 'X-Fixture-Session': 'alice', 'X-Forwarded-For': '203.0.113.2' } });
+  const second = await f.signal({ headers: { 'X-Fixture-Session': 'alice' }, body: { mode: 'pwa' } });
+  await f.signal({ headers: { Cookie: firstCookie, 'X-Fixture-Session': 'bob' } });
+  f.restart();
+  await f.signal({ headers: { Cookie: firstCookie }, body: { mode: 'browser', account: { id: 'user_forged', email: 'forged@example.test' } } });
+  await f.signal({ headers: { Cookie: 'qa-usage-id=invalid', 'X-QA-User': 'user_alice', 'X-Fixture-Session': 'forged' } });
+  const admin = await f.login(); const headers = { Cookie: admin.cookie };
+  let stats = await (await f.request(adminPath + '/stats', { headers })).json();
+  assert.equal(stats.summary.visitors, 3); assert.equal(stats.summary.visits, 3);
+  const browser = stats.visitors.find(value => value.id === firstCookie.split('=')[1].split('.')[0]);
+  const corporate = fs.existsSync(path.join(root, 'auth.js'));
+  assert.deepEqual(browser.accounts.map(value => value.email).sort(), ['alice@example.test', 'bob@example.test']);
+  assert.ok(browser.accounts.every(value => value.id === (corporate ? value.email : identities[value.email.split('@')[0]].id)));
+  assert.equal(browser.devices.length, 3);
+  assert.equal(stats.visitors.find(value => value.id === cookie(second).split('=')[1].split('.')[0]).accounts[0].email, 'alice@example.test');
+  assert.equal(stats.visitors.filter(value => !value.accounts.length).length, 1);
+  for (const search of ['ALICE@example.test', corporate ? 'alice@' : 'USER_ALICE', ...(corporate ? [] : ['анна тестовая'])]) {
+    stats = await (await f.request(adminPath + '/stats?search=' + encodeURIComponent(search), { headers })).json();
+    assert.equal(stats.total, 2, search);
+  }
+  assert.equal((await f.request(adminPath + '/stats')).status, 401);
+  f.advance(91 * 86400000);
+  await f.signal({ headers: { Cookie: firstCookie } });
+  const fresh = await f.login();
+  stats = await (await f.request(adminPath + '/stats', { headers: { Cookie: fresh.cookie } })).json();
+  assert.equal(stats.visitors.length, 1); assert.deepEqual(stats.visitors[0].accounts, []);
+  const db = new DatabaseSync(path.join(f.dir, 'admin', 'usage.sqlite'));
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM visitor_accounts').get().count, 0); db.close();
 });

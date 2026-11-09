@@ -58,7 +58,10 @@
   const sessions = new Map();
   let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
-  root.QaReportMcpEditor = { session: () => { const value = currentSession(); return value?.expiresAt > Date.now() ? value : undefined; } };
+  root.QaReportMcpEditor = {
+    session: () => { const value = currentSession(); return value?.expiresAt > Date.now() ? value : undefined; },
+    sessions: () => [...sessions.values()].filter(item => item.expiresAt > Date.now()),
+  };
   function updateHistoryButtons() {
     for (const button of document.querySelectorAll("[data-history-ai]")) {
       const session = sessions.get(button.dataset.historyAi);
@@ -255,6 +258,7 @@
       if (typeof authCsrfToken === "function") body.csrfToken = await authCsrfToken();
       const session = await browserRequest("", { method: "POST", body: JSON.stringify(body) }, null);
       session.title = body.context.metadata.issueUrl.text || body.context.title;
+      session.publicId = draft.publicId;
       sessions.set(session.reportId, session);
       storeSessions();
       message("Скопируйте промпт для агента и оставьте вкладку открытой. Можно переключаться между отчётами", session);

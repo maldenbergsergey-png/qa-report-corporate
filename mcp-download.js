@@ -49,7 +49,7 @@ function createMcpDownload(root = __dirname) {
     }
     const expected = new URL(request.url, "http://localhost").searchParams.get("v");
     if (expected && expected !== bundle.sha256) {
-      response.writeHead(409, { "Cache-Control": "no-store" }); response.end("Откройте «Подключить ИИ» и скопируйте обновлённую конфигурацию."); return true;
+      response.writeHead(409, { "Cache-Control": "no-store" }); response.end("Откройте «AI» и скопируйте обновлённую конфигурацию."); return true;
     }
     response.writeHead(200, { "Content-Type": "application/gzip", "Content-Length": bundle.bytes.length,
       "Content-Disposition": `attachment; filename="qa-report-mcp-${bundle.version}.tgz"`, "X-Content-Type-Options": "nosniff",

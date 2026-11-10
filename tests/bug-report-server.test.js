@@ -27,3 +27,19 @@ test("corporate bug creation retains session, CSRF and OAuth boundaries and isol
   await assert.rejects(call("alice", { operationId: crypto.randomUUID(), fields: {} }), { status: 422, fieldErrors: { summary: "Укажите заголовок до 255 символов" } });
   assert.equal(await service({ url: "/api/reports", method: "POST" }, {}), false);
 });
+
+test('task metadata reads require the same session, CSRF and configured OAuth connection', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'corporate-task-context-')); t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let reads = 0;
+  const service = createBugReportService({ directory,
+    readJson: async req => req.body, sendJson: (res, status, value) => Object.assign(res, { status, value }), audit() {},
+    requireUser: req => { if (!req.user) throw Object.assign(Error('Login required'), { status: 401 }); return req.user; },
+    verifyCsrf: (_, token) => token === 'csrf',
+    jiraConnection: (req, body) => { if (body.instanceId !== 'allowed') throw Object.assign(Error('Forbidden'), { status: 403 }); return { baseUrl: 'https://jira.example.test', token: 'private-oauth-token', user: req.user }; },
+    jiraFetch: async (connection, route) => { reads++; assert.equal(connection.token, 'private-oauth-token'); return route.endsWith('/field') ? [] : { key: 'APP-1', fields: { summary: 'Название задачи', issuetype: { name: 'История' } } }; },
+  });
+  const call = async (user, extra = {}) => { const response = {}; await service({ url: '/api/jira/issue-details', method: 'POST', user, body: { instanceId: 'allowed', csrfToken: 'csrf', issueKey: 'APP-1', ...extra } }, response); return response; };
+  await assert.rejects(call(null), { status: 401 }); await assert.rejects(call('alice', { csrfToken: 'wrong' }), { status: 403 });
+  await assert.rejects(call('alice', { instanceId: 'foreign', baseUrl: 'https://other.test' }), { status: 403 }); assert.equal(reads, 0);
+  const result = await call('alice'); assert.equal(result.value.task.summary, 'Название задачи'); assert(!JSON.stringify(result.value).includes('private-oauth-token'));
+});

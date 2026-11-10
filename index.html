@@ -11,10 +11,11 @@
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=162" />
-    <link rel="stylesheet" href="/report-view.css?v=8" />
+    <link rel="stylesheet" href="/report-view.css?v=9" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
     <link rel="stylesheet" href="/mcp-settings.css?v=6" />
+      <link rel="stylesheet" href="/task-context.css?v=3" />
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true">
@@ -270,10 +271,10 @@
 
           <div class="metadata-grid">
             <div class="field issue-field">
-              <label for="issueUrl"><span>Ссылка на задачу</span></label>
+              <label for="issueUrl"><span>Ссылка или ключ задачи</span></label>
               <input
                 id="issueUrl"
-                type="url"
+                type="text"
                 placeholder="https://company.atlassian.net/browse/QA-1234"
                 aria-required="true"
                 aria-describedby="issueUrlError"
@@ -959,6 +960,10 @@
           <select class="history-sort" id="historySort" aria-label="Сортировка истории" title="Сначала новые">
             <option value="updated">Последние изменения</option><option value="created">Дата создания</option>
           </select>
+          <div class="history-parent-toolbar"><span>Родитель</span>
+          <select class="history-parent-filter" id="historyParentFilter" aria-label="Фильтр по родительской задаче"><option value="">Все родительские задачи</option></select>
+          <button class="button button-ghost history-load-tasks" id="historyLoadTasks" type="button" hidden>Загрузить задачи родителя</button>
+          </div>
           <div class="history-selection-toolbar" id="historySelectionToolbar" hidden>
             <label class="history-select-all"><input id="historySelectAll" type="checkbox" title="Выделить чек-листы в текущем списке" /> Выбрать всё</label>
             <span id="historySelectionCount" role="status" aria-live="polite">Выбрано: 0</span>
@@ -1305,7 +1310,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=141"></script>
+    <script src="/release-notes.js?v=142"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1313,10 +1318,10 @@
     <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=9"></script>
+    <script src="/report-file.js?v=10"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
-    <script src="/history-content.js?v=1"></script>
+    <script src="/history-content.js?v=2"></script>
     <script src="/jira-publication.js?v=5"></script>
     <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
@@ -1401,10 +1406,11 @@
     <script src="/bug-report.js?v=7"></script>
     <script src="/bug-attachment-analysis.js?v=2"></script>
     <script src="/tracker-links.js?v=6"></script>
+    <script src="/task-context.js?v=1"></script>
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
-    <script src="/report-view.js?v=11"></script>
+    <script src="/report-view.js?v=13"></script>
     <dialog id="personalCloudDialog" class="cloud-dialog" aria-labelledby="personalCloudTitle" aria-describedby="personalCloudHint">
       <header class="cloud-heading"><div><h2 id="personalCloudTitle">Мои облачные отчёты</h2><p id="personalCloudAccount"></p></div><button id="personalCloudClose" class="button button-ghost" type="button" aria-label="Закрыть облачные отчёты">Закрыть</button></header>
       <p id="personalCloudHint">Откройте отчёт на другом устройстве через свой профиль. Работа идёт в браузере; новые правки выбранных отчётов сохраняются в облако раз в минуту.</p>
@@ -1431,7 +1437,8 @@
       <a id="corporateProfileAdmin" class="corporate-profile-admin" hidden>Админ-панель · отдельный вход администратора</a>
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
-    <script src="/app.js?v=176"></script>
+    <script src="/task-context-ui.js?v=2"></script>
+    <script src="/app.js?v=177"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=12"></script>

@@ -217,6 +217,7 @@ const DEFAULT_DRAFT = {
   lastSavedBy: "",
   lastSavedClientId: "",
   issueUrl: "",
+  taskInfo: null,
   environment: "",
   overallStatus: "",
   intro: "",
@@ -311,6 +312,7 @@ const elements = {
   closeHistoryButton: document.querySelector("#closeHistoryButton"),
   historySearch: document.querySelector("#historySearch"),
   historyProjectFilter: document.querySelector("#historyProjectFilter"),
+  historyParentFilter: document.querySelector("#historyParentFilter"),
   historySort: document.querySelector("#historySort"),
   historySelectionToggle: document.querySelector("#historySelectionToggle"),
   historySelectionToolbar: document.querySelector("#historySelectionToolbar"),
@@ -549,6 +551,7 @@ function normalizeDraft(value) {
     lastSavedBy: parsed.lastSavedBy || "",
     lastSavedClientId: parsed.lastSavedClientId || "",
     issueUrl: parsed.issueUrl || "",
+    taskInfo: window.QaReportTaskContext.normalize(parsed.taskInfo, parsed.issueUrl),
     environment: String(parsed.environment || "").trim().replace(/^Не указано$/i, ""),
     overallStatus: parsed.overallStatus || "",
     numberingMode: ChecklistNumbering.normalizeMode(parsed.numberingMode),
@@ -984,7 +987,7 @@ async function getReportMetadata(id) {
   await openDatabase(); // The existing main-thread code owns schema initialization.
   try {
     if (!reportMetadataWorker) {
-      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=2");
+      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=3");
       reportMetadataWorker.addEventListener("message", ({ data }) => {
         const pending = reportMetadataRequests.get(data.requestId);
         if (!pending) return;
@@ -1035,6 +1038,7 @@ async function saveReportSnapshot(reason = "manual", candidate = null, { expecte
     publicId: snapshot.publicId,
     title: `${reportIssueLabel(snapshot)} — ${snapshot.environment}`,
     issueUrl: snapshot.issueUrl,
+    taskInfo: snapshot.taskInfo,
     issueKey,
     environment: snapshot.environment,
     overallStatus: snapshot.overallStatus,
@@ -1626,6 +1630,7 @@ async function validateReportPublication() {
 function collectDocumentFields() {
   localEditGeneration++;
   draft.issueUrl = elements.issueUrl.value;
+  draft.taskInfo = window.QaReportTaskContext.normalize(draft.taskInfo, draft.issueUrl);
   draft.environment = elements.environment.value.trim();
   draft.overallStatus = elements.overallStatus.value;
   draft.intro = cleanEditorHtml(elements.introEditor);
@@ -1669,6 +1674,7 @@ function flushDraftFromDom() {
 
 function render() {
   elements.issueUrl.value = draft.issueUrl || "";
+  window.QaReportTaskUI?.render();
   setReportMetadataError(elements.issueUrl);
   elements.environment.value = draft.environment;
   environmentPicker.close();
@@ -2003,7 +2009,7 @@ async function copySelectedRowsToNewChecklist() {
     if (!sections.length) return;
     const next = normalizeDraft({
       ...clone(DEFAULT_DRAFT),
-      issueUrl: before.issueUrl, environment: before.environment, overallStatus: before.overallStatus,
+      issueUrl: before.issueUrl, taskInfo: before.taskInfo, environment: before.environment, overallStatus: before.overallStatus,
       intro: before.intro, numberingMode: before.numberingMode, sections,
       draftId: crypto.randomUUID(), reportId: crypto.randomUUID(), publicId: createPublicId(),
       revision: 1, updatedAt: new Date().toISOString(), lastSavedBy: tabId, lastSavedClientId: reportClientId,
@@ -4861,8 +4867,9 @@ elements.previewModal.addEventListener("close", syncBodyModalOverflow);
 function openPreview() {
   const numbers = ChecklistNumbering.rowNumbers(draft);
   showChecklistPreview({
-    title: issueKeyFromUrl(draft.issueUrl) || "Отчёт о тестировании",
+    title: window.QaReportTaskContext.label(window.QaReportTaskContext.forReport(draft)) || issueKeyFromUrl(draft.issueUrl) || "Отчёт о тестировании",
     issueUrl: draft.issueUrl,
+    taskInfo: draft.taskInfo,
     environment: draft.environment,
     overallStatus: draft.overallStatus,
     intro: draft.intro,
@@ -5360,21 +5367,25 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
   const colors = loadProjectColors();
   renderHistoryProjectFilter(reports, names);
   const selectedProject = elements.historyProjectFilter.value;
+  window.QaReportTaskUI.historyParents(reports, selectedProject);
   const query = elements.historySearch.value.trim().toLowerCase();
   const filtered = sortHistoryReports(reports.filter((report) => {
     const projectKey = reportProjectKey(report);
     const matchesProject = !selectedProject || (selectedProject === "none" ? !projectKey : projectKey === selectedProject);
-    return matchesProject && `${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""} ${names[projectKey] || projectKey}`.toLowerCase().includes(query);
+    const taskInfo = window.QaReportTaskContext.forReport(report);
+    const taskSearch = [window.QaReportTaskContext.label(taskInfo), window.QaReportTaskContext.label(taskInfo?.parent)].join(" ");
+    return matchesProject && window.QaReportTaskUI.historyMatches(report) && `${taskSearch} ${reportIssueLabel(report)} ${report.title} ${report.issueKey} ${report.document?.issueUrl ?? report.issueUrl} ${report.historyComment || ""} ${names[projectKey] || projectKey}`.toLowerCase().includes(query);
   }), elements.historySort.value);
   const availableIds = new Set(reports.map(report => report.id));
   for (const id of selectedHistoryReportIds) if (!availableIds.has(id)) selectedHistoryReportIds.delete(id);
   historyFilteredReports = filtered;
-  elements.historyUsage.textContent = `${selectedProject || query ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · В этом браузере`;
+  elements.historyUsage.textContent = `${selectedProject || query || elements.historyParentFilter?.value ? `Показано: ${filtered.length} из ${reports.length}` : `Всего: ${reports.length}`} · В этом браузере`;
   elements.historyList.innerHTML = "";
   updateHistorySelectionUi();
   if (!filtered.length) {
     const title = reports.length ? "Ничего не найдено" : "Отчётов пока нет";
     elements.historyList.innerHTML = `<div class="history-empty"><p>${title}</p><button class="button button-primary" type="button" data-create-empty-report>Создать</button></div>`;
+    window.QaReportTaskUI.renderInventory(elements.historyList);
     elements.historyList.querySelector("[data-create-empty-report]")?.addEventListener("click", () => {
       closeHistory();
       resetDraft();
@@ -5393,6 +5404,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const projectName = names[projectKey] || projectKey || "Без проекта";
     const projectStyle = colors[projectKey] ? ` style="--project-color:${colors[projectKey]}"` : "";
     info.innerHTML = `<div class="history-item-heading"><h3>${escapeHtml(issueLabel)}</h3><span class="history-project-label"${projectStyle} title="${escapeHtml(projectKey || "Без проекта")}">${escapeHtml(projectName)}</span></div><div class="history-item-meta"><div class="history-record-identity"><code>${escapeHtml(publicId)}</code><span class="history-storage"><svg class="ui-icon" role="img" aria-label="В этом браузере"><title>Сохранён в этом браузере</title><use href="#icon-monitor"></use></svg></span></div><span class="history-dates">${historyDatesMarkup(report)}</span></div>`;
+    window.QaReportTaskUI.decorateHistory(info.querySelector(".history-item-heading"), report);
     const cloudButton = createSmallButton("", () => historyReportAction(report, () => personalCloud.open()), false, "cloud-upload");
     cloudButton.className = "history-cloud-button";
     cloudButton.dataset.historyCloud = report.id;
@@ -5527,6 +5539,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     if (publications.children.length) item.append(publications);
     elements.historyList.append(item);
   });
+  window.QaReportTaskUI.renderInventory(elements.historyList);
   updateHistoryStorage();
   window.QaLocalImport?.updateHistoryButtons();
   updateHistorySelectionUi();
@@ -7313,6 +7326,7 @@ function importedDraftInCurrentReport(imported, current = draft) {
     revision: current.revision, updatedAt: current.updatedAt,
     lastSavedBy: current.lastSavedBy, lastSavedClientId: current.lastSavedClientId,
     issueUrl: imported.issueUrl || current.issueUrl,
+    taskInfo: imported.taskInfo || (!imported.issueUrl || imported.issueUrl === current.issueUrl ? current.taskInfo : null),
   });
 }
 
@@ -8265,7 +8279,7 @@ function sharedSnapshotOptions(source, scope) {
   const excluded = new Set(sharedExcludedRows(scope).map(row => JSON.stringify([row.sectionId, row.rowId])));
   return {
     includeRow: (section, row) => !excluded.has(JSON.stringify([section.id, row.id])),
-    title: issueKeyFromUrl(source.issueUrl) || "Отчёт о тестировании",
+    title: window.QaReportTaskContext.label(window.QaReportTaskContext.forReport(source)) || issueKeyFromUrl(source.issueUrl) || "Отчёт о тестировании",
     toText: htmlToSpreadsheetText,
     toCode: node => extractCodeText(node, { preserveWhitespace: true }),
     rowNumbers: ChecklistNumbering.rowNumbers(source),
@@ -9614,9 +9628,10 @@ renderEnvironmentOptions();
   [elements.issueUrl, elements.environment, elements.overallStatus].forEach((control) => {
     control.addEventListener(eventName, () => {
       draft.issueUrl = elements.issueUrl.value;
+      draft.taskInfo = window.QaReportTaskContext.normalize(draft.taskInfo, draft.issueUrl);
       draft.environment = elements.environment.value.trim();
       draft.overallStatus = elements.overallStatus.value;
-      if (control === elements.issueUrl) renderPublicationState();
+      if (control === elements.issueUrl) { renderPublicationState(); window.QaReportTaskUI.render(); }
       if (control === elements.overallStatus) setStatusClass(control, draft.overallStatus);
       if (control.hasAttribute("aria-invalid")) setReportMetadataError(control, reportMetadataError(control));
       scheduleSave({ collect: false });
@@ -11046,4 +11061,17 @@ const personalCloud = window.QaReportCloud.create({
     const next = await openPortableDocument(document);
     return next;
   },
+});
+
+window.QaReportTaskUI.init({
+  getDraft: () => draft,
+  apply: (info, url) => { flushDraftFromDom(); draft.issueUrl = url; draft.taskInfo = window.QaReportTaskContext.normalize(info, url); render(); scheduleSave({ collect: false }); },
+  historyRender: async () => { await flushVisibleHistoryComments(); await renderHistoryList(); }, toast: showToast,
+  start: async info => { const previous = draft.reportId; await resetDraft(); if (draft.reportId === previous) return; closeHistory(); draft.issueUrl = info.issueUrl; draft.taskInfo = window.QaReportTaskContext.normalize(info, info.issueUrl); render(); scheduleSave({ collect: false }); },
+  connections: async () => { const { instances } = await reportApi("/api/jira/connections"); return instances.filter(item => item.connected).map(item => ({ provider: "jira", baseUrl: item.baseUrl })); },
+  request: async (action, target) => { const { instances } = await reportApi("/api/jira/connections");
+    const connection = instances.find(item => item.connected && item.baseUrl.replace(/\/$/, "") === target.baseUrl.replace(/\/$/, ""));
+    if (!connection) throw new Error("Подключите выбранную Jira в настройках приложения.");
+    const { csrfToken } = await reportApi("/api/auth/csrf");
+    return reportApi(`/api/jira/${action}`, { method: "POST", body: JSON.stringify({ instanceId: connection.id, issueKey: target.issueKey, csrfToken }) }); },
 });

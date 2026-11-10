@@ -1,4 +1,4 @@
-importScripts("/history-content.js?v=1");
+importScripts("/history-content.js?v=2");
 
 // Read metadata from the existing database off the UI thread. Its records and
 // attachments stay in the original format; this worker never writes or migrates.

@@ -16,12 +16,13 @@ COPY --chown=node:node admin ./admin
 COPY --chown=node:node usage.js jira-upload-runtime.js jira-upload-store.js jira-upload-client.js ./
 COPY --chown=node:node corporate-accounts.js corporate-profile.js corporate-storage.js ./
 COPY --chown=node:node scripts/check-corporate-storage.cjs ./scripts/
+COPY --chown=node:node task-context.js task-context-ui.js task-context.css ./
 COPY --chown=node:node report-sharing.js report-storage.js shared-table-layout.js shared-report.html shared-report.js shared-report.css shared-comment-editor.js status-palette.css ./
 COPY --chown=node:node mcp-connections.js developer-mcp-access.js mcp-connect.html mcp-connect.js project-mcp-access.js personal-mcp-access.js personal-mcp-settings.js mcp-download.js shared-mcp-setup.js mcp-settings.js mcp-settings.css project-mcp-settings.js ./
 COPY --chown=node:node scripts/qa-report-mcp.cjs scripts/shared-report-mcp.cjs ./scripts/
 COPY --chown=node:node scripts/setup-admin.cjs ./scripts/
 COPY --chown=node:node dictation-input.js bug-voice-input.js connect-dictation-server.js ./
-COPY --chown=node:node bug-report.js bug-report-ui.js bug-rich-editor.js bug-report-server.js jira-issues.js bug-attachment-analysis.js bug-wizard.css tracker-links.js ./
+COPY --chown=node:node bug-report.js bug-report-ui.js bug-rich-editor.js bug-report-server.js jira-issues.js jira-task-context.js bug-attachment-analysis.js bug-wizard.css tracker-links.js ./
 COPY --chown=node:node vendor ./vendor
 COPY --chown=node:node icons ./icons
 RUN mkdir -p /app/reports-data && chown -R node:node /app/reports-data

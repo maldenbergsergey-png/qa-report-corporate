@@ -231,6 +231,7 @@ function createService({ configuredJira, jiraFetch, directory }) {
       const raw = c.type === "cloud" ? await pages(c, "/rest/api/3/project/search", "values") : await jiraFetch(c, "/rest/api/2/project");
       return { ok: true, projects: (Array.isArray(raw) ? raw : []).map(item => ({ key: String(item.key), name: String(item.name) })) };
     }
+    if (["issue-details", "issue-children"].includes(action)) return require("./jira-task-context").executeTaskContext(c, action, payload, jiraFetch);
     if (action === "issue-context") return context(c, payload);
     if (action === "issue-fields") return fields(c, payload);
     if (action === "issue-options") return options(c, payload);

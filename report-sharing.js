@@ -185,6 +185,7 @@ function snapshotFrom(raw, usedFiles) {
   return {
     title: str(raw.title ?? "", 500).trim() || "Отчёт QA Report",
     issueUrl: link(raw.issueUrl),
+    ...(require("./task-context").normalize(raw.taskInfo, raw.issueUrl) ? { taskInfo: require("./task-context").normalize(raw.taskInfo, raw.issueUrl) } : {}),
     environment: str(raw.environment ?? "", 500),
     overallStatus: str(raw.overallStatus ?? "", 120),
     intro: content(raw.intro),

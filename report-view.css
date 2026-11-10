@@ -421,3 +421,6 @@
 @media (max-width: 760px) {
   .qa-report-view .toolbar-filters:has([data-multiple="true"]) { grid-template-columns: minmax(0, 1fr); }
 }
+
+.qa-report-view .metadata dd { min-width: 0; }
+.qa-report-view .metadata dd > a { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -49,7 +49,8 @@ function harness(records = new Map(), preferences = new Map()) {
     localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) },
     URL, localEditGeneration: 0, historyRenderRequestId: 0, historyLoading: false, historySelectionMode: false, historyDeleting: false,
     historyFilteredReports: [], selectedHistoryReportIds: new Set(), pendingHistoryServerSaves: new Map(), document: { createElement: element, querySelectorAll: () => [] },
-    window: { QaReportJiraPublication: JiraPublication },
+    window: { QaReportJiraPublication: JiraPublication, QaReportTaskContext: require("../task-context"),
+      QaReportTaskUI: { historyParents() {}, historyMatches: () => true, decorateHistory() {}, renderInventory() {} } },
     draft: { reportId: "report", publicId: "abc12345", issueUrl: "", environment: "STAGE", sections: [] },
     elements: {
       issueUrl: element(), environment: { value: "STAGE" }, overallStatus: { value: "OK" },

@@ -13,6 +13,7 @@
     content.numberingMode = ["section", "continuous", "hierarchical", "manual"].includes(content.numberingMode) ? content.numberingMode : "section";
     content.sectionNumberingMode = content.sectionNumberingMode === "manual" ? "manual" : "automatic";
     content.issueUrl = content.issueUrl || "";
+    if (!content.taskInfo) delete content.taskInfo;
     if (Array.isArray(content.sections)) content.sections = content.sections.map((section, index) => ({
       ...section,
       title: String(section.title || "").trim() || `Раздел ${index + 1}`,

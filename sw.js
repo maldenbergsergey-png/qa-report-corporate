@@ -2,6 +2,7 @@
 // No editor HTML, user data, login responses or API results are cached.
 const CACHE_NAME = 'qa-report-corporate-assets-v179';
 const SHELL = [
+  "/task-context.js?v=1", "/task-context-ui.js?v=2", "/task-context.css?v=3",
   "/personal-mcp-settings.js?v=3",
   "/project-mcp-settings.js?v=4",
   "/corporate-profile.js?v=1",
@@ -17,9 +18,9 @@ const SHELL = [
   "/jira-publication.js?v=5",
   "/dictation-input.js?v=2",
   "/bug-voice-input.js?v=5",
-  "/draft-storage-worker.js?v=2",
-  "/history-content.js?v=1",
-  "/report-file.js?v=9",
+  "/draft-storage-worker.js?v=3",
+  "/history-content.js?v=2",
+  "/report-file.js?v=10",
   "/file-preview.js?v=4",
   "/import-options.js?v=7", "/import-wizard.js?v=6",
   "/attachment-limits.js?v=1",
@@ -28,9 +29,9 @@ const SHELL = [
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=8', '/report-view.js?v=11', '/styles.css?v=162', '/app.js?v=176', '/pwa.js?v=6',
+  '/report-view.css?v=9', '/report-view.js?v=13', '/styles.css?v=162', '/app.js?v=177', '/pwa.js?v=6',
   '/jira-markup-import.js?v=14', '/checklist-selection.js?v=6',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=141',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=142',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

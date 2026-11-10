@@ -1,6 +1,7 @@
 /* Portable .report v1: a bounded, uncompressed ZIP with verified binary assets. */
 (function (root) {
   "use strict";
+  const TaskContext = typeof module === "object" && module.exports ? require("./task-context") : root.QaReportTaskContext;
   const MAX_BYTES = 250 * 1024 * 1024;
   const MAX_FILES = 1000;
   const encoder = new TextEncoder();
@@ -80,6 +81,7 @@
     let rows = 0;
     const result = { schemaVersion: 3, issueUrl: string(value.issueUrl), environment: string(value.environment), overallStatus: value.overallStatus,
       intro: string(value.intro), numberingMode: value.numberingMode,
+      ...(TaskContext.normalize(value.taskInfo, value.issueUrl) ? { taskInfo: TaskContext.normalize(value.taskInfo, value.issueUrl) } : {}),
       ...(value.pinnedColumns !== undefined ? { pinnedColumns: { number: value.pinnedColumns.number, status: value.pinnedColumns.status } } : {}),
       ...(value.sectionNumberingMode !== undefined ? { sectionNumberingMode: value.sectionNumberingMode } : {}), sections: value.sections.map(section => {
         if (!section || !Array.isArray(section.columns) || !section.columns.length || section.columns.length > 100 || !Array.isArray(section.rows) || !section.rows.length || (rows += section.rows.length) > 20000) bad();
@@ -429,7 +431,7 @@
       }
       if (rows.length) structure.push([section.id, options.sectionTitle(section), section.columns.map(column => [column.id, column.title]), rows]);
     }
-    return { metadata: [options.title, shareLink(shareUrl(report.issueUrl)), report.environment, report.overallStatus],
+    return { metadata: [options.title, shareLink(shareUrl(report.issueUrl)), report.environment, report.overallStatus, ...(report.taskInfo ? [report.taskInfo] : [])],
       intro, structure, statuses, checks, attachments };
   }
 
@@ -498,7 +500,7 @@
       if (rows.length) sections.push({ id: section.id, title: sectionTitle(section), columns, rows });
     }
     if (!sections.length) fail("В публикации должен остаться хотя бы один заполненный пункт.");
-    return { snapshot: { title, issueUrl: shareLink(shareUrl(report.issueUrl)), environment: report.environment,
+    return { snapshot: { title, issueUrl: shareLink(shareUrl(report.issueUrl)), ...(report.taskInfo ? { taskInfo: report.taskInfo } : {}), environment: report.environment,
       overallStatus: report.overallStatus, intro, sections }, files: [...files.values()] };
   }
 

@@ -6,7 +6,7 @@ function createBugReportService({ readJson, sendJson, requireUser, verifyCsrf, j
   const execute = createService({ configuredJira: connection => connection, jiraFetch, directory });
   const pending = new Map();
   return async function handle(request, response) {
-    const route = new URL(request.url, "http://localhost").pathname.match(/^\/api\/jira\/(issue-projects|issue-context|issue-fields|issue-options|create-issue|issue-evidence)$/);
+    const route = new URL(request.url, "http://localhost").pathname.match(/^\/api\/jira\/(issue-projects|issue-details|issue-children|issue-context|issue-fields|issue-options|create-issue|issue-evidence)$/);
     if (request.method !== "POST" || !route) return false;
     const user = requireUser(request), body = await readJson(request);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw Object.assign(new Error("Заполните форму баг-репорта"), { status: 422 });

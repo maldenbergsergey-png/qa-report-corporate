@@ -37,6 +37,7 @@
     const href = safeLink(value);
     if (!href) return null;
     const link = element("a", "", label);
+    link.title = String(label || "");
     link.href = href;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
@@ -49,13 +50,15 @@
     return tag;
   }
 
-  function renderOverview(overview, { issueUrl, environment, overallStatus, published, updated }, renderIntro) {
+  function renderOverview(overview, { issueUrl, taskInfo, environment, overallStatus, published, updated }, renderIntro) {
     const meta = overview.querySelector(".metadata");
     const intro = overview.querySelector(".intro");
     const introContent = intro.querySelector(".intro-content");
     const issueKey = root.QaReportTrackerLinks.parse(issueUrl)?.key;
+    const info = root.QaReportTaskContext?.normalize(taskInfo, issueUrl);
     const fields = [
-      ["Задача", externalLink(issueUrl, issueKey || "Открыть задачу")],
+      ["Задача", externalLink(issueUrl, root.QaReportTaskContext?.label(info) || issueKey || "Открыть задачу")],
+      ["Родительская задача", info?.parent && externalLink(info.parent.issueUrl, root.QaReportTaskContext.label(info.parent))],
       ["Окружение", environment?.trim() && element("span", "report-tag", environment.trim())],
       ["Итог проверки", overallStatus && statusTag(overallStatus)],
       ["Опубликовано", published],

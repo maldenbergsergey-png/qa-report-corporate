@@ -40,3 +40,8 @@
 .mcp-settings .mcp-project-key { display: flex; align-items: center; gap: 12px; padding-block: 10px; border-top: 1px solid var(--line); }
 .mcp-settings .mcp-project-key span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
 .mcp-settings .mcp-project-key button { flex-shrink: 0; }
+
+.personal-mcp [data-personal-form] { display: grid; gap: 14px; margin-block: 16px; }
+.personal-mcp [data-personal-form] > button { justify-self: start; }
+.personal-mcp [data-personal-issued], .mcp-browser-access { margin-top: 20px; }
+.mcp-browser-access { padding-top: 16px; border-top: 1px solid var(--line); }

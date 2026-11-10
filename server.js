@@ -1,5 +1,6 @@
 const { contentFingerprint: historyContentFingerprint } = require("./history-content");
 const http = require("node:http");
+const { createPersonalMcpAccess } = require("./personal-mcp-access");
 const { createProjectMcpAccess } = require("./project-mcp-access");
 const { createMcpDownload } = require("./mcp-download");
 const { createMcpConnections } = require("./mcp-connections");
@@ -1577,6 +1578,14 @@ projectMcp = createProjectMcpAccess({ getDb: getReportsDb, readJson, sendJson, r
   },
 });
 
+const personalMcp = createPersonalMcpAccess({ getDb: getReportsDb, readJson, sendJson, requestOrigin, localImportService, audit,
+  authenticateOwner: async request => request.user?.email || null,
+  validateWrite: request => {
+    if (request.headers["x-qa-personal-request"] !== "1" || !verifyCsrf(request, request.headers["x-qa-csrf-token"]) ||
+      !request.headers["content-type"]?.startsWith("application/json")) throw Object.assign(new Error("Недействительный защитный токен"), { status: 403 });
+  },
+});
+
 const mcpDownload = createMcpDownload();
 const mcpConnections = createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, audit });
 const server = http.createServer(async (request, response) => {
@@ -1590,6 +1599,7 @@ const server = http.createServer(async (request, response) => {
     // Anonymous downloads contain only the allowlisted MCP source and manifest,
     // never report data, cookies, deployment configuration or corporate secrets.
     if (await mcpDownload(request, response, requestPath)) return;
+    if (await personalMcp.machine(request, response, requestPath)) return;
     if (await projectMcp.machine(request, response, requestPath)) return;
     if (await mcpConnections.machine(request, response, requestPath)) return;
     if (request.method === "GET" && requestPath === "/api/health") {
@@ -1656,6 +1666,7 @@ const server = http.createServer(async (request, response) => {
       if (!["GET", "HEAD"].includes(request.method)) audit(request, response, "personal_cloud_write", { email: request.user.email });
       return;
     }
+    if (await personalMcp.browser(request, response, requestPath)) return;
     if (await projectMcp.browser(request, response, requestPath)) return;
     if (await mcpConnections.browser(request, response, requestPath)) return;
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
@@ -1680,6 +1691,7 @@ const server = http.createServer(async (request, response) => {
       const owner = resolveReportOwner(request);
       if (await localImportService.browser(request, response, {
         owner: `${owner.source}:${owner.id}`, origin: requestOrigin(request),
+        accountOwner: request.user.email,
         validateCreate: (req, body) => {
           if (!verifyCsrf(req, body.csrfToken)) throw Object.assign(new Error("Недействительный защитный токен"), { status: 403 });
         },

@@ -2144,3 +2144,6 @@ tests/mcp-onboarding.browser.cjs` с Playwright в `QA_REPORT_PLAYWRIGHT`.
 
 Проектный доступ разработчика на 30 дней без настройки на каждый отчёт:
 [ключ проекта](docs/project-mcp.md).
+
+Личное подключение аккаунта с поиском чек-листов и работой через браузер:
+[личные MCP-токены](docs/personal-mcp.md).

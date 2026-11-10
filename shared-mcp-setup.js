@@ -1,21 +1,22 @@
 (function (root) {
   "use strict";
-  function buildSetup({ shareUrl, connection, project, packageUrl, client = "codex", windows = false, readOnly = false, fileRoot = "", accessToken = "" }) {
-    if ([shareUrl, connection, project].filter(Boolean).length !== 1) throw new Error("Выберите одно подключение");
-    const target = new URL(shareUrl || connection?.url || project.url), bundle = new URL(packageUrl, target.origin);
+  function buildSetup({ shareUrl, connection, project, personal, packageUrl, client = "codex", windows = false, readOnly = false, fileRoot = "", accessToken = "" }) {
+    if ([shareUrl, connection, project, personal].filter(Boolean).length !== 1) throw new Error("Выберите одно подключение");
+    const target = new URL(shareUrl || connection?.url || project?.url || personal.url), bundle = new URL(packageUrl, target.origin);
     const local = target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
     if ((!local && target.protocol !== "https:") || target.username || target.password || target.search
-        || (project ? !/^\/api\/mcp\/projects\/[a-f0-9]{32}\/reports$/.test(target.pathname) || target.hash || !/^[A-Za-z0-9_-]{43}$/.test(project.token)
+        || (personal ? target.pathname !== "/api/mcp/personal" || target.hash || !/^[A-Za-z0-9_-]{43}$/.test(personal.token)
+          : project ? !/^\/api\/mcp\/projects\/[a-f0-9]{32}\/reports$/.test(target.pathname) || target.hash || !/^[A-Za-z0-9_-]{43}$/.test(project.token)
           : shareUrl ? !/^\/shared-report\/[a-f0-9]{32}$/.test(target.pathname) || !/^#[A-Za-z0-9_-]{43}$/.test(target.hash)
           : !/^\/api\/local-import\/agent\/[A-Za-z0-9_-]{1,80}$/.test(target.pathname) || target.hash || !/^[a-f0-9]{64}$/.test(connection.token))
         || bundle.origin !== target.origin || bundle.pathname !== "/downloads/qa-report-mcp.tgz"
         || !/^\?v=[a-f0-9]{64}$/.test(bundle.search) || bundle.hash) throw new Error("Неполное подключение MCP");
-    if (fileRoot && (!connection || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(fileRoot) || /[\r\n\0]/.test(fileRoot))) throw new Error("Укажите полный путь к папке вложений");
+    if (fileRoot && (!(connection || personal) || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(fileRoot) || /[\r\n\0]/.test(fileRoot))) throw new Error("Укажите полный путь к папке вложений");
     if (accessToken && (!shareUrl || !/^[a-f0-9]{64}$/.test(accessToken))) throw new Error("Неполное временное подключение");
-    const name = "qa-report-" + (project ? "project-" + target.pathname.split("/")[4].slice(-8) : (shareUrl ? "" : "qa-") + target.pathname.slice(-8));
+    const name = "qa-report-" + (personal ? "personal-" + target.host.replace(/[^A-Za-z0-9_-]/g, "-") : project ? "project-" + target.pathname.split("/")[4].slice(-8) : (shareUrl ? "" : "qa-") + target.pathname.slice(-8));
     const command = windows ? "cmd" : "npx";
-    const args = [...(windows ? ["/c", "npx"] : []), "--yes", "--ignore-scripts", "--package", project ? bundle.origin + bundle.pathname : bundle.href, "qa-report-mcp"];
-    const env = { ...(project ? { QA_REPORT_PROJECT_URL: target.href, QA_REPORT_PROJECT_TOKEN: project.token } : shareUrl ? { QA_REPORT_SHARE_URL: target.href } : { QA_REPORT_IMPORT_URL: target.href, QA_REPORT_IMPORT_TOKEN: connection.token }),
+    const args = [...(windows ? ["/c", "npx"] : []), "--yes", "--ignore-scripts", "--package", (project || personal) ? bundle.origin + bundle.pathname : bundle.href, "qa-report-mcp"];
+    const env = { ...(personal ? { QA_REPORT_PERSONAL_URL: target.href, QA_REPORT_PERSONAL_TOKEN: personal.token } : project ? { QA_REPORT_PROJECT_URL: target.href, QA_REPORT_PROJECT_TOKEN: project.token } : shareUrl ? { QA_REPORT_SHARE_URL: target.href } : { QA_REPORT_IMPORT_URL: target.href, QA_REPORT_IMPORT_TOKEN: connection.token }),
       ...(accessToken ? { QA_REPORT_MCP_ACCESS_TOKEN: accessToken } : {}),
       ...(fileRoot ? { QA_REPORT_FILE_ROOT: fileRoot } : {}), ...(readOnly ? { QA_REPORT_MCP_READ_ONLY: "1" } : {}) };
     if (client === "json") return { code: JSON.stringify({ mcpServers: { [name]: { command, args, env } } }, null, 2),

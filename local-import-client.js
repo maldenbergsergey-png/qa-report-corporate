@@ -72,10 +72,10 @@
   let sessionGeneration = 0; let syncing;
   let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
-  const needsPolling = () => [...sessions.values()].some(item => !item.remote || item.stopping);
+  const needsPolling = () => [...sessions.values()].some(item => (!item.personal && !item.remote) || item.stopping);
   root.QaReportMcpEditor = {
     session: () => { const value = currentSession(); return value?.expiresAt > Date.now() ? value : undefined; },
-    sessions: () => [...sessions.values()].filter(item => item.expiresAt > Date.now()),
+    sessions: () => [...sessions.values()].filter(item => !item.personal && item.expiresAt > Date.now()),
   };
   function updateHistoryButtons() {
     for (const button of document.querySelectorAll("[data-history-ai]")) {
@@ -100,6 +100,7 @@
   }
   function timeOf(current) { return new Date(current.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
   function assertActive(current) {
+    current.personalGuard?.();
     if (sessions.get(current.reportId) !== current || current.stopping || Date.now() >= current.expiresAt) throw new Error("Приём остановлен или срок подключения истёк");
   }
   function updateControls() {
@@ -107,7 +108,7 @@
     reportLabel.textContent = `${reportIssueLabel(draft)} · ${draft.publicId}`;
     const session = currentSession();
     const active = Boolean(session);
-    start.disabled = (active && (!session.remote || session.stopping)) || starting; stop.disabled = !active; copy.disabled = !active || session.stopping;
+    start.disabled = (active && (!session.remote || session.stopping)) || starting; stop.disabled = !active; copy.disabled = !active || session.stopping || Boolean(session.personal);
     start.textContent = starting ? "Включаем…" : session?.remote && !session.stopping ? "Возобновить приём" : active ? "Приём включён" : "Включить приём";
     panel.dataset.state = active ? "on" : "off";
     trigger.classList.toggle("local-import-active", sessions.size > 0);
@@ -153,7 +154,7 @@
   }
   async function browserRequest(suffix, options = {}, current = currentSession()) {
     const response = await fetch(`/api/local-import/sessions${suffix}`, {
-      ...options, cache: "no-store", headers: { ...reportIdentityHeaders(), "X-QA-Import-Request": "1", "X-QA-Import-Manager": manager, ...(current ? { "X-QA-Import-Reader": current.consumerToken } : {}), ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
+      ...options, cache: "no-store", headers: { ...reportIdentityHeaders(), ...(current?.personal ? await root.QaPersonalMcp.authHeaders(options.method || "GET") : {}), "X-QA-Import-Request": "1", "X-QA-Import-Manager": manager, ...(current ? { "X-QA-Import-Reader": current.consumerToken } : {}), ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
     });
     if (options.binary && response.ok) return response.blob();
     const payload = await response.json().catch(() => ({}));
@@ -186,6 +187,7 @@
       // Existing tabs keep receiving; a recovered connection is resumed explicitly.
       for (const item of result.sessions) {
         const previous = sessions.get(item.reportId);
+        if (previous?.personal) continue;
         known.set(item.reportId, previous?.id === item.id ? previous : { ...item, remote: true });
       }
       // A previous server may not yet know this browser's management key.
@@ -275,7 +277,7 @@
   async function poll() {
     if (busy) return;
     busy = true;
-    try { for (const current of [...sessions.values()]) if (sessions.get(current.reportId) === current) {
+    try { for (const current of [...sessions.values()]) if (!current.personal && sessions.get(current.reportId) === current) {
       if (navigator.locks) await navigator.locks.request(`qa-report-import:${current.id}`, { ifAvailable: true }, lock => lock ? pollSession(current) : undefined);
       else await pollSession(current);
     } }
@@ -322,6 +324,33 @@
     } catch (error) { message(`Не удалось включить приём: ${error.message}`); }
     finally { starting = false; updateControls(); }
   });
+  async function startPersonal(reportId, accountHeaders, validate = () => {}) {
+    validate();
+    const existing = sessions.get(reportId);
+    if (existing?.personal && !existing.stopping && !existing.remote && existing.expiresAt > Date.now()) return existing.id;
+    if (existing) { await endSession(existing); if (sessions.has(reportId)) throw new Error("Дождитесь завершения предыдущего приёма"); }
+    if (draft.reportId === reportId) await saveReportSnapshot("before-personal-mcp");
+    const value = draft.reportId === reportId ? draft : (await getReportRecord(reportId))?.document;
+    if (!value) throw new Error("Чек-лист не найден в этом браузере");
+    const body = { reportId, context: await context(value), personalMcp: true };
+    if (typeof authCsrfToken === "function") body.csrfToken = accountHeaders["X-QA-CSRF-Token"] || await authCsrfToken();
+    const session = await browserRequest("", { method: "POST", body: JSON.stringify(body), headers: accountHeaders }, null);
+    try { validate(); } catch (error) { await browserRequest(`/${session.id}`, { method: "DELETE", headers: accountHeaders }, session).catch(() => {}); throw error; }
+    session.personalGuard = validate; session.personal = true; session.title = body.context.metadata.issueUrl.text || body.context.title; session.publicId = value.publicId;
+    sessions.set(reportId, session); sessionGeneration++; storeSessions(); updateControls();
+    clearTimeout(timer); timer = setTimeout(poll, 200); return session.id;
+  }
+  async function stopPersonal() {
+    const personal = [...sessions.values()].filter(item => item.personal);
+    await Promise.all(personal.map(item => endSession(item)));
+    for (const item of personal) if (sessions.get(item.reportId) === item) { sessions.delete(item.reportId); sessionGeneration++; }
+    storeSessions(); updateControls();
+  }
+  Object.assign(root.QaReportMcpEditor, { startPersonal, stopPersonal, async pollPersonal(reportIds) {
+    if (busy) return; busy = true;
+    try { for (const reportId of reportIds) { const current = sessions.get(reportId); if (current?.personal) await pollSession(current); } }
+    finally { busy = false; updateControls(); }
+  } });
   stop.addEventListener("click", async () => { await endSession(); start.focus(); });
   async function copyPrompt(session = currentSession()) {
     if (!session) return;
@@ -338,7 +367,7 @@
   try {
     const stored = JSON.parse(sessionStorage.getItem(key) || "[]");
     // Migrate the single-report connection without changing its expiry or tokens.
-    for (const item of Array.isArray(stored) ? stored : [stored]) if (item?.expiresAt > Date.now()) sessions.set(item.reportId, item);
+    for (const item of Array.isArray(stored) ? stored : [stored]) if (!item?.personal && item?.expiresAt > Date.now()) sessions.set(item.reportId, item);
     storeSessions();
   } catch { sessionStorage.removeItem(key); }
   tick();

@@ -103,7 +103,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
   function checkOrigin(request, origin) {
     if (request.headers["sec-fetch-site"] === "cross-site" || (request.headers.origin && request.headers.origin !== origin)) throw problem(403, "Запрос с другого сайта запрещён");
   }
-  async function browser(request, response, { owner, origin, validateCreate = () => {} }) {
+  async function browser(request, response, { owner, origin, accountOwner, validateCreate = () => {} }) {
     const url = new URL(request.url, origin);
     if (!url.pathname.startsWith("/api/local-import/sessions")) return false;
     checkOrigin(request, origin);
@@ -114,29 +114,34 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     if (url.pathname === "/api/local-import/sessions" && request.method === "GET") {
       if (!managerHash) throw problem(403, "Нужен ключ управления подключениями");
       cleanup();
-      json(response, 200, { sessions: [...sessions.values()].filter(session => session.owner === owner && session.managerHash === managerHash).map(session => browserSession(session, origin)) });
+      json(response, 200, { sessions: [...sessions.values()].filter(session => session.owner === owner && session.managerHash === managerHash && !session.personalOnly && (!session.accountOwner || session.accountOwner === accountOwner)).map(session => browserSession(session, origin)) });
       return true;
     }
     if (url.pathname === "/api/local-import/sessions" && request.method === "POST") {
       const body = await readSmallJson(request); validateCreate(request, body); cleanup();
       if (!ID.test(body.reportId || "") || !body.context || !Array.isArray(body.context.sections)) throw problem(400, "Укажите открытый отчёт");
-      // A new tab or a lost response must not consume another slot for the same report.
-      const existing = managerHash && [...sessions.values()].find(session => session.owner === owner && session.managerHash === managerHash && session.reportId === body.reportId);
+      if (body.personalMcp !== undefined && typeof body.personalMcp !== "boolean") throw problem(400, "Некорректный режим приёма");
+      if (body.personalMcp && !accountOwner) throw problem(403, "Войдите в аккаунт личного MCP");
+      const personalOnly = Boolean(body.personalMcp && accountOwner);
+      // Recover only explicit temporary reception; personal sessions belong to their selected browser workspace.
+      const existing = !personalOnly && managerHash && [...sessions.values()].find(session => !session.personalOnly && session.owner === owner && session.managerHash === managerHash && session.reportId === body.reportId && (!session.accountOwner || session.accountOwner === accountOwner));
       if (existing) { json(response, 200, browserSession(existing, origin)); return true; }
-      if ([...sessions.values()].filter(s => s.owner === owner).length >= 3) throw problem(429, "Приём уже включён в трёх отчётах. Остановите одно из подключений");
+      if ([...sessions.values()].filter(item => item.owner === owner && Boolean(item.personalOnly) === personalOnly).length >= (personalOnly ? 24 : 3)) throw problem(429, personalOnly ? "Закройте неиспользуемые локальные подключения MCP" : "Приём уже включён в трёх отчётах. Остановите одно из подключений");
       if (sessions.size >= 64) throw problem(429, "На сервере достигнут лимит подключений. Повторите позже");
       const contextBytes = Buffer.byteLength(JSON.stringify(body.context));
       if (allocated + contextBytes > maxGlobalBytes) throw problem(429, "Временный буфер занят. Повторите позже");
-      const session = { contextBytes, metadataBytes: contextBytes, id: crypto.randomUUID(), owner, managerHash, reportId: body.reportId, context: body.context, producerToken: crypto.randomBytes(32).toString("hex"), consumerToken: crypto.randomBytes(32).toString("hex"), expiresAt: now() + ttlMs, files: new Map(), batches: new Map(), bytes: 0 };
+      const session = { contextBytes, metadataBytes: contextBytes, id: crypto.randomUUID(), owner, managerHash: personalOnly ? "" : managerHash, accountOwner, personalOnly, reportId: body.reportId, context: body.context, producerToken: crypto.randomBytes(32).toString("hex"), consumerToken: crypto.randomBytes(32).toString("hex"), expiresAt: now() + ttlMs, files: new Map(), batches: new Map(), bytes: 0 };
       sessions.set(session.id, session); allocated += contextBytes;
       json(response, 201, browserSession(session, origin)); return true;
     }
     const match = url.pathname.match(/^\/api\/local-import\/sessions\/([a-zA-Z0-9_-]+)(?:\/(next|ack|files\/([a-zA-Z0-9_-]+)))?$/);
     if (!match) throw problem(404, "Маршрут импорта не найден");
     const session = get(match[1], request.headers["x-qa-import-reader"], "consumer", owner);
+    if (session.accountOwner && session.accountOwner !== accountOwner) throw problem(403, "Войдите в аккаунт подключённого браузера");
     if (!match[2] && request.method === "DELETE") { drop(session); json(response, 200, { ok: true }); return true; }
     if (match[2] === "next" && request.method === "GET") {
       const batch = [...session.batches.values()].find(b => b.status === "pending");
+      batch?.authorize?.();
       json(response, 200, { reportId: session.reportId, expiresAt: session.expiresAt, batch: batch ? { ...batch.payload, files: batch.fileIds.map(id => manifest(session.files.get(id))) } : null }); return true;
     }
     if (match[3] && request.method === "GET") {
@@ -163,7 +168,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     }
     throw problem(405, "Метод не поддерживается");
   }
-  async function producer(request, response, origin) {
+  async function producer(request, response, origin, authorizeWrite) {
     const url = new URL(request.url, origin);
     if (!url.pathname.startsWith("/api/local-import/agent/")) return false;
     checkOrigin(request, origin);
@@ -171,6 +176,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     if (!match) throw problem(404, "Маршрут импорта не найден");
     const token = String(request.headers["x-qa-import-token"] || "");
     const session = get(match[1], token, "producer");
+    if (session.personalOnly && !authorizeWrite) throw problem(403, "Используйте личное MCP-подключение");
     if (match[2] === "context" && request.method === "GET") { json(response, 200, { reportId: session.reportId, expiresAt: session.expiresAt, context: session.context }); return true; }
     if (match[3] && request.method === "PUT") {
       const id = match[3];
@@ -186,6 +192,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
       let complete = false;
       try {
         const bytes = await readBytes(request, Math.min(reserve, maxFileBytes));
+        authorizeWrite?.();
         if (!sessions.has(session.id) || session.expiresAt <= now()) throw problem(410, "Сессия завершена");
         const file = { id, name, bytes, type: fileType(bytes, String(request.headers["content-type"] || "").split(";")[0]) };
         session.bytes += bytes.length - reserve; allocated += bytes.length - reserve;
@@ -197,6 +204,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     }
     if (match[2] === "batches" && request.method === "POST") {
       const body = await readSmallJson(request);
+      authorizeWrite?.();
       if (!sessions.has(session.id) || session.expiresAt <= now()) throw problem(410, "Сессия завершена");
       const fingerprint = crypto.createHash("sha256").update(JSON.stringify(body)).digest("hex");
       const existing = session.batches.get(body.id);
@@ -208,7 +216,7 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
       const fileIds = validateBatch(body, new Map([...session.files].filter(([, f]) => !f.uploading)));
       const metadataBytes = Buffer.byteLength(JSON.stringify(body));
       if (allocated + metadataBytes > maxGlobalBytes) throw problem(429, "Временный буфер занят. Повторите позже");
-      const batch = { id: body.id, payload: body, fileIds, fingerprint, metadataBytes, status: "pending" };
+      const batch = { id: body.id, payload: body, fileIds, fingerprint, metadataBytes, status: "pending", authorize: authorizeWrite };
       allocated += metadataBytes; session.metadataBytes += metadataBytes;
       for (const id of fileIds) session.files.get(id).batchId = body.id;
       session.batches.set(body.id, batch); json(response, 202, receipt(batch)); return true;
@@ -219,6 +227,13 @@ function createLocalImportService({ maxFileBytes = 50 * MB, maxSessionBytes = 10
     }
     throw problem(405, "Метод не поддерживается");
   }
-  return { browser, producer, close() { clearInterval(timer); for (const session of sessions.values()) drop(session); }, cleanup };
+  return { browser, producer, closeForAccount(owner, id) {
+    const session = sessions.get(id);
+    if (owner && session?.accountOwner === owner && session.personalOnly) drop(session);
+  }, forAccount(owner, id, reportId) {
+    cleanup();
+    if (!owner) return undefined;
+    return [...sessions.values()].find(item => item.accountOwner === owner && (id ? item.id === id : item.reportId === reportId));
+  }, close() { clearInterval(timer); for (const session of sessions.values()) drop(session); }, cleanup };
 }
 module.exports = { createLocalImportService, readBytes, fileType, cleanName, problem, validateBatch };

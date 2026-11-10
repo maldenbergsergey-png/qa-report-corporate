@@ -8053,6 +8053,7 @@ async function exportReportFile() {
 }
 const shareReport = Object.fromEntries([
   "Modal", "Title", "Hint", "State", "Spinner", "Status", "Stage", "Detail", "Error", "Options", "Images", "Files", "Statuses",
+  "Exclusions", "ExclusionSummary", "ExclusionSearch", "ExclusionReset", "ExclusionList", "ExclusionEmpty",
   "Links", "Latest", "DateLabel", "Date", "Author", "TargetAuthor", "Access", "Update", "Revoke", "Attempts", "AttemptList", "Open", "Copy", "ChooseLink", "LinkSelect",
   "Close", "Minimize", "Dock", "DockStatus", "DockSpinner", "DockProgress", "Restore",
   "Footer", "Background", "CancelUpdate", "ReplacePending", "Publish", "SignOut",
@@ -8078,6 +8079,76 @@ function setSharedDefaultStatuses(statuses = []) {
     label.append(input, text);
     return label;
   }));
+}
+
+function sharedExcludedRows(value) {
+  return Array.isArray(value?.excludedRows) ? value.excludedRows.filter(row =>
+    typeof row?.sectionId === "string" && typeof row.rowId === "string") : [];
+}
+
+function selectedSharedExclusions() {
+  return [...shareReport.ExclusionList.querySelectorAll("input:checked")].map(input => ({
+    sectionId: input.dataset.sectionId, rowId: input.dataset.rowId,
+  }));
+}
+
+function updateSharedExclusionCount() {
+  const count = selectedSharedExclusions().length;
+  shareReport.ExclusionSummary.textContent = count ? `Исключить пункты · ${count}` : "Исключить пункты";
+  shareReport.ExclusionReset.hidden = count === 0;
+}
+
+function filterSharedExclusions() {
+  const query = shareReport.ExclusionSearch.value.trim().toLocaleLowerCase();
+  let visible = 0;
+  for (const section of shareReport.ExclusionList.children) {
+    let sectionVisible = 0;
+    for (const label of section.querySelectorAll("label")) {
+      label.hidden = Boolean(query && !label.dataset.search.includes(query));
+      if (!label.hidden) sectionVisible++;
+    }
+    section.hidden = sectionVisible === 0;
+    visible += sectionVisible;
+  }
+  shareReport.ExclusionEmpty.hidden = visible > 0;
+}
+
+function renderSharedExclusions(excludedRows = []) {
+  const excluded = new Set(excludedRows.map(row => JSON.stringify([row.sectionId, row.rowId])));
+  const numbers = ChecklistNumbering.rowNumbers(draft);
+  const sections = [];
+  for (const section of draft.sections) {
+    const group = document.createElement("div");
+    group.className = "share-report-exclusion-section";
+    const title = ChecklistNumbering.sectionTitle(draft, section);
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    group.append(heading);
+    section.rows.forEach((row, index) => {
+      const label = document.createElement("label");
+      label.className = "publish-scope-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.sectionId = section.id;
+      input.dataset.rowId = row.id;
+      input.checked = excluded.has(JSON.stringify([section.id, row.id]));
+      const number = numbers.get(row.id) || `Без номера (строка ${index + 1})`;
+      const content = section.columns.map(column => htmlToSpreadsheetText(row.cells[column.id] || "")).join(" ").replace(/\s+/g, " ").trim();
+      const snippet = content.length > 180 ? content.slice(0, 180) + "…" : content || "Без текста";
+      input.setAttribute("aria-label", `${title} · пункт ${number}: ${snippet}`);
+      const text = document.createElement("span");
+      text.textContent = `${number} ${snippet}`;
+      label.dataset.search = `${title} ${number} ${content}`.toLocaleLowerCase();
+      label.append(input, text);
+      group.append(label);
+    });
+    if (section.rows.length) sections.push(group);
+  }
+  shareReport.ExclusionList.replaceChildren(...sections);
+  shareReport.Exclusions.open = excluded.size > 0;
+  shareReport.ExclusionSearch.value = "";
+  updateSharedExclusionCount();
+  filterSharedExclusions();
 }
 
 function sharedReportPrefix(reportId) {
@@ -8191,7 +8262,9 @@ function sharedReportUrl(id, token) {
 }
 
 function sharedSnapshotOptions(source, scope) {
+  const excluded = new Set(sharedExcludedRows(scope).map(row => JSON.stringify([row.sectionId, row.rowId])));
   return {
+    includeRow: (section, row) => !excluded.has(JSON.stringify([section.id, row.id])),
     title: issueKeyFromUrl(source.issueUrl) || "Отчёт о тестировании",
     toText: htmlToSpreadsheetText,
     toCode: node => extractCodeText(node, { preserveWhitespace: true }),
@@ -8223,8 +8296,8 @@ function sharePublicationState(publication, reportId = draft.reportId, { checkPe
   const unknown = { state: "unknown", label: "Не удалось сравнить версии", action: "Скопировать ссылку" };
   const before = window.QaReportJiraPublication.normalizeContent(publication.contentSnapshot);
   if (!before || reportId !== source.reportId) return unknown;
-  const scope = window.QaReportJiraPublication.attachmentOptions(publication);
-  const key = `${localEditGeneration}:${scope.includeImages}:${scope.includeFiles}`;
+  const scope = { ...window.QaReportJiraPublication.attachmentOptions(publication), excludedRows: sharedExcludedRows(publication) };
+  const key = JSON.stringify([localEditGeneration, scope]);
   if (sharedContentCheck?.source !== source || sharedContentCheck?.key !== key) {
     let snapshot;
     try { snapshot = sharedContentSnapshot(source, sharedSnapshotOptions(source, scope)); } catch {}
@@ -8431,6 +8504,7 @@ async function openShareReport(event, mode = "") {
     return;
   }
   if (shareReportBusy) return;
+  flushDraftFromDom();
   const returnFocus = trigger.id === "shareReportExportButton"
     ? elements.copyMenuButton : document.getElementById("publicationMenuButton");
   const context = { reportId: draft.reportId, returnFocus, enabled: false,
@@ -8441,6 +8515,7 @@ async function openShareReport(event, mode = "") {
   shareReport.Images.checked = true;
   shareReport.Files.checked = true;
   setSharedDefaultStatuses();
+  renderSharedExclusions();
   setShareReportError();
   renderSharedLinks();
   if (mode === "new") editSharedSnapshot("new");
@@ -8722,6 +8797,7 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
     includeImages: shareReport.Images.checked,
     includeFiles: shareReport.Files.checked,
     defaultStatuses: [...shareReport.Statuses.querySelectorAll("input:checked")].map(input => input.value),
+    excludedRows: selectedSharedExclusions(),
     ...(updateId && { updateId }),
   };
   let contentSnapshot = attemptedScope?.contentSnapshot;
@@ -8829,7 +8905,8 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
       publication = { ...target, ...publication };
     }
     publication = { ...publication, ...window.QaReportJiraPublication.attachmentOptions(scope),
-      defaultStatuses: scope.defaultStatuses ?? publication.defaultStatuses ?? [], contentSnapshot: contentSnapshot || null };
+      defaultStatuses: scope.defaultStatuses ?? publication.defaultStatuses ?? [],
+      excludedRows: sharedExcludedRows(scope), contentSnapshot: contentSnapshot || null };
     context.selectedPublicationId = publication.id;
     if (rememberSharedPublication(context.reportId, publication)) {
       try { forgetSharedAttempt(context.reportId, publishKey); }
@@ -8955,11 +9032,19 @@ function editSharedSnapshot(mode) {
   shareReport.Images.checked = scope.includeImages;
   shareReport.Files.checked = scope.includeFiles;
   setSharedDefaultStatuses(mode === "new" ? [] : context.latest?.defaultStatuses);
+  flushDraftFromDom();
+  renderSharedExclusions(mode === "new" ? [] : sharedExcludedRows(context.latest));
   setShareReportStatus();
   setShareReportError();
   updateShareReportControls();
   if (context.enabled) shareReport.Images.focus();
 }
+shareReport.ExclusionList.addEventListener("change", updateSharedExclusionCount);
+shareReport.ExclusionSearch.addEventListener("input", filterSharedExclusions);
+shareReport.ExclusionReset.addEventListener("click", () => {
+  for (const input of shareReport.ExclusionList.querySelectorAll("input:checked")) input.checked = false;
+  updateSharedExclusionCount();
+});
 shareReport.Update.addEventListener("click", () => editSharedSnapshot("update"));
 shareReport.ReplacePending.addEventListener("click", () => editSharedSnapshot("replacement"));
 shareReport.CancelUpdate.addEventListener("click", () => {

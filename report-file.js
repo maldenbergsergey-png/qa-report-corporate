@@ -419,6 +419,7 @@
     for (const section of report.sections) {
       const rows = [];
       for (const row of section.rows) {
+        if (options.includeRow && !options.includeRow(section, row)) continue;
         const entries = section.columns.map(column => [column.id, inspectPart(row.cells[column.id], [row.id, column.id])]);
         const bugs = sharedBugs(row);
         if (!sharedRowVisible(row, bugs, entries)) continue;
@@ -433,7 +434,7 @@
   }
 
   async function prepareSharedSnapshot(value, {
-    title, load, toText, toCode, rowNumbers, sectionTitle, includeImages, includeFiles, onProgress, onAttachment, signal,
+    title, load, toText, toCode, rowNumbers, sectionTitle, includeImages, includeFiles, onProgress, onAttachment, signal, includeRow = () => true,
   }) {
     const report = documentFields(value);
     const maximumFile = 50 * 1024 * 1024;
@@ -487,6 +488,7 @@
       const columns = section.columns.map(column => ({ id: column.id, label: column.title }));
       const rows = [];
       for (const row of section.rows) {
+        if (!includeRow(section, row)) continue;
         const entries = [];
         for (const column of columns) entries.push([column.id, await preparePart(row.cells[column.id])]);
         const bugs = sharedBugs(row);
@@ -495,7 +497,7 @@
       }
       if (rows.length) sections.push({ id: section.id, title: sectionTitle(section), columns, rows });
     }
-    if (!sections.length) fail("Добавьте хотя бы один заполненный пункт для публикации.");
+    if (!sections.length) fail("В публикации должен остаться хотя бы один заполненный пункт.");
     return { snapshot: { title, issueUrl: shareLink(shareUrl(report.issueUrl)), environment: report.environment,
       overallStatus: report.overallStatus, intro, sections }, files: [...files.values()] };
   }

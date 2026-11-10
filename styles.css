@@ -6077,6 +6077,21 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .share-report-options .publish-scope-option:hover { background: transparent; }
 .share-report-options .publish-scope-option:focus-within { border-color: transparent; box-shadow: none; }
 .share-report-options .publish-scope-option input:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.share-report-exclusions { min-width: 0; }
+.share-report-exclusions summary { cursor: pointer; font-weight: 700; }
+.share-report-exclusions > :not(summary) { margin-top: 10px; }
+.share-report-exclusions > input {
+  width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--canvas); color: var(--ink); font: inherit;
+}
+.share-report-exclusions > input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.share-report-exclusion-list { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
+.share-report-exclusion-section + .share-report-exclusion-section { margin-top: 14px; }
+.share-report-exclusion-section h3 { margin: 0 0 6px; font-size: 14px; overflow-wrap: anywhere; }
+.share-report-exclusion-section label { align-items: flex-start; font-size: 14px; font-weight: 400; }
+.share-report-exclusion-section label input { flex-shrink: 0; margin-top: 3px; }
+.share-report-exclusion-section label span { min-width: 0; overflow-wrap: anywhere; }
 .share-report-links { display: grid; gap: 12px; }
 .share-report-result { display: grid; gap: 8px; min-width: 0; }
 .share-report-result-meta {

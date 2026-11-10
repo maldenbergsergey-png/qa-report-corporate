@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=6" defer></script>
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=161" />
+    <link rel="stylesheet" href="/styles.css?v=162" />
     <link rel="stylesheet" href="/report-view.css?v=8" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -510,6 +510,14 @@
               <label class="publish-scope-option"><input id="shareReportImages" type="checkbox" checked><span>Включить скриншоты и изображения</span></label>
               <label class="publish-scope-option"><input id="shareReportFiles" type="checkbox" checked><span>Включить остальные файлы</span></label>
             </fieldset>
+            <details class="share-report-exclusions" id="shareReportExclusions">
+              <summary id="shareReportExclusionSummary">Исключить пункты</summary>
+              <p class="share-report-hint" id="shareReportExclusionHint">Отметьте пункты, которые не должны попасть в отчёт по ссылке. В исходном чек-листе они останутся. Номера указаны как в редакторе, отдельно для каждого раздела.</p>
+              <input type="search" id="shareReportExclusionSearch" aria-label="Найти пункт или раздел" placeholder="Найти пункт или раздел" />
+              <button class="share-report-text-action" id="shareReportExclusionReset" type="button" hidden>Снять все исключения</button>
+              <div class="share-report-exclusion-list" id="shareReportExclusionList" role="group" aria-label="Пункты для исключения" aria-describedby="shareReportExclusionHint"></div>
+              <p class="share-report-hint" id="shareReportExclusionEmpty" hidden>Пункты не найдены.</p>
+            </details>
             <fieldset class="share-report-options" aria-describedby="shareReportStatusHint">
               <legend>На что обратить внимание разработчику</legend>
               <p class="share-report-hint" id="shareReportStatusHint">Выберите статусы проверок, требующих внимания разработчика. По ссылке отчёт откроется с фильтром по этим статусам. Без выбора будут показаны все пункты.</p>
@@ -1297,7 +1305,7 @@
     <script src="/checklist-selection.js?v=6"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=140"></script>
+    <script src="/release-notes.js?v=141"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1305,7 +1313,7 @@
     <script src="/import-options.js?v=7"></script>
     <script src="/import-wizard.js?v=6"></script>
     <script src="/file-preview.js?v=4"></script>
-    <script src="/report-file.js?v=8"></script>
+    <script src="/report-file.js?v=9"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=1"></script>
@@ -1423,7 +1431,7 @@
       <a id="corporateProfileAdmin" class="corporate-profile-admin" hidden>Админ-панель · отдельный вход администратора</a>
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
-    <script src="/app.js?v=175"></script>
+    <script src="/app.js?v=176"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=12"></script>

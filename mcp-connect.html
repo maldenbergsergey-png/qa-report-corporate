@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru" data-theme="graphite">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Подключить ассистента — QA Report</title>
+  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/styles.css?v=81">
+  <script src="/login-theme.js?v=2"></script><script src="/mcp-connect.js?v=1" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <h1>Подключить ассистента</h1>
+    <p id="identity"></p>
+    <p>Введите код из своего чата. Ассистент сможет открывать присланные отчёты и работать с назначенными вам проектами до окончания этого входа.</p>
+    <form id="approve">
+      <label class="field"><span>Код из чата</span><input name="code" required maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus></label>
+      <button class="button button-primary" type="submit" disabled>Подтвердить подключение</button>
+    </form>
+    <p id="state" role="status" aria-live="polite"></p>
+  </main>
+</body></html>

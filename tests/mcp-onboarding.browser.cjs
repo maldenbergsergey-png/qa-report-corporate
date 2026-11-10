@@ -110,6 +110,7 @@ async function main() {
     await page.click("#shared-mcp-open");
     await page.waitForFunction(() => !document.getElementById("shared-mcp-copy").disabled);
     await page.locator("#shared-mcp-client").selectOption("json");
+    await page.waitForFunction(() => document.getElementById("shared-mcp-code").value.startsWith("{"));
     const developer = Object.values(JSON.parse(await page.locator("#shared-mcp-code").inputValue()).mcpServers)[0];
     assert.ok(developer.env.QA_REPORT_MCP_ACCESS_TOKEN);
     // Execute exactly the downloaded package from this corporate host, without browser cookies.
@@ -128,6 +129,7 @@ async function main() {
     await page.goto(shareUrl(publication.readToken)); await page.click("#shared-mcp-open");
     await page.waitForFunction(() => !document.getElementById("shared-mcp-copy").disabled);
     await page.locator("#shared-mcp-client").selectOption("json");
+    await page.waitForFunction(() => document.getElementById("shared-mcp-code").value.startsWith("{"));
     const viewer = Object.values(JSON.parse(await page.locator("#shared-mcp-code").inputValue()).mcpServers)[0];
     assert.equal(viewer.env.QA_REPORT_MCP_READ_ONLY, "1");
     const denied = await fetch(origin + "/api/mcp/shared/" + publication.id + "/answers", { method: "POST", headers: {

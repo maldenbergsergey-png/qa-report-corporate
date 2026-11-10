@@ -4,16 +4,16 @@ const { spawn } = require("node:child_process"), { DatabaseSync } = require("nod
 const { initializeSharing } = require("../report-sharing"), { projectOf } = require("../project-mcp-access");
 const { connectMcp } = require("./helpers/qa-report-mcp-client.cjs");
 const root = path.resolve(__dirname, ".."), corporate = fs.existsSync(path.join(root, "auth.js"));
-let app, browser, client, directory, database;
+let app, browser, client, namedClient, directory, database;
 function data(value) { assert.equal(value.error, undefined); assert.notEqual(value.result?.isError, true, JSON.stringify(value)); return JSON.parse(value.result.content[0].text); }
 async function main() {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), "project-mcp-browser-"));
   const listener = http.createServer(); await new Promise(resolve => listener.listen(0, "127.0.0.1", resolve));
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
   const origin = `http://127.0.0.1:${port}`, secret = crypto.randomBytes(32).toString("hex");
-  const env = { ...process.env, NODE_ENV: "development", HOST: "127.0.0.1", PORT: String(port), QA_REPORT_PUBLIC_URL: origin,
+  const env = { ...process.env, NODE_ENV: "development", QA_REPORT_TRUST_PROXY: "true", HOST: "127.0.0.1", PORT: String(port), QA_REPORT_PUBLIC_URL: origin,
     REPORTS_DB_PATH: path.join(directory, "reports.sqlite"), QA_ADMIN_CONFIG_FILE: path.join(directory, "absent.json"),
-    AUTH_SECRET: secret, AUTH_SECRET_FILE: "", QA_REPORT_S3_CONFIG_FILE: "", CLERK_PUBLISHABLE_KEY: "", CLERK_JWT_KEY: "", CLERK_JWT_KEY_FILE: "",
+    AUTH_SECRET: secret, AUTH_SECRET_FILE: "", DEV_LOGIN_EMAIL: "developer@example.test", DEV_LOGIN_PASSWORD: "synthetic-device-login", QA_REPORT_S3_CONFIG_FILE: "", CLERK_PUBLISHABLE_KEY: "", CLERK_JWT_KEY: "", CLERK_JWT_KEY_FILE: "",
     QA_STORAGE_ACCESS_KEY: "", QA_STORAGE_SECRET_KEY: "", QA_STORAGE_ACCESS_KEY_FILE: "", QA_STORAGE_SECRET_KEY_FILE: "" };
   let jwt = "";
   if (!corporate) {
@@ -45,7 +45,7 @@ async function main() {
     app.stderr.on("data", chunk => { log += chunk; }); app.once("exit", code => { clearTimeout(timer); reject(Error("Server exited " + code + ": " + log)); });
   });
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ serviceWorkers: "block", locale: "ru-RU", viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({ serviceWorkers: "block", extraHTTPHeaders: { "X-Forwarded-For": "192.0.2.11" }, locale: "ru-RU", viewport: { width: 1280, height: 900 } });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   async function login() {
     if (corporate) await context.addCookies([{ name: "query-port-session", value: require("../auth").createSessionToken("author@example.test", { env }), url: origin, httpOnly: true, sameSite: "Lax" }]);
@@ -106,11 +106,62 @@ async function main() {
   await page.waitForFunction(() => document.querySelector("[data-project-keys]")?.textContent.includes("отозван"));
   assert.equal((await client.call("qa_report_list_reports")).result.isError, true);
   assert.equal(database.prepare("SELECT revoked_at FROM shared_report_project_keys WHERE id = ?").get(keyId).revoked_at > 0, true);
+  // An author grants projects before the recipient's first login. The same
+  // downloaded MCP remains running during login, grants, revocation and logout.
+  await page.locator("[data-project-install]").click();
+  await page.waitForFunction(() => document.querySelector("[data-project-install-state]").textContent.includes("Вставьте запрос"));
+  const setup = await page.evaluate(() => navigator.clipboard.readText());
+  assert.match(setup, /--links/);
+  const siteGrant = page.locator("[data-project-grant-form]");
+  await siteGrant.locator("[data-project-recipient]").fill("developer@example.test");
+  await siteGrant.locator("[data-project-grant-project]").selectOption(projectOf("https://tasks.example.test/browse/QA-1").id);
+  await siteGrant.locator("[data-project-grant-create]").click();
+  await page.locator("[data-project-grants] .mcp-project-key").first().waitFor();
+  const info = await (await fetch(origin + "/api/mcp/package")).json();
+  const installed = path.join(directory, "qa-report-developer.cjs");
+  const bytes = Buffer.from(await (await fetch(origin + info.developerUrl)).arrayBuffer());
+  assert.ok(setup.includes(crypto.createHash("sha256").update(bytes).digest("hex")));
+  fs.writeFileSync(installed, bytes);
+  const state = { QA_REPORT_MCP_STATE_DIR: path.join(directory, "private") };
+  require("node:child_process").execFileSync(process.execPath, [installed, "--trust", origin], { env: { ...process.env, ...state } });
+  namedClient = await connectMcp(state, undefined, undefined, { command: process.execPath, args: [installed, "--links"] });
+  const pairing = data(await namedClient.call("qa_report_connect", { site: origin }));
+  // The employee browser, author browser and MCP are separate clients behind the test proxy.
+  const employee = await browser.newContext({ serviceWorkers: "block", extraHTTPHeaders: { "X-Forwarded-For": "192.0.2.22" } });
+  const approval = await employee.newPage();
+  await approval.goto(pairing.verificationUrl);
+  await approval.locator("#loginEmail").fill("developer@example.test");
+  await approval.locator("#loginPassword").fill("synthetic-device-login");
+  await approval.locator("#loginSubmit").click();
+  await approval.waitForURL(origin + "/mcp-connect.html");
+  await approval.locator("input[name=code]").fill(pairing.code);
+  await approval.getByRole("button", { name: "Подтвердить подключение" }).click();
+  await approval.waitForFunction(() => document.querySelector("#approve").hidden);
+  assert.ok((await approval.locator("#identity").textContent()).includes("developer@example.test"));
+  const list = query => namedClient.call("qa_report_list_reports", { site: origin, query });
+  const namedReports = data(await list("QA-1")).reports;
+  assert.equal(namedReports.length, 1);
+  const report = data(await namedClient.call("qa_report_read", { url: namedReports[0].url }));
+  data(await namedClient.call("qa_report_save_answer", { reportRef: report.reportRef, sectionId: "section", rowId: "row", revision: 1, comment: "Проверено разработчиком" }));
+  await siteGrant.locator("[data-project-grant-project]").selectOption("");
+  await siteGrant.locator("[data-project-grant-url]").fill("https://tasks.example.test/desk/Task/TWO-1");
+  await siteGrant.locator("[data-project-grant-create]").click();
+  await page.locator("[data-project-grants] .mcp-project-key", { hasText: "TWO" }).waitFor();
+  const later = publish("https://tasks.example.test/desk/Task/TWO-2");
+  assert.equal(data(await list("TWO-2")).reports[0].id, later);
+  await page.locator("[data-project-grants] .mcp-project-key", { hasText: " · QA · " }).getByRole("button").click();
+  await page.waitForFunction(() => document.querySelectorAll("[data-project-grants] .mcp-project-key").length === 1);
+  assert.equal(data(await list("QA-1")).reports.length, 0);
+  assert.equal(data(await list("TWO-2")).reports.length, 1);
+  const csrfEmployee = (await (await employee.request.get(origin + "/api/auth/csrf")).json()).csrfToken;
+  assert.equal((await employee.request.post(origin + "/api/auth/logout", { data: { csrfToken: csrfEmployee } })).status(), 200);
+  assert.equal((await list("TWO-2")).result.isError, true);
+  await employee.close();
   assert.deepEqual(errors, []);
   console.log((corporate ? "Corporate" : "Public") + " project MCP: real account, scoped reports, clean package, future publication, answer, logout and revocation passed. Screenshots: " + directory);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  await client?.close(); await browser?.close();
+  await namedClient?.close(); await client?.close(); await browser?.close();
   if (app && app.exitCode === null) await new Promise(resolve => { app.once("exit", resolve); app.kill(); });
   database?.close();
   if (directory) fs.rmSync(path.join(directory, "npm-cache"), { recursive: true, force: true });

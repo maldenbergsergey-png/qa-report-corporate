@@ -33,28 +33,34 @@ async function buildMcpPackage(root = __dirname) {
   return { bytes, version: app.version, sha256, packageUrl: `/downloads/qa-report-mcp.tgz?v=${sha256}` };
 }
 
-function createMcpDownload(root = __dirname) {
-  let cached;
+function createMcpDownload(root = __dirname, developerAccess = "link") {
+  let cached, developer;
   return async (request, response, pathname) => {
-    if (!["/api/mcp/package", "/downloads/qa-report-mcp.tgz"].includes(pathname)) return false;
+    if (!["/api/mcp/package", "/downloads/qa-report-mcp.tgz", "/downloads/qa-report-developer.cjs"].includes(pathname)) return false;
     if (!["GET", "HEAD"].includes(request.method)) {
       response.writeHead(405, { Allow: "GET, HEAD" }); response.end(); return true;
     }
     cached ??= buildMcpPackage(root).catch(error => { cached = undefined; throw error; });
-    const bundle = await cached;
+    developer ??= fs.readFile(path.join(root, "scripts/shared-report-mcp.cjs")).then(bytes => {
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      return { bytes, sha256, url: "/downloads/qa-report-developer.cjs?v=" + sha256 };
+    }).catch(error => { developer = undefined; throw error; });
+    const [bundle, script] = await Promise.all([cached, developer]);
     if (pathname === "/api/mcp/package") {
-      const payload = JSON.stringify({ version: bundle.version, sha256: bundle.sha256, packageUrl: bundle.packageUrl, node: ">=22" });
+      const payload = JSON.stringify({ version: bundle.version, sha256: bundle.sha256, packageUrl: bundle.packageUrl, developerUrl: script.url, developerAccess, node: ">=22" });
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       response.end(request.method === "HEAD" ? undefined : payload); return true;
     }
     const expected = new URL(request.url, "http://localhost").searchParams.get("v");
-    if (expected && expected !== bundle.sha256) {
+    const standalone = pathname === "/downloads/qa-report-developer.cjs";
+    const artifact = standalone ? script : bundle;
+    if (expected && expected !== artifact.sha256) {
       response.writeHead(409, { "Cache-Control": "no-store" }); response.end("Откройте «AI» и скопируйте обновлённую конфигурацию."); return true;
     }
-    response.writeHead(200, { "Content-Type": "application/gzip", "Content-Length": bundle.bytes.length,
-      "Content-Disposition": `attachment; filename="qa-report-mcp-${bundle.version}.tgz"`, "X-Content-Type-Options": "nosniff",
-      "Cache-Control": expected ? "public, max-age=31536000, immutable" : "no-cache", ETag: `"${bundle.sha256}"` });
-    response.end(request.method === "HEAD" ? undefined : bundle.bytes); return true;
+    response.writeHead(200, { "Content-Type": standalone ? "application/octet-stream" : "application/gzip", "Content-Length": artifact.bytes.length,
+      "Content-Disposition": standalone ? 'attachment; filename="qa-report-developer.cjs"' : `attachment; filename="qa-report-mcp-${bundle.version}.tgz"`, "X-Content-Type-Options": "nosniff",
+      "Cache-Control": expected ? "public, max-age=31536000, immutable" : "no-cache", ETag: `"${artifact.sha256}"` });
+    response.end(request.method === "HEAD" ? undefined : artifact.bytes); return true;
   };
 }
 module.exports = { buildMcpPackage, createMcpDownload };

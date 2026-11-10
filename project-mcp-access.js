@@ -152,6 +152,6 @@ function createProjectMcpAccess({ getDb, readJson, sendJson, requestOrigin, auth
     db().prepare("UPDATE shared_report_project_keys SET last_used_at = ? WHERE id = ?").run(now(), key.id);
     return true;
   }
-  return { browser, machine, authorize };
+  return { browser, machine, authorize, projects };
 }
 module.exports = { createProjectMcpAccess, projectOf };

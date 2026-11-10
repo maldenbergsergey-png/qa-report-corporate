@@ -99,3 +99,60 @@ test("concurrent first reads cannot bind one session to two published reports", 
   assert.equal(data(first).id, f.publication.id); failed(blocked);
   assert.equal(data(await client.call("qa_report_read")).id, f.publication.id);
 });
+
+test("one downloaded offline launcher reads multiple sites and isolates links, write handles and approvals", async t => {
+  const fs = require("node:fs/promises"), os = require("node:os"), path = require("node:path");
+  const { promisify } = require("node:util"), execFile = promisify(require("node:child_process").execFile);
+  const { createHash } = require("node:crypto");
+  const { connectMcp } = require("./helpers/qa-report-mcp-client.cjs");
+  const { buildDeveloperInstall } = require("../shared-mcp-setup");
+  let redirectTo, leaked = false;
+  const a = await fixture(t, { intercept(req, res, pathname) {
+    if (redirectTo && pathname.startsWith("/api/shared-reports/")) { res.writeHead(307, { Location: redirectTo }); res.end(); return true; }
+  } });
+  const b = await fixture(t, { legacy: true, intercept(req, res, pathname) {
+    if (pathname === "/sink" || req.headers["x-qa-developer-device"]) leaked = true;
+  } });
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "qa-report-links-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const meta = await (await fetch(a.origin + "/api/mcp/package")).json();
+  const source = Buffer.from(await (await fetch(a.origin + meta.developerUrl)).arrayBuffer());
+  assert.equal(createHash("sha256").update(source).digest("hex"), new URL(meta.developerUrl, a.origin).searchParams.get("v"));
+  const setup = buildDeveloperInstall({ origin: a.origin, developerUrl: meta.developerUrl, client: "claude-chat" });
+  assert.match(setup.code, /qa-report-developer/); assert.match(setup.code, /--links/);
+  assert.ok(!setup.code.includes(a.publication.replyToken));
+  assert.throws(() => buildDeveloperInstall({ origin: a.origin, developerUrl: b.origin + meta.developerUrl }));
+  const script = path.join(directory, "installed.cjs");
+  await fs.writeFile(script, source);
+  const env = { QA_REPORT_MCP_STATE_DIR: directory };
+  const trust = origin => execFile(process.execPath, [script, "--trust", origin], { env: { ...process.env, ...env } });
+  const launch = () => connectMcp(env, undefined, undefined, { command: process.execPath, args: [script, "--links"] });
+  const client = await launch(); t.after(() => client.close());
+  assert.equal(data(await client.call("qa_report_capabilities")).scope, "developer-links");
+  const unknown = await client.call("qa_report_read", { url: a.url(a.publication.replyToken) });
+  assert.match(unknown.result.content[0].text, /--trust/);
+  await Promise.all([trust(a.origin), trust(a.origin), trust(b.origin)]);
+  const first = data(await client.call("qa_report_read", { url: a.url(a.publication.replyToken) }));
+  const second = data(await client.call("qa_report_read", { url: b.url(b.publication.replyToken) }));
+  const readOnly = data(await client.call("qa_report_read", { url: a.url(a.publication.readToken) }));
+  assert.notEqual(first.reportRef, second.reportRef); assert.notEqual(first.reportRef, readOnly.reportRef);
+  assert.equal(readOnly.canReply, false);
+  const update = { ...point, revision: 0, status: "fixed" };
+  failed(await client.call("qa_report_save_answer", { ...update, reportRef: readOnly.reportRef }));
+  failed(await client.call("qa_report_save_answer", { ...update }));
+  failed(await client.call("qa_report_save_answer", { ...update, reportRef: second.reportRef, comment: a.publication.replyToken }));
+  data(await client.call("qa_report_save_answer", { ...update, reportRef: second.reportRef }));
+  assert.equal((await a.read()).data.report.answers.length, 0);
+  assert.equal((await b.read()).data.report.answers[0].status, "fixed");
+  assert.equal((await b.read()).data.report.sections[0].rows[0].status, "NOT_OK");
+  failed(await client.call("qa_report_read", { url: b.origin + "/shared-report/" + b.publication.id }));
+  a.db.prepare("UPDATE shared_publications SET revoked_at=? WHERE id=?").run(new Date().toISOString(), first.id);
+  failed(await client.call("qa_report_save_answer", { ...update, reportRef: first.reportRef }));
+  redirectTo = b.origin + "/sink";
+  failed(await client.call("qa_report_read", { url: a.url(a.publication.readToken) }));
+  assert.equal(leaked, false);
+  const restart = await launch(); t.after(() => restart.close());
+  assert.equal(data(await restart.call("qa_report_read", { url: b.url(b.publication.readToken) })).id, second.id);
+  failed(await restart.call("qa_report_save_answer", { ...update, reportRef: second.reportRef }));
+  for (const secret of [a.publication.replyToken,b.publication.replyToken]) assert.ok(!JSON.stringify(client.messages).includes(secret));
+});

@@ -3,6 +3,7 @@ const http = require("node:http");
 const { createPersonalMcpAccess } = require("./personal-mcp-access");
 const { createProjectMcpAccess } = require("./project-mcp-access");
 const { createMcpDownload } = require("./mcp-download");
+const { createDeveloperAccess } = require("./developer-mcp-access");
 const { createMcpConnections } = require("./mcp-connections");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -297,6 +298,7 @@ async function handleLogout(request, response) {
   }
   audit(request, response, "session_logout");
   mcpConnections.revokeSession(request.user);
+  developerAccess.revokeSession(request.user);
   response.setHeader("Set-Cookie", clearSessionCookie());
   sendJson(response, 200, { ok: true });
 }
@@ -1547,9 +1549,9 @@ const personalCloud = createPersonalCloud({
   storage: () => createCorporateStorage(),
 });
 
-let projectMcp;
+let projectMcp, developerAccess;
 const reportSharing = createReportSharing({
-  projectAccess: (request, row) => projectMcp?.authorize(request, row),
+  projectAccess: (request, row) => developerAccess?.authorize(request, row) || projectMcp?.authorize(request, row),
   getDb: getReportsDb, readJson, sendJson, requestOrigin,
   publicationSettings,
   configPath: objectStorageConfigured() ? "corporate-storage" : undefined,
@@ -1586,7 +1588,8 @@ const personalMcp = createPersonalMcpAccess({ getDb: getReportsDb, readJson, sen
   },
 });
 
-const mcpDownload = createMcpDownload();
+developerAccess = createDeveloperAccess({ getDb: getReportsDb, readJson, sendJson, verifyCsrf, reportSharing, projects: projectMcp.projects, audit });
+const mcpDownload = createMcpDownload(__dirname, "account");
 const mcpConnections = createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, audit });
 const server = http.createServer(async (request, response) => {
   applySecurityHeaders(response);
@@ -1601,6 +1604,7 @@ const server = http.createServer(async (request, response) => {
     if (await mcpDownload(request, response, requestPath)) return;
     if (await personalMcp.machine(request, response, requestPath)) return;
     if (await projectMcp.machine(request, response, requestPath)) return;
+    if (await developerAccess.machine(request, response, requestPath)) return;
     if (await mcpConnections.machine(request, response, requestPath)) return;
     if (request.method === "GET" && requestPath === "/api/health") {
       sendJson(response, 200, {
@@ -1668,6 +1672,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (await personalMcp.browser(request, response, requestPath)) return;
     if (await projectMcp.browser(request, response, requestPath)) return;
+    if (await developerAccess.browser(request, response, requestPath)) return;
     if (await mcpConnections.browser(request, response, requestPath)) return;
     if (requestPath === "/api/usage/visit") { await adminService.collect(request, response); return; }
     if (requestPath.startsWith("/api/shared-reports") || /^\/shared-report\/[a-f0-9]{32}$/.test(requestPath)) {

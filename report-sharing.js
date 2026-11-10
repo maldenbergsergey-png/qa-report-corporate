@@ -1047,9 +1047,9 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   }
 
   async function answer(request, id) {
-    const row = authorizeAnswer(request, id);
+    authorizeAnswer(request, id);
     const body = await readJson(request, 128 * 1024);
-    projectAccess?.(request, publication(id));
+    const row = authorizeAnswer(request, id);
     const sectionId = identifier(body?.sectionId);
     const rowId = identifier(body?.rowId);
     const { revision } = body;

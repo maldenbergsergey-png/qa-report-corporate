@@ -8,7 +8,7 @@ const { createReportSharing } = require("../../report-sharing");
 const { createMcpDownload } = require("../../mcp-download");
 const { connectMcp } = require("./qa-report-mcp-client.cjs");
 
-async function fixture(t) {
+async function fixture(t, { legacy = false, intercept } = {}) {
   const db = new DatabaseSync(":memory:"), objects = new Map();
   let origin, concurrentWrite;
   const service = createReportSharing({ getDb: () => db, allowLocal: true, configPath: "synthetic.json", requestOrigin: () => origin,
@@ -25,6 +25,12 @@ async function fixture(t) {
   const server = http.createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url, origin).pathname;
+      if (intercept?.(req, res, pathname)) return;
+      if (legacy && pathname === "/api/mcp/package") {
+        const sha256 = "a".repeat(64);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ version: "0.32.0", sha256, packageUrl: "/downloads/qa-report-mcp.tgz?v=" + sha256, node: ">=22" })); return;
+      }
       if (await download(req, res, pathname)) return;
       const file = /^\/shared-report\/[a-f0-9]{32}$/.test(pathname) ? "shared-report.html" : pathname.slice(1);
       if (req.method === "GET" && (file === "shared-report.html" || assets.has(file))) {

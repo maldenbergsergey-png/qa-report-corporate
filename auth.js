@@ -51,6 +51,12 @@ function sessionSecret(env = process.env) {
   return secret;
 }
 
+// Bind a delegated device to the current session signing key without storing a reusable web cookie.
+function developerSessionProof(email, issuedAt, expiresAt, env = process.env) {
+  return crypto.createHmac("sha256", sessionSecret(env))
+    .update(JSON.stringify(["developer-mcp", email, issuedAt, expiresAt])).digest("hex");
+}
+
 function createSessionToken(email, { env = process.env, now = Date.now() } = {}) {
   const normalized = normalizeEmail(email);
   if (!normalized) throw new Error("Некорректный email");
@@ -255,7 +261,7 @@ async function authenticateLdap(email, password, { env = process.env, createClie
 
 module.exports = {
   SESSION_MAX_AGE_SECONDS, SESSION_COOKIE, CSRF_COOKIE, normalizeEmail, escapeLdapFilter,
-  createSessionToken, verifySessionToken, sessionFromRequest, sessionCookie, clearSessionCookie,
+  createSessionToken, developerSessionProof, verifySessionToken, sessionFromRequest, sessionCookie, clearSessionCookie,
   createCsrfToken, csrfCookie, verifyCsrf, sanitizeCallbackUrl, clientIp,
   createLoginRateLimiter, ldapConfig, authenticateLdap,
   authenticateDevelopmentAccount,

@@ -41,7 +41,11 @@ test("package metadata and download are public, bounded to exact routes and supp
   }
   const info = await call("/api/mcp/package"); assert.equal(info.status, 200);
   const metadata = JSON.parse(info.body);
-  assert.deepEqual(Object.keys(metadata).sort(), ["node", "packageUrl", "sha256", "version"]);
+  assert.deepEqual(Object.keys(metadata).sort(), ["developerAccess", "developerUrl", "node", "packageUrl", "sha256", "version"]);
+  assert.equal(metadata.developerAccess, "link");
+  const script = await call(metadata.developerUrl);
+  assert.equal(script.status, 200); assert.ok(metadata.developerUrl.endsWith(createHash("sha256").update(script.body).digest("hex")));
+  assert.equal((await call("/downloads/qa-report-developer.cjs?v=wrong")).status, 409);
   const downloaded = await call(metadata.packageUrl); assert.equal(downloaded.status, 200);
   assert.equal(createHash("sha256").update(downloaded.body).digest("hex"), metadata.sha256);
   const head = await call(metadata.packageUrl, "HEAD"); assert.equal(head.status, 200); assert.equal(head.body, undefined);

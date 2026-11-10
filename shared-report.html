@@ -16,7 +16,7 @@
     <script src="/tracker-links.js?v=5" defer></script>
     <script src="/report-view.js?v=11" defer></script>
     <script src="/shared-table-layout.js?v=2" defer></script>
-    <script src="/shared-mcp-setup.js?v=4" defer></script>
+    <script src="/shared-mcp-setup.js?v=5" defer></script>
     <script src="/shared-report.js?v=38" defer></script>
   </head>
   <body>
@@ -158,17 +158,16 @@
       <header><h2 id="shared-mcp-title">Подключить ИИ к отчёту</h2><button id="shared-mcp-close" type="button" aria-label="Закрыть подключение">×</button></header>
       <p id="shared-mcp-permission"></p>
       <ol>
-        <li>Установите <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 22 или новее</a>, если он ещё не установлен.</li>
-        <li>Выберите клиент, выполните команду в терминале по подсказке ниже.</li>
-        <li>Попросите ассистента прочитать замечания и после исправлений обновить статусы и комментарии к нужным пунктам.</li>
+        <li>Выберите ассистента и вставьте запрос подключения в его чат.</li>
+        <li>Попросите прочитать замечания и записать результаты исправлений.</li>
       </ol>
       <div class="shared-mcp-choices">
-        <label>Клиент<select id="shared-mcp-client"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="json">Другой клиент (JSON)</option><option value="codex-config">Codex (настройки вручную)</option></select></label>
+        <label>Клиент<select id="shared-mcp-client"><option value="codex-chat">Codex — через чат</option><option value="claude-chat">Claude Code — через чат</option><optgroup label="Настроить вручную"><option value="codex">Codex — команда</option><option value="claude">Claude Code — команда</option><option value="json">Другой клиент — JSON</option><option value="codex-config">Codex — TOML</option></optgroup></select></label>
         <label>Система<select id="shared-mcp-platform"><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label>
       </div>
       <p id="shared-mcp-help"></p>
       <textarea id="shared-mcp-code" readonly spellcheck="false" aria-label="Конфигурация подключения ИИ"></textarea>
-      <p class="shared-mcp-note">Клиент запускает сервер автоматически. При первом запуске нужен интернет для загрузки сервера и зависимостей. Настройка содержит ключ доступа к этому отчёту: храните её в личных настройках и не добавляйте в репозиторий. Вкладку отчёта можно закрыть.</p>
+      <p class="shared-mcp-note">Нужен <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 22+</a>. Запрос содержит ключ доступа — храните его в личных настройках. Вкладку отчёта можно закрыть.</p>
       <footer><button id="shared-mcp-copy" type="button" disabled>Скопировать подключение</button><button id="shared-mcp-disconnect" type="button" hidden>Отключить ИИ</button><span id="shared-mcp-state" role="status"></span></footer>
     </dialog>
     <dialog id="shared-viewer" class="shared-viewer" aria-labelledby="shared-viewer-title">

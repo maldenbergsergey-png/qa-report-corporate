@@ -96,3 +96,24 @@ test("QA setup pins its temporary receipt, separates roles and quotes local path
   const corporate = Object.values(JSON.parse(buildSetup({ shareUrl, packageUrl, accessToken: "e".repeat(64), client: "json" }).code).mcpServers)[0];
   assert.equal(corporate.env.QA_REPORT_MCP_ACCESS_TOKEN, "e".repeat(64));
 });
+
+
+test("chat installation request preserves exact launch settings for each role and never treats the API URL as HTTP MCP", () => {
+  const roles = [
+    { shareUrl },
+    { connection: { url: "https://reports.example/api/local-import/agent/session", token: "d".repeat(64) }, fileRoot: "/tmp/QA files" },
+    { personal: { url: "https://reports.example/api/mcp/personal", token: "e".repeat(43) } },
+    { project: { url: "https://reports.example/api/mcp/projects/" + "f".repeat(32) + "/reports", token: "g".repeat(43) }, readOnly: true },
+  ];
+  for (const role of roles) for (const windows of [false, true]) for (const client of ["codex-chat", "claude-chat"]) {
+    const chat = buildSetup({ ...role, packageUrl, windows, client });
+    assert.match(chat.code, /^Подключи MCP QA Report/);
+    assert.match(chat.code, /локальный сервер stdio/);
+    assert.match(chat.code, /qa_report_capabilities/);
+    assert.match(chat.code, /не заявляй об успешном соединении без проверки/);
+    assert.match(chat.help, /Вставьте запрос в чат/);
+    const payload = JSON.parse(chat.code.split("Параметры подключения (JSON):\n")[1]);
+    assert.deepEqual(payload, JSON.parse(buildSetup({ ...role, packageUrl, windows, client: "json" }).code));
+    assert.ok(Object.values(payload.mcpServers).every(server => !server.url));
+  }
+});

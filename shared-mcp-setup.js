@@ -1,6 +1,19 @@
 (function (root) {
   "use strict";
   function buildSetup({ shareUrl, connection, project, personal, packageUrl, client = "codex", windows = false, readOnly = false, fileRoot = "", accessToken = "" }) {
+    if (["codex-chat", "claude-chat"].includes(client)) {
+      const assistant = client === "codex-chat" ? "Codex" : "Claude Code";
+      const settings = buildSetup({ shareUrl, connection, project, personal, packageUrl, client: "json", windows, readOnly, fileRoot, accessToken });
+      const scope = client === "codex-chat"
+        ? "Для Codex используй личный ~/.codex/config.toml (таблицы mcp_servers), сохрани остальные настройки и задай startup_timeout_sec = 120."
+        : "Для Claude Code используй пользовательскую область MCP (scope user), сохрани остальные подключения.";
+      const code = `Подключи MCP QA Report в моём ${assistant}, используя параметры JSON ниже. Настрой подключение сам через доступные тебе инструменты. ${scope}
+Это локальный сервер stdio: URL в env относится к API QA Report, его нельзя регистрировать как удалённый HTTP MCP. Проверь Node.js 22+ и npx; если их нет, помоги установить. Секрет сохраняй только в личных настройках, не в репозитории, и не повторяй его в ответе.
+После настройки переподключи MCP и вызови qa_report_capabilities для проверки. Данные чек-листов при проверке не меняй. Если инструменты ещё недоступны, объясни, как перезапустить подключение или открыть новый чат; не заявляй об успешном соединении без проверки. Если не хватает прав, сообщи, какое разрешение нужно.
+Параметры подключения (JSON):
+${settings.code}`;
+      return { code, help: `Вставьте запрос в чат ${assistant} с доступом к настройкам.` };
+    }
     if ([shareUrl, connection, project, personal].filter(Boolean).length !== 1) throw new Error("Выберите одно подключение");
     const target = new URL(shareUrl || connection?.url || project?.url || personal.url), bundle = new URL(packageUrl, target.origin);
     const local = target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
@@ -60,7 +73,7 @@
       if (!packageUrl) return;
       if (corporate && (!temporary || temporary.expiresAt <= Date.now())) { code.value = ""; copy.disabled = true; state.textContent = "Подключение истекло. Закройте окно и подключите ИИ заново."; return; }
       const setup = buildSetup({ shareUrl, packageUrl, client: client.value, windows: platform.value === "windows", readOnly: !canReply, accessToken: temporary?.token });
-      code.value = setup.code; help.textContent = setup.help; state.textContent = ""; copy.disabled = false;
+      code.value = setup.code; help.textContent = setup.help; copy.textContent = client.value.endsWith("-chat") ? "Скопировать запрос" : "Скопировать настройки"; state.textContent = ""; copy.disabled = false;
       if (corporate) state.textContent = "Доступ до " + new Date(temporary.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ". Выйдя из аккаунта, вы отключите ИИ.";
       if (disconnect) disconnect.hidden = !temporary;
     }
@@ -81,7 +94,7 @@
     });
     copy.addEventListener("click", async () => {
       if (corporate && temporary?.expiresAt <= Date.now()) { update(); return; }
-      try { await navigator.clipboard.writeText(code.value); state.textContent = "Скопировано. Добавьте подключение в выбранный клиент."; }
+      try { await navigator.clipboard.writeText(code.value); state.textContent = client.value.endsWith("-chat") ? "Запрос скопирован. Вставьте его в чат ассистента." : "Настройки скопированы."; }
       catch { code.focus(); code.select(); state.textContent = "Скопируйте выделенный текст вручную."; }
     });
     disconnect?.addEventListener("click", async () => {

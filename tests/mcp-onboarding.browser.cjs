@@ -41,6 +41,12 @@ async function main() {
   if (corporate) await page.click("#corporateProfileButton");
   await page.locator(corporate ? "#corporateProfileDialog [data-mcp-open]" : "#profilePage [data-mcp-open]").click();
   await page.locator("#mcpSettingsDialog").waitFor();
+  assert.equal(await page.getByRole("tab", { name: "Личный MCP", exact: true }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator('[data-mcp-panel="developer"]').isVisible(), false);
+  await page.getByRole("tab", { name: "Личный MCP", exact: true }).focus(); await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getByRole("tab", { name: "Для разработчика", exact: true }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator('[data-mcp-panel="personal"]').isVisible(), false);
+  await page.keyboard.press("Home");
   assert.equal(await page.locator("#mcpSettingsDialog [data-setup]").isVisible(), false);
   await page.screenshot({ path: path.join(directory, "guide-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -68,9 +74,10 @@ async function main() {
   assert.equal(await reportSelect.inputValue(), "");
   assert.equal(await reportSelect.locator("option").count(), 3);
   assert.equal(await page.locator("#mcpSettingsDialog [data-setup]").isVisible(), false);
+  await page.locator("[data-temporary] > summary").click();
   await reportSelect.selectOption(firstSession.id);
   await page.waitForFunction(() => !document.querySelector("#mcpSettingsDialog [data-copy]").disabled);
-  assert.match(await page.locator("#mcpSettingsDialog [data-code]").inputValue(), /^codex mcp add /);
+  assert.match(await page.locator("#mcpSettingsDialog [data-code]").inputValue(), /^Подключи MCP QA Report/);
   await page.locator("#mcpSettingsDialog [data-client]").selectOption("json");
   await page.locator("#mcpSettingsDialog [data-copy]").click();
   const setup = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));

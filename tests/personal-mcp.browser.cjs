@@ -79,8 +79,12 @@ async function main() {
   await page.locator("[data-personal-lifetime]").selectOption("");
   await page.locator("[data-personal-create]").click();
   await page.locator("[data-personal-issued]").waitFor();
+  await page.locator("[data-personal-copy]").click();
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^Подключи MCP QA Report/);
+  assert.equal(await page.locator("[data-personal-options]").getAttribute("open"), null);
+  await page.screenshot({ path: path.join(directory, "personal-chat.png") });
   await page.locator("[data-personal-client]").selectOption("json");
-  await page.locator(".personal-mcp summary").click();
+  if (!await page.locator("[data-personal-files]").isVisible()) await page.locator("[data-personal-options] > summary").click();
   await page.locator("[data-personal-files]").fill(directory);
   fs.writeFileSync(path.join(directory,"agent-log.txt"),"Synthetic log from QA verification");
   await page.locator("[data-personal-copy]").click();
@@ -88,7 +92,7 @@ async function main() {
   const tokenHash=crypto.createHash("sha256").update(launch.env.QA_REPORT_PERSONAL_TOKEN).digest("hex");
   assert.equal(database.prepare("SELECT expires_at FROM personal_mcp_tokens WHERE token_hash=?").get(tokenHash).expires_at,null);
   await page.locator("[data-personal-browser]").click();
-  await page.waitForFunction(()=>document.querySelector("[data-personal-browser-state]").textContent.includes("Браузер подключён"));
+  await page.waitForFunction(()=>document.querySelector("[data-personal-browser-state]").textContent.includes("Подключён ·"));
   await page.locator(".personal-mcp h3").scrollIntoViewIfNeeded();
   await page.screenshot({path:path.join(directory,"personal-desktop.png")});
   await page.setViewportSize({width:390,height:844});
@@ -128,7 +132,7 @@ async function main() {
   reader=await connectMcp(readLaunch.env);
   assert.equal((await reader.request("tools/list",{})).result.tools.some(tool=>tool.name==="qa_report_update_cells"),false);
   await page.evaluate(()=>window.dispatchEvent(new Event("qa-report-account-change")));
-  await page.waitForFunction(()=>document.querySelector("[data-personal-browser-state]").textContent.includes("Браузер отключён"));
+  await page.waitForFunction(()=>document.querySelector("[data-personal-browser-state]").textContent.includes("Отключён."));
   assert.equal(data(await reader.call("qa_report_list_reports",{query:"SHOP-"})).reports.length,0);
   if(corporate) {
     const csrf=(await(await context.request.get(origin+"/api/auth/csrf")).json()).csrfToken;

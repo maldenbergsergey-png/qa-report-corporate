@@ -65,6 +65,7 @@ async function main() {
     await page.goto(corporate ? origin : origin + "/profile");
     if (corporate) await page.click("#corporateProfileButton");
     await page.locator(corporate ? "#corporateProfileDialog [data-mcp-open]" : "#profilePage [data-mcp-open]").click();
+    await page.getByRole("tab", { name: "Для разработчика", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("[data-project-select] option").length === 4);
   }
   await open();
@@ -72,6 +73,9 @@ async function main() {
   await page.locator("[data-project-label]").fill("Frontend developer");
   await page.locator("[data-project-create]").click();
   await page.locator("[data-project-issued]").waitFor();
+  await page.locator("[data-project-copy]").click();
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^Подключи MCP QA Report/);
+  assert.equal(await page.locator("[data-project-options]").getAttribute("open"), null);
   await page.locator("[data-project-client]").selectOption("json");
   await page.locator("[data-project-copy]").click();
   const launch = Object.values(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())).mcpServers)[0];

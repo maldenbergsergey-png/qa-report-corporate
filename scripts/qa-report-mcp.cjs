@@ -181,7 +181,7 @@ function createQaReportMcp(env = process.env) {
     }
     const response = await fetch(endpoint, {
       method, redirect: "error", signal: AbortSignal.timeout(20000), body,
-      headers: { ...(config.mode === "personal" ? { Authorization: "Bearer " + config.token, ...personalHeaders } : { "X-QA-Import-Token": config.token }),
+      headers: { ...(config.mode === "personal" ? { "X-QA-Personal-Token": config.token, Authorization: "Bearer " + config.token, ...personalHeaders } : { "X-QA-Import-Token": config.token }),
         ...(json === undefined ? {} : { "Content-Type": "application/json; charset=utf-8" }), ...headers },
     });
     if (!response.ok) {

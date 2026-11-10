@@ -68,6 +68,23 @@ async function main() {
     await page.locator("[data-personal-form]").waitFor();
   }
   await open();
+  const dialog = page.locator("#mcpSettingsDialog");
+  const tab = dialog.getByRole("tab", { name: "Личный MCP" });
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    for (const theme of ["light", "dark", "graphite"]) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      const styles = await tab.evaluate(node => {
+        const props = ["backgroundColor", "color", "fontSize", "fontWeight", "borderRadius", "padding", "outlineWidth"];
+        return [node, document.querySelector("#importModal .import-source-tab.active")].map(el => props.map(p => getComputedStyle(el)[p]));
+      });
+      assert.deepEqual(styles[0], styles[1]);
+      const bounds = await dialog.boundingBox();
+      assert.ok(bounds.width <= width && bounds.height < page.viewportSize().height - 40);
+      await dialog.screenshot({ path: path.join(directory, `personal-${theme}-${width}.png`) });
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.evaluate(async () => {
     const values = ["aaa0001", "aaa0002"].map((publicId,index) => normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId:"personal_fixture_"+index, publicId,
       issueUrl:"https://tasks.example.test/desk/Task/SHOP-"+(index+1), environment:index ? "PROD" : "STAGE",

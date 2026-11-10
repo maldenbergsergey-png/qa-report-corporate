@@ -107,8 +107,9 @@ function createPersonalMcpAccess({ getDb, readJson, sendJson, requestOrigin, aut
     fail(405, "Метод не поддерживается.");
   }
   function token(request) {
-    const secret = String(request.headers.authorization || "").match(/^Bearer ([a-zA-Z0-9_-]{43})$/)?.[1];
-    if (!secret) fail(401, "Нужен личный токен MCP.");
+    const legacy = request.headers.authorization;
+    const secret = request.headers["x-qa-personal-token"] ?? legacy?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+    if (typeof secret !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(secret) || (legacy && legacy !== "Bearer " + secret)) fail(401, "Нужен личный токен MCP.");
     const row = db().prepare(`SELECT * FROM personal_mcp_tokens WHERE token_hash=? AND ${activeSql}`).get(digest(secret), now());
     if (!row) fail(401, "Личный токен отозван или истёк.");
     return row;

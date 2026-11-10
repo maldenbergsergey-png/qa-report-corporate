@@ -8547,7 +8547,7 @@ async function requestSharedReport(path, { method = "POST", body, token, timeout
     method, credentials: "same-origin", cache: "no-store", redirect: "error",
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     headers: { ...(body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { "X-QA-Report-Token": token, Authorization: `Bearer ${token}` } : {}),
       ...(csrfToken ? { "X-QA-CSRF-Token": csrfToken } : {}) }, body,
   });
   const data = await response.json().catch(() => null);

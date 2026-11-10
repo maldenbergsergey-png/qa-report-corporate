@@ -26,7 +26,12 @@ async function main() {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  await context.route("**/*", route => {
+    if (new URL(route.request().url()).origin !== origin) return route.abort();
+    const headers = route.request().headers();
+    delete headers.authorization; // The corporate reverse proxy removes this header.
+    return route.continue({ headers });
+  });
   if (corporate) {
     const { createSessionToken } = require("../auth");
     await context.addCookies([{ name: "query-port-session", value: createSessionToken("qa@example.test", { env: authEnv }), url: origin, httpOnly: true, sameSite: "Lax" }]);

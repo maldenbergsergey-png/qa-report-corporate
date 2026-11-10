@@ -100,6 +100,7 @@ async function request(share, suffix = "", body) {
   const headers = { Authorization: `Bearer ${share.token}` };
   if (share.mcpAccessToken) headers["X-QA-MCP-Token"] = share.mcpAccessToken;
   if (body) headers["Content-Type"] = "application/json";
+  if (share.device || share.mcpAccessToken || share.projectPath) headers["X-QA-Report-Token"] = share.token;
   if (share.device) headers["X-QA-Developer-Device"] = share.device;
   const endpoint = share.projectPath ? share.projectPath + (share.id ? "/" + share.id : "") : `${share.mcpAccessToken ? "/api/mcp/shared/" : "/api/shared-reports/"}${share.id}`;
   const response = await siteFetch(share.origin, endpoint + suffix, {
@@ -354,7 +355,7 @@ function createLinksRunner() {
     if (name === "qa_report_connect") {
       const target = await site(args.site);
       if (target.mode !== "account") return JSON.stringify({ access: "link", message: "Откройте полную ссылку на отчёт через qa_report_read." });
-      const response = await siteFetch(target.origin, "/api/mcp/developer/pair", { method: "POST", headers: { Authorization: "Bearer " + target.device } });
+      const response = await siteFetch(target.origin, "/api/mcp/developer/pair", { method: "POST", headers: { "X-QA-Developer-Device": target.device, Authorization: "Bearer " + target.device } });
       if (!response.ok) { await response.body?.cancel(); throw new ToolError("Не удалось начать привязку. Проверьте доступ к серверу или повторите позже."); }
       const value = await readJson(response);
       if (value.connected === true) return JSON.stringify({ connected: true, expiresAt: value.expiresAt });

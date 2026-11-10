@@ -18,6 +18,9 @@
       return { provider: "eva", baseUrl: url.origin + match[1], key, issueUrl: url.origin + match[1] + "/desk/Task/" + encodeURIComponent(key) };
     } catch { return null; }
   }
+  function projectKey(issueKey) {
+    return typeof issueKey === "string" ? issueKey.trim().match(/^([\p{L}\p{N}_][\p{L}\p{N}_-]{0,99})-\d+$/u)?.[1]?.toUpperCase() || "" : "";
+  }
   function commentId(value) {
     try {
       if (!parse(value, "eva")) return "";
@@ -41,7 +44,7 @@
       } catch {}
     }
   }
-  const api = { parse, commentId, wikiLinks, identity: value => parse(value)?.issueUrl || "" };
+  const api = { parse, projectKey, commentId, wikiLinks, identity: value => parse(value)?.issueUrl || "" };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QaReportTrackerLinks = api;
 })(typeof window === "object" ? window : globalThis);

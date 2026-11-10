@@ -1,5 +1,6 @@
 "use strict";
 const { createHash, randomBytes } = require("node:crypto");
+const { reportToken } = require("./report-sharing");
 const digest = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
@@ -29,7 +30,7 @@ function createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, a
     // Use the existing report authorization, including live link revocation.
     const probe = Object.create(request);
     probe.method = "GET"; probe.url = `/api/shared-reports/${body.reportId}`;
-    probe.headers = { ...request.headers, authorization: `Bearer ${body.reportToken}` };
+    probe.headers = { ...request.headers, "x-qa-report-token": body.reportToken, authorization: `Bearer ${body.reportToken}` };
     let status, payload;
     const capture = { writeHead(value) { status = value; }, end(value) { payload = JSON.parse(value); } };
     await reportSharing(probe, capture, probe.url);
@@ -52,8 +53,8 @@ function createMcpConnections({ reportSharing, readJson, sendJson, verifyCsrf, a
     const item = typeof token === "string" && /^[a-f0-9]{64}$/.test(token) && connections.get(digest(token));
     if (!item) fail(401, "Подключение ИИ истекло или отключено. Откройте отчёт после корпоративного входа и подключите ИИ заново");
     const match = pathname.match(/^\/api\/mcp\/shared\/([a-f0-9]{32})(\/answers|\/files\/[A-Za-z0-9_-]{1,80})?$/);
-    const reportToken = String(request.headers.authorization || "").match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-    if (!match || match[1] !== item.reportId || !reportToken || digest(reportToken) !== item.reportTokenHash) fail(403, "Подключение ограничено одним отчётом");
+    const linkToken = reportToken(request);
+    if (!match || match[1] !== item.reportId || !linkToken || digest(linkToken) !== item.reportTokenHash) fail(403, "Подключение ограничено одним отчётом");
     if (!((request.method === "GET" && match[2] !== "/answers") || (request.method === "POST" && match[2] === "/answers" && item.canReply))) fail(403, "Действие недоступно этому подключению");
     const proxy = Object.create(request);
     proxy.user = { ...item.user }; proxy.url = `/api/shared-reports/${item.reportId}${match[2] || ""}`;

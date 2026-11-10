@@ -10,14 +10,16 @@
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/report-view.css?v=8" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
-    <link rel="stylesheet" href="/shared-report.css?v=32" />
+    <link rel="stylesheet" href="/shared-report.css?v=33" />
+    <link rel="stylesheet" href="/dialog-controls.css?v=1" />
+    <link rel="stylesheet" href="/mcp-settings.css?v=6" />
     <script src="/file-preview.js?v=4" defer></script>
     <script src="/shared-comment-editor.js?v=3" defer></script>
-    <script src="/tracker-links.js?v=5" defer></script>
+    <script src="/tracker-links.js?v=6" defer></script>
     <script src="/report-view.js?v=11" defer></script>
     <script src="/shared-table-layout.js?v=2" defer></script>
-    <script src="/shared-mcp-setup.js?v=6" defer></script>
-    <script src="/shared-report.js?v=38" defer></script>
+    <script src="/shared-mcp-setup.js?v=7" defer></script>
+    <script src="/shared-report.js?v=39" defer></script>
   </head>
   <body>
     <main>
@@ -154,21 +156,29 @@
       <symbol id="shared-icon-resize" viewBox="0 0 20 20"><path d="M6 14 14 6M10.5 6H14v3.5M9.5 14H6v-3.5" /></symbol>
       <symbol id="shared-icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></symbol>
     </svg>
-    <dialog id="shared-mcp-dialog" class="shared-mcp-dialog" aria-labelledby="shared-mcp-title">
-      <header><h2 id="shared-mcp-title">Подключить ИИ к отчёту</h2><button id="shared-mcp-close" type="button" aria-label="Закрыть подключение">×</button></header>
-      <p id="shared-mcp-permission"></p>
-      <ol>
-        <li>При первом подключении вставьте запрос в чат ассистента.</li>
-        <li>Отправьте ассистенту полную ссылку на нужный отчёт.</li>
-      </ol>
-      <div class="shared-mcp-choices">
-        <label>Клиент<select id="shared-mcp-client"><option value="codex-chat">Codex — через чат</option><option value="claude-chat">Claude Code — через чат</option><optgroup label="Разовое подключение к этому отчёту"><option value="codex">Codex — команда</option><option value="claude">Claude Code — команда</option><option value="json">Другой клиент — JSON</option><option value="codex-config">Codex — TOML</option></optgroup></select></label>
-        <label>Система<select id="shared-mcp-platform"><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label>
+    <dialog id="shared-mcp-dialog" class="modal mcp-dialog shared-mcp-dialog" aria-labelledby="shared-mcp-title">
+      <header class="modal-header">
+        <h2 id="shared-mcp-title">Подключить ИИ к отчёту</h2>
+        <button class="icon-button" id="shared-mcp-close" type="button" aria-label="Закрыть подключение">×</button>
+      </header>
+      <div class="mcp-settings-body">
+        <p id="shared-mcp-permission"></p>
+        <div class="mcp-settings-choices">
+          <label class="field"><span>Ассистент</span><select id="shared-mcp-client"><option value="codex-chat">Codex — через чат</option><option value="claude-chat">Claude Code — через чат</option><optgroup label="Разовое подключение к этому отчёту"><option value="codex">Codex — команда</option><option value="claude">Claude Code — команда</option><option value="json">Другой клиент — JSON</option><option value="codex-config">Codex — TOML</option></optgroup></select></label>
+          <label class="field"><span>Система</span><select id="shared-mcp-platform"><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label>
+        </div>
+        <p id="shared-mcp-help" class="mcp-note"></p>
+        <details id="shared-mcp-options">
+          <summary id="shared-mcp-summary">Текст запроса</summary>
+          <textarea class="mcp-settings-code" id="shared-mcp-code" readonly spellcheck="false" aria-label="Конфигурация подключения ИИ"></textarea>
+          <p class="mcp-note">Для запуска нужен <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 22+</a>.</p>
+        </details>
+        <div class="mcp-inline-actions">
+          <button class="button button-primary" id="shared-mcp-copy" type="button" disabled>Скопировать запрос</button>
+          <button class="button button-ghost" id="shared-mcp-disconnect" type="button" hidden>Отключить ИИ</button>
+        </div>
+        <p id="shared-mcp-state" role="status"></p>
       </div>
-      <p id="shared-mcp-help"></p>
-      <textarea id="shared-mcp-code" readonly spellcheck="false" aria-label="Конфигурация подключения ИИ"></textarea>
-      <p class="shared-mcp-note">Нужен <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 22+</a>. Установленный MCP можно использовать для следующих отчётов.</p>
-      <footer><button id="shared-mcp-copy" type="button" disabled>Скопировать подключение</button><button id="shared-mcp-disconnect" type="button" hidden>Отключить ИИ</button><span id="shared-mcp-state" role="status"></span></footer>
     </dialog>
     <dialog id="shared-viewer" class="shared-viewer" aria-labelledby="shared-viewer-title">
       <header class="shared-viewer-header">

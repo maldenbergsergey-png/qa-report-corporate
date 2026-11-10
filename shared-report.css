@@ -74,8 +74,8 @@ button, select, summary { cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 select, textarea, button { color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
-select, button { min-height: 36px; padding: 5px 10px; }
-button:hover:not(:disabled) { background: var(--surface-subtle); }
+select, button:where(:not(.button, .icon-button)) { min-height: 36px; padding: 5px 10px; }
+button:where(:not(.button, .icon-button)):hover:not(:disabled) { background: var(--surface-subtle); }
 
 .report-filter-label { color: var(--muted); font-weight: 650; font-size: .84rem; }
 .qa-report-view #report-filter::after { display: none; }
@@ -687,16 +687,4 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
   .qa-report-view[data-answer-view="table"] .has-pinned-overlap :is(th, td).qa-status { box-shadow: none; }
 }
 
-.shared-mcp-dialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 22px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--glass-shadow); }
-.shared-mcp-dialog::backdrop { background: #0009; }
-.shared-mcp-dialog header, .shared-mcp-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.shared-mcp-dialog h2 { margin: 0; font-size: 1.2rem; }
-.shared-mcp-dialog p, .shared-mcp-dialog ol { font-size: .88rem; }
-.shared-mcp-dialog ol { padding-inline-start: 22px; }
-.shared-mcp-dialog li + li { margin-top: 6px; }
-.shared-mcp-choices { display: flex; flex-wrap: wrap; gap: 12px; }
-.shared-mcp-choices label { display: grid; gap: 4px; font-size: .85rem; }
-#shared-mcp-code { display: block; width: 100%; min-height: 190px; padding: 12px; font: .8rem/1.6 ui-monospace, monospace; resize: vertical; background: var(--code-surface); }
-.shared-mcp-note, #shared-mcp-state { color: var(--muted); font-size: .8rem; }
-.shared-mcp-dialog footer { flex-wrap: wrap; margin-top: 16px; }
 #shared-mcp-open { white-space: nowrap; font-size: .8rem; }

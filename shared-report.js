@@ -537,7 +537,7 @@
     }
     const response = await fetch(`${api}${path}`, {
       method: options.method || "GET",
-      headers: { Authorization: `Bearer ${token}`, ...(options.body ? { "Content-Type": "application/json" } : {}),
+      headers: { "X-QA-Report-Token": token, Authorization: `Bearer ${token}`, ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(options.accountToken ? { "X-QA-Report-Session": options.accountToken } : {}),
         ...(csrf ? { "X-QA-CSRF-Token": csrf } : {}) },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),

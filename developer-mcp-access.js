@@ -2,7 +2,7 @@
 
 const { createHash, randomBytes } = require("node:crypto");
 const { normalizeEmail, developerSessionProof } = require("./auth");
-const { initializeSharing } = require("./report-sharing");
+const { initializeSharing, reportToken } = require("./report-sharing");
 const { projectOf } = require("./project-mcp-access");
 const tracker = require("./tracker-links");
 
@@ -109,8 +109,9 @@ function createDeveloperAccess({ getDb, readJson, sendJson, verifyCsrf, reportSh
   }
   async function machine(request, response, pathname) {
     if (pathname === base + "/pair" && request.method === "POST") {
-      const secret = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-      if (!secret) fail(401, "Нужен ключ устройства.");
+      const legacy = request.headers.authorization;
+      const secret = request.headers["x-qa-developer-device"] ?? legacy?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+      if (typeof secret !== "string" || !secretPattern.test(secret) || (legacy && legacy !== "Bearer " + secret)) fail(401, "Нужен ключ устройства.");
       sendJson(response, 200, { ok: true, ...beginPairing(digest(secret)) });
       return true;
     }
@@ -121,7 +122,7 @@ function createDeveloperAccess({ getDb, readJson, sendJson, verifyCsrf, reportSh
     const hash = digest(secret), current = device(hash);
     if (!current) fail(401, "Подтвердите корпоративный вход.");
     const [, kind, id, suffix = ""] = match;
-    if (kind === "reports" && request.headers.authorization !== "Bearer " + secret) fail(401, "Нужен ключ устройства.");
+    if (kind === "reports" && reportToken(request) !== secret) fail(401, "Нужен ключ устройства.");
     const url = new URL(request.url, "http://localhost");
     if (!id) {
       if (request.method !== "GET" || kind !== "reports") fail(405, "Метод недоступен.");

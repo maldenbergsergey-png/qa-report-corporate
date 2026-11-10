@@ -3,29 +3,83 @@
   const dialog = document.getElementById("mcpSettingsDialog");
   if (!dialog) return;
   const section = document.createElement("section"); section.className = "mcp-settings-connection mcp-developer";
-  section.innerHTML = `<h3>Доступ к отчётам</h3><p class="mcp-note">Подключите MCP один раз, затем отправляйте ассистенту ссылки на отчёты.</p>
-    <div class="mcp-inline-actions"><button type="button" class="button button-secondary" data-project-install>Скопировать запрос подключения</button></div>
+  section.innerHTML = `<h3>Подключение по ссылке</h3><p class="mcp-note">Вставьте запрос в чат ассистента. После подключения отправляйте ему ссылки на отчёты.</p>
+    <div class="mcp-inline-actions"><button type="button" class="button button-secondary" data-project-install>Скопировать запрос</button></div>
     <textarea data-project-install-text class="import-textarea mcp-settings-code" hidden readonly aria-label="Запрос установки MCP"></textarea><p data-project-install-state role="status"></p>
     <p data-project-state role="status" aria-live="polite"></p>
-    <form data-project-grant-form hidden><h4>Доступ сотрудника к проекту</h4>
+    <form class="share-report-options" data-project-grant-form hidden><h4>Доступ сотрудника к проекту</h4>
       <div class="mcp-settings-choices"><label class="field"><span>Корпоративный email</span><input type="email" maxlength="254" required data-project-recipient></label><label class="field"><span>Проект</span><select data-project-grant-project></select></label></div>
       <label class="field"><span>Ссылка на задачу в Jira или Eva</span><input type="url" data-project-grant-url required></label>
-      <label class="mcp-project-readonly"><input type="checkbox" data-project-grant-readonly> Только чтение</label>
+      <label class="publish-scope-option"><input type="checkbox" data-project-grant-readonly><span>Только чтение</span></label>
       <div class="mcp-inline-actions"><button type="submit" class="button button-primary" data-project-grant-create>Выдать доступ</button><span class="mcp-note">Ваши публикации проекта · 30 дней</span></div>
     </form><div data-project-grants></div>
-    <form data-project-form hidden><h4>Проектный ключ по приглашению</h4><div class="mcp-settings-choices"><label class="field"><span>Проект</span><select data-project-select required><option value="">Выберите проект</option></select></label><label class="field"><span>Название ключа</span><input data-project-label maxlength="100" value="Разработчик" required autocomplete="off"></label></div>
-      <label class="mcp-project-readonly"><input type="checkbox" data-project-readonly> Только чтение</label><div class="mcp-inline-actions"><button class="button button-primary" type="submit" data-project-create>Создать ключ</button><span class="mcp-note">На 30 дней · результаты QA сохраняются</span></div>
+    <details data-project-invitation><summary>Ключ на проект</summary>
+    <form class="share-report-options" data-project-form hidden><div class="mcp-settings-choices"><label class="field"><span>Проект</span><select data-project-select><option value="">Выберите проект</option></select></label><label class="field"><span>Название ключа</span><input data-project-label maxlength="100" value="Разработчик" required autocomplete="off"></label></div>
+      <label class="field"><span>Ссылка на задачу в Jira или Eva</span><input type="url" data-project-url required></label>
+      <label class="publish-scope-option"><input type="checkbox" data-project-readonly><span>Только чтение</span></label><div class="mcp-inline-actions"><button class="button button-primary" type="submit" data-project-create>Создать ключ</button><span class="mcp-note">Доступ на 30 дней</span></div>
     </form>
     <div data-project-issued hidden><div class="mcp-settings-choices"><label class="field"><span>Ассистент разработчика</span><select data-project-client></select></label></div>
       <div class="mcp-inline-actions"><button class="button button-primary" type="button" data-project-copy>Скопировать запрос</button><button class="button button-ghost" type="button" data-project-done>Готово</button><span class="mcp-note" data-project-expiry></span></div><p class="mcp-note" data-project-help></p><p class="mcp-note">Ключ показывается только сейчас. Передайте запрос разработчику лично.</p>
       <details data-project-options><summary>Настройки подключения</summary><label class="field"><span>Система</span><select data-project-platform><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label><p class="mcp-note">Нужен <a href="https://nodejs.org/en/download" target="_blank" rel="noopener noreferrer">Node.js 22+</a>.</p><textarea class="import-textarea mcp-settings-code" data-project-code readonly spellcheck="false" aria-label="Подключение к проекту"></textarea></details>
-    </div><div data-project-keys></div><button class="button button-ghost" type="button" data-project-refresh>Обновить список</button>`;
+    </div><div data-project-keys></div></details><button class="button button-secondary" type="button" data-project-refresh hidden>Повторить</button>`;
   dialog.querySelector('[data-mcp-panel="developer"]').append(section);
   const find = key => section.querySelector(`[data-project-${key}]`);
   const select = find("select"), client = find("client"), platform = find("platform"), code = find("code"), state = find("state");
   client.replaceChildren(...[...dialog.querySelector("[data-client]").options].map(item => new Option(item.text, item.value)));
   platform.value = /Windows/i.test(navigator.userAgent) ? "windows" : "posix";
   let issued, packageUrl, generation = 0, busy = false;
+  async function availableProjects(published) {
+    const options = new Map(), unresolved = new Set(), resolved = new Set();
+    function add(projectKey, provider, trackerUrl, value) {
+      const identity = JSON.stringify([provider, trackerUrl, projectKey]);
+      resolved.add(projectKey);
+      if (!options.has(identity)) options.set(identity, { value, label: `${projectKey} · ${provider === "eva" ? "Eva" : "Jira"} · ${trackerUrl}` });
+    }
+    for (const item of published) add(item.projectKey, item.provider, item.trackerUrl, item.id);
+    const records = typeof getAllReports === "function" ? await getAllReports().catch(() => []) : [];
+    if (typeof draft !== "undefined" && draft?.issueUrl) records.push(draft);
+    for (const record of records) {
+      const value = record.document?.issueUrl || record.issueUrl || record.issueKey;
+      const issue = window.QaReportTrackerLinks.parse(value);
+      const key = window.QaReportTrackerLinks.projectKey(issue?.key || value);
+      if (key && issue) add(key, issue.provider, issue.baseUrl, issue.issueUrl);
+      else if (key) unresolved.add(key);
+    }
+    for (const key of unresolved) if (!resolved.has(key)) options.set(key, { value: "key:" + key, label: key });
+    return [...options.values()].sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  }
+  function projectPicker(select, input) {
+    function update() {
+      const needsLink = !select.value || select.value.startsWith("key:");
+      input.closest("label").hidden = !needsLink;
+      input.required = needsLink;
+      input.setCustomValidity("");
+    }
+    select.addEventListener("change", update);
+    input.addEventListener("input", () => input.setCustomValidity(""));
+    return {
+      populate(options) {
+        const selected = select.value;
+        select.replaceChildren(new Option("По ссылке на задачу", ""), ...options.map(item => new Option(item.label, item.value)));
+        if (options.some(item => item.value === selected)) select.value = selected;
+        update();
+      },
+      source() {
+        const value = select.value;
+        if (/^[a-f0-9]{64}$/.test(value)) return { projectId: value };
+        const url = input.required ? input.value.trim() : value;
+        const issue = window.QaReportTrackerLinks.parse(url);
+        const key = window.QaReportTrackerLinks.projectKey(issue?.key);
+        if (!key || (value.startsWith("key:") && value.slice(4) !== key)) {
+          input.setCustomValidity(value.startsWith("key:") ? "Укажите ссылку на задачу проекта " + value.slice(4) + "." : "Укажите ссылку на задачу в Jira или Eva.");
+          input.reportValidity();
+          return null;
+        }
+        return { issueUrl: issue.issueUrl };
+      }
+    };
+  }
+  const project = projectPicker(select, find("url"));
   function clearIssued() { issued = undefined; packageUrl = undefined; code.value = ""; find("issued").hidden = true; }
   function message(text) { state.textContent = text; }
   find("install").addEventListener("click", async () => {
@@ -61,11 +115,7 @@
     return data;
   }
   const grantForm = find("grant-form"), grantProject = find("grant-project"), grantUrl = find("grant-url");
-  function grantSource() {
-    grantUrl.closest("label").hidden = Boolean(grantProject.value);
-    grantUrl.required = !grantProject.value;
-  }
-  grantProject.addEventListener("change", grantSource);
+  const employeeProject = projectPicker(grantProject, grantUrl);
   function renderGrants(grants) {
     const list = find("grants");
     list.replaceChildren();
@@ -88,27 +138,11 @@
   function grantRequest(path, method, body, ticket) {
     return request(path, method, body, ticket, "/api/mcp/developer/grants");
   }
-  async function grantProjects(published) {
-    const options = published.map(project => ({ label: project.projectKey + " · " + project.trackerUrl, value: project.id,
-      key: JSON.stringify([project.provider, project.trackerUrl, project.projectKey]) }));
-    const known = new Set(options.map(option => option.key));
-    const local = typeof getAllReports === "function" ? await getAllReports().catch(() => []) : [];
-    if (typeof draft !== "undefined" && draft?.issueUrl) local.push(draft);
-    for (const record of local) {
-      const issue = window.QaReportTrackerLinks.parse(record.document?.issueUrl || record.issueUrl);
-      const projectKey = issue?.key.match(/^([\p{L}\p{N}_][\p{L}\p{N}_-]{0,99})-\d+$/u)?.[1]?.toUpperCase();
-      if (!projectKey) continue;
-      const key = JSON.stringify([issue.provider, issue.baseUrl, projectKey]);
-      if (known.has(key)) continue;
-      known.add(key); options.push({ label: projectKey + " · " + issue.baseUrl, value: issue.issueUrl });
-    }
-    return options;
-  }
   grantForm.addEventListener("submit", async event => {
     event.preventDefault();
     if (busy) return;
-    const ticket = generation, selection = grantProject.value;
-    const source = /^[a-f0-9]{64}$/.test(selection) ? { projectId: selection } : { issueUrl: selection || grantUrl.value.trim() };
+    const ticket = generation, source = employeeProject.source();
+    if (!source) return;
     busy = true; find("grant-create").disabled = true;
     try {
       const result = await grantRequest("", "POST", { recipient: find("recipient").value.trim(), readOnly: find("grant-readonly").checked, ...source }, ticket);
@@ -116,7 +150,7 @@
     } catch (error) { if (ticket === generation) message(error.message); }
     finally { busy = false; find("grant-create").disabled = false; }
   });
-  function clearGrants() { renderGrants([]); grantForm.reset(); grantSource(); grantForm.hidden = true; }
+  function clearGrants() { renderGrants([]); grantForm.reset(); employeeProject.populate([]); grantForm.hidden = true; }
   dialog.addEventListener("close", clearGrants);
   window.addEventListener("qa-report-account-change", clearGrants);
   function renderKeys(keys) {
@@ -142,23 +176,19 @@
     }
   }
   async function load(ticket = generation) {
-    const selectedProject = select.value;
+    find("refresh").hidden = true;
     message("Загружаем ваши проекты и ключи…"); find("form").hidden = true;
     try {
       const [data, access] = await Promise.all([request("", "GET", undefined, ticket), grantRequest("", "GET", undefined, ticket)]);
-      const available = await grantProjects(data.projects);
+      const available = await availableProjects(data.projects);
       if (ticket !== generation) return;
-      const selected = grantProject.value;
-      grantProject.replaceChildren(new Option("По ссылке на задачу", ""), ...available.map(item => new Option(item.label, item.value)));
-      grantProject.value = selected; grantSource(); grantForm.hidden = false;
+      employeeProject.populate(available); grantForm.hidden = false;
       renderGrants(access.grants);
-      select.replaceChildren(new Option("Выберите проект", ""));
-      for (const project of data.projects) select.add(new Option(`${project.projectKey} · ${project.trackerUrl} · отчётов: ${project.reportCount}`, project.id));
-      if (data.projects.some(project => project.id === selectedProject)) select.value = selectedProject;
-      find("form").hidden = !data.projects.length || Boolean(issued);
+      project.populate(available);
+      find("invitation").hidden = false; find("form").hidden = Boolean(issued);
       renderKeys(data.keys);
       message("");
-    } catch (error) { if (ticket === generation && dialog.open) { find("keys").replaceChildren(); clearGrants(); message(error.message); } }
+    } catch (error) { if (ticket === generation && dialog.open) { find("keys").replaceChildren(); clearGrants(); find("invitation").hidden = true; find("refresh").hidden = false; message(error.message); } }
   }
   function updateCode() {
     code.value = ""; if (!issued || !packageUrl) return;
@@ -166,7 +196,8 @@
     code.value = setup.code; find("help").textContent = setup.help; find("copy").textContent = client.value.endsWith("-chat") ? "Скопировать запрос" : "Скопировать настройки"; if (!client.value.endsWith("-chat")) find("options").open = true;
   }
   find("form").addEventListener("submit", async event => {
-    event.preventDefault(); if (busy || !select.value) return;
+    event.preventDefault(); if (busy) return;
+    const source = project.source(); if (!source) return;
     busy = true; find("create").disabled = true; const ticket = generation;
     clearIssued(); message("Создаём ключ…");
     try {
@@ -175,7 +206,7 @@
       if (!response.ok) throw new Error("Не удалось подготовить MCP-пакет.");
       const metadata = await response.json();
       if (ticket !== generation) return;
-      const value = await request("", "POST", { projectId: select.value, label: find("label").value.trim(), readOnly: find("readonly").checked }, ticket);
+      const value = await request("", "POST", { ...source, label: find("label").value.trim(), readOnly: find("readonly").checked }, ticket);
       issued = value; packageUrl = metadata.packageUrl; updateCode(); find("issued").hidden = false;
       find("expiry").textContent = `До ${new Date(value.key.expiresAt).toLocaleDateString()}`;
       await load(ticket);
@@ -187,10 +218,10 @@
   find("copy").addEventListener("click", async () => {
     if (!issued || issued.key.expiresAt <= Date.now()) { clearIssued(); message("Срок ключа истёк. Создайте новое подключение."); return; }
     try { await navigator.clipboard.writeText(code.value); message("Скопировано."); }
-    catch { code.focus(); code.select(); message("Скопируйте выделенный текст вручную."); }
+    catch { find("options").open = true; code.focus(); code.select(); message("Скопируйте выделенный текст вручную."); }
   });
   find("refresh").addEventListener("click", () => { if (!busy) void load(); });
-  dialog.addEventListener("mcp-settings-open", () => { ++generation; clearIssued(); select.value = ""; find("keys").replaceChildren(); void load(); });
+  dialog.addEventListener("mcp-settings-open", () => { ++generation; clearIssued(); find("invitation").open = false; find("invitation").hidden = true; select.value = ""; find("url").value = ""; find("keys").replaceChildren(); void load(); });
   dialog.addEventListener("close", () => { ++generation; clearIssued(); });
   window.addEventListener("qa-report-account-change", () => { ++generation; clearIssued(); select.value = ""; find("keys").replaceChildren(); find("form").hidden = true; if (dialog.open) void load(); });
 })();

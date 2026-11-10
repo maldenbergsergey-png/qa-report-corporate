@@ -1,3 +1,5 @@
+@import url("/dialog-controls.css?v=1");
+
 :root {
   color-scheme: light;
   --section-sticky-top: 132px;
@@ -8,8 +10,6 @@
   --surface: #ffffff;
   --selected-row-background: #eee8ff;
   --canvas: #f4f5f7;
-  --primary: #0c66e4;
-  --primary-hover: #0055cc;
   --green: #14892c;
   --red: #c9372c;
   --blue: #0c66e4;
@@ -32,8 +32,6 @@
   --surface: #1d2635;
   --selected-row-background: #2b2d52;
   --canvas: #111827;
-  --primary: #579dff;
-  --primary-hover: #85b8ff;
   --shadow: 0 16px 42px rgba(0, 0, 0, 0.4);
   --sticky-gap-cover: color-mix(in srgb, var(--canvas) 84%, var(--surface));
   --table-scrollbar-track: #172131;
@@ -51,8 +49,6 @@
   --surface: #1f2329;
   --selected-row-background: #34304d;
   --canvas: #17191d;
-  --primary: #ef4444;
-  --primary-hover: #ff5a5a;
   --green: #45d483;
   --red: #ff5a5f;
   --blue: #4f8cff;
@@ -493,18 +489,6 @@ body.focus-mode-active .floating-help-button {
   bottom: 84px;
 }
 
-.button {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 7px;
-  font-weight: 600;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -514,15 +498,6 @@ body.focus-mode-active .floating-help-button {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.button-primary {
-  color: white;
-  background: var(--primary);
-}
-
-.button-primary:hover {
-  background: var(--primary-hover);
 }
 
 .button-success {
@@ -541,21 +516,6 @@ body.focus-mode-active .floating-help-button {
 
 .button-danger:hover {
   background: #ae2e24;
-}
-
-.button-secondary {
-  background: #e9f2ff;
-  color: #0c66e4;
-}
-
-.button-ghost {
-  background: transparent;
-  color: #44546f;
-}
-
-.button-ghost:hover,
-.button-secondary:hover {
-  background: #dce8f8;
 }
 
 .workspace {
@@ -608,35 +568,6 @@ body.focus-mode-active .floating-help-button {
   margin-bottom: 18px;
 }
 
-.field {
-  display: grid;
-  gap: 6px;
-}
-
-.field[hidden] {
-  display: none;
-}
-
-.field span {
-  color: #44546f;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.field input,
-.field select {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  padding: 0 11px;
-  border: 1px solid #b7bdc8;
-  border-radius: 6px;
-  outline: none;
-  background: #fff;
-}
-
-.field input:focus,
-.field select:focus,
 .section-title:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(12, 102, 228, 0.16);
@@ -1108,23 +1039,6 @@ body.section-sticky-active .editor-toolbar::after {
 .section-actions {
   display: flex;
   gap: 4px;
-}
-
-.icon-button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #44546f;
-  font-size: 20px;
-}
-
-.icon-button:hover {
-  background: #e9ebee;
 }
 
 .icon-button.danger:hover {
@@ -1807,27 +1721,6 @@ body.section-sticky-active .editor-toolbar::after {
   display: none;
 }
 
-.modal {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  width: min(1400px, 96vw);
-  height: min(880px, 92vh);
-  overflow: hidden;
-  border-radius: 12px;
-  color: var(--ink);
-  background: var(--surface);
-  box-shadow: 0 28px 80px rgba(9, 30, 66, 0.38);
-}
-
-.modal-header,
-.modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--line);
-}
-
 .import-modal {
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(920px, 94vw);
@@ -2323,11 +2216,6 @@ body.section-sticky-active .editor-toolbar::after {
   color: #ae2e24;
   background: #ffeceb;
   font-size: 12px;
-}
-
-.modal-header h2 {
-  margin: 0;
-  font-size: 20px;
 }
 
 .cell-code-block {
@@ -3803,25 +3691,20 @@ body.resizing-code * {
   background: var(--surface);
 }
 
-:root[data-theme="dark"] .button-ghost,
 :root[data-theme="dark"] .header-action,
 :root[data-theme="dark"] .header-icon-button,
 :root[data-theme="dark"] .header-dropdown-trigger,
-:root[data-theme="dark"] .field span,
 :root[data-theme="dark"] .summary-label {
   color: #c7d1e0;
 }
 
-:root[data-theme="graphite"] .button-ghost,
 :root[data-theme="graphite"] .header-action,
 :root[data-theme="graphite"] .header-icon-button,
 :root[data-theme="graphite"] .header-dropdown-trigger,
-:root[data-theme="graphite"] .field span,
 :root[data-theme="graphite"] .summary-label {
   color: #d7dbe0;
 }
 
-:root[data-theme="dark"] .button-secondary,
 :root[data-theme="dark"] .add-column-button {
   background: #243b5a;
   color: #85b8ff;
@@ -3832,7 +3715,6 @@ body.resizing-code * {
   background: #243b5a;
 }
 
-:root[data-theme="graphite"] .button-secondary,
 :root[data-theme="graphite"] .add-column-button {
   background: #2a1f22;
   color: #ff6b6b;
@@ -3933,14 +3815,11 @@ body.resizing-code * {
   color: #d2a8ff;
 }
 
-:root[data-theme="dark"] .button-ghost:hover,
-:root[data-theme="dark"] .button-secondary:hover,
 :root[data-theme="dark"] .header-action:hover,
 :root[data-theme="dark"] .header-icon-button:hover,
 :root[data-theme="dark"] .header-dropdown-trigger:hover,
 :root[data-theme="dark"] .header-dropdown.open .header-dropdown-trigger,
 :root[data-theme="dark"] .header-dropdown-item:hover,
-:root[data-theme="dark"] .icon-button:hover,
 :root[data-theme="dark"] .editor-toolbar button:hover,
 :root[data-theme="dark"] .editor-toolbar select:hover,
 :root[data-theme="dark"] .row-menu-button:hover,
@@ -3948,14 +3827,11 @@ body.resizing-code * {
   background: #2d3b50;
 }
 
-:root[data-theme="graphite"] .button-ghost:hover,
-:root[data-theme="graphite"] .button-secondary:hover,
 :root[data-theme="graphite"] .header-action:hover,
 :root[data-theme="graphite"] .header-icon-button:hover,
 :root[data-theme="graphite"] .header-dropdown-trigger:hover,
 :root[data-theme="graphite"] .header-dropdown.open .header-dropdown-trigger,
 :root[data-theme="graphite"] .header-dropdown-item:hover,
-:root[data-theme="graphite"] .icon-button:hover,
 :root[data-theme="graphite"] .editor-toolbar button:hover,
 :root[data-theme="graphite"] .editor-toolbar select:hover,
 :root[data-theme="graphite"] .row-menu-button:hover,
@@ -4011,8 +3887,6 @@ body.resizing-code * {
   background: #262a30;
 }
 
-:root[data-theme="dark"] .field input,
-:root[data-theme="dark"] .field select,
 :root[data-theme="dark"] .editor-toolbar,
 :root[data-theme="dark"] .section-sticky-block,
 :root[data-theme="dark"] .add-row-button,
@@ -4022,8 +3896,6 @@ body.resizing-code * {
   color: var(--ink);
 }
 
-:root[data-theme="graphite"] .field input,
-:root[data-theme="graphite"] .field select,
 :root[data-theme="graphite"] .editor-toolbar,
 :root[data-theme="graphite"] .section-sticky-block,
 :root[data-theme="graphite"] .add-row-button,
@@ -5372,11 +5244,11 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 #importModal .import-modal { display: flex; flex-direction: column; width: min(720px, calc(100vw - 48px)); height: min(480px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); }
 #importModal .modal-header, #importModal .import-source-tabs, #importModal .import-progress { flex: 0 0 auto; }
 #importModal .modal-header { padding: 16px 22px; }
-#importModal .import-source-tabs { padding: 12px 22px 0; flex-wrap: nowrap; }
-#importModal .import-source-tab { flex: 1; min-width: 0; white-space: nowrap; font-size: 13px; font-weight: 600; }
-#importModal .import-source-tab.active { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--surface)); }
-#importModal .import-source-tab:hover { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
-#importModal .import-source-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+:is(#importModal, #mcpSettingsDialog) .import-source-tabs { padding: 12px 22px 0; flex-wrap: nowrap; }
+:is(#importModal, #mcpSettingsDialog) .import-source-tab { flex: 1; min-width: 0; white-space: nowrap; font-size: 13px; font-weight: 600; }
+:is(#importModal, #mcpSettingsDialog) .import-source-tab.active { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--surface)); }
+:is(#importModal, #mcpSettingsDialog) .import-source-tab:hover { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
+:is(#importModal, #mcpSettingsDialog) .import-source-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 #importModal .import-body { flex: 1; min-height: 0; padding: 18px 22px; gap: 16px; overflow: auto; }
 #importModal .import-body p { font-size: 13px; }
 #importModal:not(.has-import-preview) .import-pane { flex: 0 0 auto; }
@@ -5414,8 +5286,8 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 @media (max-width: 600px) {
   #importModal .import-modal { width: calc(100vw - 24px); height: min(480px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); }
   #importModal .modal-header { padding: 14px 16px; }
-  #importModal .import-source-tabs { padding: 10px 12px 0; gap: 2px; }
-  #importModal .import-source-tab { padding: 8px 4px; font-size: 12px; }
+  :is(#importModal, #mcpSettingsDialog) .import-source-tabs { padding: 10px 12px 0; gap: 2px; }
+  :is(#importModal, #mcpSettingsDialog) .import-source-tab { padding: 8px 4px; font-size: 12px; }
   #importModal .import-body { padding: 16px; }
   #importModal .modal-footer { flex-basis: 106px; min-height: 106px; padding: 12px 16px; gap: 8px; justify-content: center; }
   #importModal .modal-footer > span { font-size: 12px; }
@@ -5423,7 +5295,7 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 }
 
 @media (max-width: 400px) {
-  #importModal .import-source-tab { padding-inline: 2px; font-size: 11px; }
+  :is(#importModal, #mcpSettingsDialog) .import-source-tab { padding-inline: 2px; font-size: 11px; }
   #importModal #importSource-comment { flex-grow: 1.35; }
 }
 

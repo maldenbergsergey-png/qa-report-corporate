@@ -39,6 +39,8 @@ async function fixture(t) {
   const server = http.createServer(async (req, res) => {
     try {
       const path = new URL(req.url, origin).pathname;
+      // The supported corporate reverse proxy strips the standard authorization header.
+      if (path.startsWith("/api/mcp/developer/")) delete req.headers.authorization;
       if (req.headers["x-fixture-owner"]) req.user = loggedIn(req.headers["x-fixture-owner"]);
       if (await download(req, res, path) || await named.machine(req, res, path) || await named.browser(req, res, path)) return;
       if (await project.machine(req, res, path) || await project.browser(req, res, path) || await sharing(req, res, path)) return;
@@ -109,6 +111,23 @@ test("one MCP connection can read and answer two reports without mixing IDs, pre
   failed(await client.call("qa_report_read"));
   failed(await client.call("qa_report_read", { reportId: a.id, url: "https://attacker.example.test" }));
   assert.equal(JSON.stringify(client.messages).includes(key.connection.token), false);
+});
+
+test("a project key issued before publication opens only this author's matching tracker and project", async t => {
+  const f = await fixture(t);
+  const issueUrl = "https://tasks.example.test/desk/Task/FUTURE-3";
+  const create = body => f.call("/api/mcp/project-keys", { method: "POST", body: { label: "Future project", ...body } });
+  assert.equal((await create({ issueUrl: "FUTURE-3" })).status, 400);
+  assert.equal((await create({ issueUrl, projectId: projectOf(issueUrl).id })).status, 400);
+  const issued = await create({ issueUrl });
+  assert.equal(issued.status, 201);
+  const client = await f.connect(issued.body);
+  const list = async () => data(await client.call("qa_report_list_reports")).reports.map(report => report.id);
+  assert.deepEqual(await list(), []);
+  const matching = await f.publish(issueUrl);
+  await f.publish(issueUrl, "other@example.test");
+  await f.publish("https://tasks.example.test/browse/FUTURE-3");
+  assert.deepEqual(await list(), [matching.id]);
 });
 
 test("project keys cannot acquire owner, QA or other-author access and management requires login plus write protection", async t => {

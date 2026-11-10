@@ -3,12 +3,12 @@
   const dialog = document.getElementById("mcpSettingsDialog");
   if (!dialog) return;
   const section = document.createElement("section"); section.className = "mcp-settings-connection personal-mcp";
-  section.innerHTML = `<h3>Личные токены</h3><p class="mcp-note">Один раз подключите ассистента, затем ищите чек-листы по задаче или ссылке.</p>
+  section.innerHTML = `<h3>Личные токены</h3><p class="mcp-note">Ассистент найдёт ваши чек-листы по ключу задачи или ссылке.</p>
     <p data-personal-state role="status" aria-live="polite"></p>
-    <form data-personal-form hidden><div class="mcp-settings-choices">
+    <form class="share-report-options" data-personal-form hidden><div class="mcp-settings-choices">
       <label class="field"><span>Название</span><input data-personal-label required maxlength="100" value="Мой ассистент" autocomplete="off"></label>
       <label class="field"><span>Срок</span><select data-personal-lifetime><option value="30">30 дней</option><option value="90" selected>90 дней</option><option value="365">1 год</option><option value="">До отзыва</option></select></label>
-    </div><label class="mcp-project-readonly"><input data-personal-readonly type="checkbox"> Только чтение</label><button class="button button-primary" type="submit" data-personal-create>Создать токен</button></form>
+    </div><label class="publish-scope-option"><input data-personal-readonly type="checkbox"><span>Только чтение</span></label><button class="button button-primary" type="submit" data-personal-create>Создать токен</button></form>
     <div data-personal-issued hidden><div class="mcp-settings-choices"><label class="field"><span>Ассистент</span><select data-personal-client></select></label></div>
       <div class="mcp-inline-actions"><button class="button button-primary" type="button" data-personal-copy>Скопировать запрос</button><button class="button button-ghost" type="button" data-personal-done>Готово</button><span class="mcp-note" data-personal-expiry></span></div>
       <p class="mcp-note" data-personal-help></p><p class="mcp-note">Запрос содержит токен. Он показывается только сейчас.</p>
@@ -17,7 +17,7 @@
         <p class="mcp-note">Для запуска нужен <a href="https://nodejs.org/en/download" target="_blank" rel="noopener noreferrer">Node.js 22+</a>.</p><textarea class="import-textarea mcp-settings-code" data-personal-code readonly spellcheck="false" aria-label="Личное подключение MCP"></textarea>
       </details>
     </div><div data-personal-keys></div>
-    <div class="mcp-browser-access" hidden><div><strong>Этот браузер</strong><p class="mcp-note" data-personal-browser-state role="status"></p></div><button class="button button-secondary" type="button" data-personal-browser disabled>Подключить</button></div>`;
+    <div class="mcp-browser-access" hidden><div><strong>Локальные чек-листы</strong><p class="mcp-note" data-personal-browser-state role="status"></p></div><button class="button button-secondary" type="button" data-personal-browser disabled>Подключить</button></div>`;
   dialog.querySelector('[data-mcp-panel="personal"]').prepend(section);
   const find = name => section.querySelector(`[data-personal-${name}]`), state = find("state"), client = find("client"), platform = find("platform"), code = find("code");
   client.replaceChildren(...[...dialog.querySelector("[data-client]").options].map(item => new Option(item.text, item.value)));
@@ -78,7 +78,7 @@
       renderKeys(data.keys); find("form").hidden = Boolean(issued); find("browser").disabled = false; find("browser").closest(".mcp-browser-access").hidden = false;
       const active = data.keys.filter(key => !key.revokedAt && (!key.expiresAt || key.expiresAt > Date.now())).length;
       find("create").disabled = active >= data.maxTokens;
-      state.textContent = `Токены: ${active} из ${data.maxTokens}.`;
+      state.textContent = `Активных токенов — ${active} из ${data.maxTokens}.`;
       if (!workspace && sessionStorage.getItem(storageKey) === owner) await connectBrowser(ticket);
     } catch (error) { if (ticket === generation) { owner = undefined; find("keys").replaceChildren(); find("browser").disabled = true; find("browser").closest(".mcp-browser-access").hidden = true; state.textContent = error.message; } }
   }
@@ -100,7 +100,7 @@
   find("copy").addEventListener("click", async () => {
     if (!issued || !code.value) return;
     try { await navigator.clipboard.writeText(code.value); state.textContent = "Скопировано."; }
-    catch { code.focus(); code.select(); state.textContent = "Скопируйте выделенное подключение вручную."; }
+    catch { find("options").open = true; code.focus(); code.select(); state.textContent = "Скопируйте выделенное подключение вручную."; }
   });
   async function browserCatalog() {
     const records = await getAllReports();
@@ -167,6 +167,6 @@
   dialog.addEventListener("close", () => { ++generation; clearSecret(); });
   root.addEventListener("qa-report-account-change", () => { ++generation; csrfCache = undefined; clearSecret(); owner = undefined; find("form").hidden = true; find("keys").replaceChildren(); find("browser").disabled = true; find("browser").closest(".mcp-browser-access").hidden = true; void disconnectBrowser(); if (dialog.open) void load(); });
   root.QaPersonalMcp = { authHeaders };
-  browserState("Для локальных чек-листов подключите эту вкладку.");
+  browserState("Для доступа к черновикам подключите эту вкладку.");
   if (sessionStorage.getItem(storageKey)) void load();
 })(window);

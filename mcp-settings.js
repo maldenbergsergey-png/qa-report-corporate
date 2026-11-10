@@ -1,17 +1,17 @@
 (function () {
   "use strict";
   const dialog = document.createElement("dialog");
-  dialog.className = "modal mcp-settings"; dialog.id = "mcpSettingsDialog";
+  dialog.className = "modal mcp-dialog mcp-settings"; dialog.id = "mcpSettingsDialog";
   dialog.setAttribute("aria-labelledby", "mcpSettingsTitle");
-  dialog.innerHTML = `<header class="modal-header"><div><div class="eyebrow">Интеграции</div><h2 id="mcpSettingsTitle">MCP-сервер</h2></div><button class="icon-button" type="button" data-close aria-label="Закрыть настройки MCP">×</button></header>
-    <nav class="import-source-tabs mcp-settings-tabs" role="tablist" aria-label="Подключение MCP">
+  dialog.innerHTML = `<header class="modal-header"><h2 id="mcpSettingsTitle">MCP-сервер</h2><button class="icon-button" type="button" data-close aria-label="Закрыть настройки MCP">×</button></header>
+    <nav class="import-source-tabs" role="tablist" aria-label="Подключение MCP">
       <button class="import-source-tab active" id="mcp-personal-tab" type="button" role="tab" data-mcp-tab="personal" aria-controls="mcp-personal-panel" aria-selected="true">Личный MCP</button>
       <button class="import-source-tab" id="mcp-developer-tab" type="button" role="tab" data-mcp-tab="developer" aria-controls="mcp-developer-panel" aria-selected="false" tabindex="-1">Для разработчика</button>
     </nav>
     <div class="import-body mcp-settings-body">
       <div id="mcp-personal-panel" role="tabpanel" aria-labelledby="mcp-personal-tab" data-mcp-panel="personal">
         <details class="mcp-temporary" data-temporary><summary>Разовое подключение к чек-листу</summary>
-          <p data-inactive>Включите приём кнопкой AI в нужном чек-листе.</p>
+          <p data-inactive>Откройте чек-лист и нажмите AI → «Включить приём».</p>
           <label class="field" data-report-field hidden><span>Чек-лист с включённым приёмом</span><select data-report-select><option value="">Выберите чек-лист</option></select></label>
           <div data-setup hidden>
             <p data-report></p><div class="mcp-settings-choices"><label class="field"><span>Ассистент</span><select data-client><option value="codex-chat">Codex — через чат</option><option value="claude-chat">Claude Code — через чат</option><optgroup label="Настроить вручную"><option value="codex">Codex — команда</option><option value="claude">Claude Code — команда</option><option value="json">Другой клиент — JSON</option><option value="codex-config">Codex — TOML</option></optgroup></select></label><label class="field"><span>Система</span><select data-platform><option value="posix">macOS / Linux</option><option value="windows">Windows (PowerShell)</option></select></label></div>
@@ -104,6 +104,6 @@
   copy.addEventListener("click", async () => {
     update(); if (copy.disabled) return;
     try { await navigator.clipboard.writeText(code.value); state.textContent = client.value.endsWith("-chat") ? "Запрос скопирован. Вставьте его в чат ассистента." : "Настройки скопированы."; }
-    catch { code.focus(); code.select(); state.textContent = "Скопируйте выделенный текст вручную."; }
+    catch { code.closest("details").open = true; code.focus(); code.select(); state.textContent = "Скопируйте выделенный текст вручную."; }
   });
 })();

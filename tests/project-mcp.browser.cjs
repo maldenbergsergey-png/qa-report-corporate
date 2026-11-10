@@ -63,12 +63,29 @@ async function main() {
   const page = await context.newPage(), errors = []; page.on("pageerror", error => errors.push(error.message));
   async function open() {
     await page.goto(corporate ? origin : origin + "/profile");
+    await page.evaluate(async () => {
+      const staged = ["https://tasks.example.test/desk/Task/LOCAL-12", "BARE-5"];
+      for (const [index, issueUrl] of staged.entries()) {
+        const value = normalizeDraft({ ...clone(DEFAULT_DRAFT), reportId: "mcp_project_" + index, publicId: "aaa000" + index, issueUrl });
+        await dbTransaction("readwrite", store => store.put({ id: value.reportId, publicId: value.publicId, issueUrl, updatedAt: new Date().toISOString(), document: value }));
+      }
+    });
     if (corporate) await page.click("#corporateProfileButton");
     await page.locator(corporate ? "#corporateProfileDialog [data-mcp-open]" : "#profilePage [data-mcp-open]").click();
     await page.getByRole("tab", { name: "Для разработчика", exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll("[data-project-select] option").length === 4);
+    await page.waitForFunction(() => document.querySelectorAll("[data-project-select] option").length === 6);
+    const invitation = page.locator("[data-project-invitation]");
+    assert.equal(await invitation.getAttribute("open"), null);
+    const size = page.viewportSize();
+    await page.screenshot({ path: path.join(directory, `developer-${size.width}.png`) });
+    await invitation.locator("summary").first().click();
   }
   await open();
+  assert.equal(await page.locator('[data-project-select] option[value="https://tasks.example.test/desk/Task/LOCAL-12"]').count(), 1);
+  await page.locator("[data-project-select]").selectOption("key:BARE");
+  await page.locator("[data-project-url]").fill("https://tasks.example.test/browse/OTHER-1");
+  await page.locator("[data-project-create]").click();
+  assert.match(await page.locator("[data-project-url]").evaluate(node => node.validationMessage), /BARE/);
   await page.locator("[data-project-select]").selectOption(projectOf("https://tasks.example.test/browse/QA-1").id);
   await page.locator("[data-project-label]").fill("Frontend developer");
   await page.locator("[data-project-create]").click();

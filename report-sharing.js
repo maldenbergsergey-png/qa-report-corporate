@@ -259,6 +259,12 @@ function secretsFor(publishKey) {
   };
 }
 
+function reportToken(request) {
+  const previous = bearer(request);
+  const token = request.headers["x-qa-report-token"] ?? previous;
+  return typeof token === "string" && tokenPattern.test(token) && (!previous || previous === token) ? token : "";
+}
+
 function bearer(request) {
   return /^Bearer ([^\s]+)$/i.exec(request.headers.authorization ?? "")?.[1] ?? "";
 }
@@ -587,7 +593,7 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   }
 
   function authorize(request, id) {
-    const token = bearer(request);
+    const token = reportToken(request);
     if (!tokenPattern.test(token)) fail(404, "Публикация недоступна");
     const row = publication(id);
     if (!row || row.update_of || !(row.published_at || row.ready_at)) fail(404, "Публикация недоступна");
@@ -1269,7 +1275,7 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
 
     const { row, owner, canReply } = authorize(request, id);
     if (method === "DELETE" && !action && !fileKind && owner) {
-      if (publisherIdentity) checkPublicationAuthor(row, (await publisherIdentity(request))?.id, bearer(request));
+      if (publisherIdentity) checkPublicationAuthor(row, (await publisherIdentity(request))?.id, reportToken(request));
       revokePublication(id);
       sendJson(response, 200, { ok: true });
       await drainStorageCleanup();
@@ -1325,4 +1331,4 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   };
 }
 
-module.exports = { initializeSharing, createReportSharing, createPublicationSettings, createAuthorInvite, revokeAuthorAccess };
+module.exports = { reportToken, initializeSharing, createReportSharing, createPublicationSettings, createAuthorInvite, revokeAuthorAccess };

@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Подключить ассистента — QA Report</title>
-  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/styles.css?v=81">
+  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/styles.css?v=161">
+  <link rel="stylesheet" href="/mcp-settings.css?v=6">
   <script src="/login-theme.js?v=2"></script><script src="/mcp-connect.js?v=1" defer></script>
 </head>
 <body class="login-page">
-  <main class="login-shell">
+  <main class="cloud-access mcp-approval">
     <h1>Подключить ассистента</h1>
-    <p id="identity"></p>
-    <p>Введите код из своего чата. Ассистент сможет открывать присланные отчёты и работать с назначенными вам проектами до окончания этого входа.</p>
-    <form id="approve">
+    <p class="cloud-access-note" id="identity"></p>
+    <p>Введите код из чата. Ассистент получит доступ к присланным ссылкам и назначенным проектам на время этого входа.</p>
+    <form class="share-report-settings" id="approve">
       <label class="field"><span>Код из чата</span><input name="code" required maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus></label>
       <button class="button button-primary" type="submit" disabled>Подтвердить подключение</button>
     </form>

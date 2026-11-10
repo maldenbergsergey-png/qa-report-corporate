@@ -1,6 +1,6 @@
 "use strict";
 const { createHash, randomBytes } = require("node:crypto");
-const { initializeSharing } = require("./report-sharing");
+const { initializeSharing, reportToken } = require("./report-sharing");
 const TrackerLinks = require("./tracker-links");
 const digest = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
@@ -9,8 +9,9 @@ const browserApi = "/api/mcp/project-keys";
 const machineApi = "/api/mcp/projects/";
 
 function projectOf(issueUrl) {
+  if (typeof issueUrl !== "string") return null;
   const issue = TrackerLinks.parse(issueUrl);
-  const projectKey = issue?.key.match(/^([\p{L}\p{N}_][\p{L}\p{N}_-]{0,99})-\d+$/u)?.[1]?.toUpperCase();
+  const projectKey = TrackerLinks.projectKey(issue?.key);
   if (!projectKey) return null;
   const scope = { provider: issue.provider, trackerUrl: issue.baseUrl, projectKey };
   return { ...scope, id: digest(JSON.stringify(scope)) };
@@ -68,12 +69,13 @@ function createProjectMcpAccess({ getDb, readJson, sendJson, requestOrigin, auth
     }
     if (request.method === "POST" && pathname === browserApi) {
       const body = await readJson(request, 4096);
-      if (!body || Object.keys(body).some(key => !["projectId", "label", "readOnly"].includes(key))
-        || !/^[a-f0-9]{64}$/.test(body.projectId) || typeof body.label !== "string"
+      if (!body || Object.keys(body).some(key => !["projectId", "issueUrl", "label", "readOnly"].includes(key))
+        || (Object.hasOwn(body, "projectId") === Object.hasOwn(body, "issueUrl"))
+        || (Object.hasOwn(body, "projectId") && !/^[a-f0-9]{64}$/.test(body.projectId)) || typeof body.label !== "string"
         || !body.label.trim() || body.label.length > 100 || /[\x00-\x1f\x7f]/.test(body.label)
         || (body.readOnly !== undefined && typeof body.readOnly !== "boolean")) fail(400, "Выберите проект и укажите название ключа.");
-      const project = projects(owner).find(item => item.id === body.projectId);
-      if (!project) fail(404, "В этом проекте нет ваших доступных опубликованных отчётов с полной ссылкой на задачу.");
+      const project = body.projectId ? projects(owner).find(item => item.id === body.projectId) : projectOf(body.issueUrl);
+      if (!project) fail(body.projectId ? 404 : 400, "Выберите доступный проект или укажите ссылку на его задачу в Jira или Eva.");
       if (db().prepare("SELECT count(*) AS count FROM shared_report_project_keys WHERE author_id = ? AND revoked_at IS NULL AND expires_at > ?").get(owner, now()).count >= 20) fail(429, "Отзовите неиспользуемые ключи: разрешено до 20 активных ключей.");
       const id = randomBytes(16).toString("hex"), token = randomBytes(32).toString("base64url"), createdAt = now();
       db().prepare(`INSERT INTO shared_report_project_keys
@@ -121,7 +123,7 @@ function createProjectMcpAccess({ getDb, readJson, sendJson, requestOrigin, auth
     rate(request);
     if (request.headers.origin && request.headers.origin !== requestOrigin(request)) fail(403, "Запрос с другого сайта отклонён");
     const match = pathname.match(/^\/api\/mcp\/projects\/([a-f0-9]{32})\/reports(?:\/([a-f0-9]{32})(\/answers|\/files\/[A-Za-z0-9_-]{1,80})?)?$/);
-    const token = String(request.headers.authorization || "").match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+    const token = reportToken(request);
     if (!match || !token) fail(401, "Нужен действующий проектный ключ.");
     const key = validKey(match[1], digest(token));
     const url = new URL(request.url, requestOrigin(request));

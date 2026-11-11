@@ -7,7 +7,7 @@ const trackerLinks = require("./tracker-links");
 const api = "/api/shared-reports";
 const tokenPattern = /^[a-zA-Z0-9_-]{43}$/;
 const idPattern = /^[a-zA-Z0-9_-]{1,80}$/;
-const answerStatuses = new Set(["fixed", "not_fixed", "needs_clarification", "unreviewed"]);
+const answerStatuses = new Set(["fixed", "not_fixed", "needs_clarification", "unreviewed", "clarified", "no_changes_needed", "deferred"]);
 const normalizeAnswerStatus = status => status === "in_progress" ? "unreviewed" : status;
 const contentFragmentTypes = new Set(["text", "code", "inline-code", "link", "attachment"]);
 const commentTags = new Set(["p", "div", "h2", "h3", "b", "i", "u", "s", "ul", "ol", "li", "pre", "code", "br", "a", "span", "blockquote"]);

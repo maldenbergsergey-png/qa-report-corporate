@@ -1,7 +1,7 @@
 const { createInterface } = require("node:readline");
 
 const protocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const answerStatuses = ["fixed", "not_fixed", "needs_clarification", "unreviewed"];
+const answerStatuses = ["fixed", "not_fixed", "needs_clarification", "unreviewed", "clarified", "no_changes_needed", "deferred"];
 const textTypes = new Set(["text/plain", "text/csv", "text/markdown", "text/xml", "application/json", "application/xml"]);
 const textLimit = 32 * 1024;
 const reportLimit = 12 * 1024 * 1024;
@@ -20,7 +20,7 @@ const tools = [
   },
   {
     name: "qa_report_save_answer",
-    description: "По поручению разработчика сохранить статус исправления и/или комментарий к пункту. Пропущенное поле сохраняется без изменений. comment заменяет прежний текст; пустая строка очищает его. Статус проверки QA не меняется. Используйте ревизию из последнего чтения; при конфликте перечитайте ответ, не перезаписывайте его автоматически.",
+    description: "По поручению пользователя сохранить статус ответа и/или комментарий к пункту. Для clarified укажите пояснение, для no_changes_needed — обоснование, для deferred — причину и условие возврата в комментарии. Пропущенное поле сохраняется без изменений. comment заменяет прежний текст; пустая строка очищает его. Статус проверки QA не меняется. Используйте ревизию из последнего чтения; при конфликте перечитайте ответ, не перезаписывайте его автоматически.",
     annotations: { readOnlyHint: false, destructiveHint: true },
     inputSchema: { type: "object", additionalProperties: false, properties: {
       sectionId: itemIdSchema,
@@ -139,7 +139,7 @@ function answerFrom(args) {
       || (comment !== undefined && (typeof comment !== "string" || comment.length > commentLimit))
       || (status === undefined && comment === undefined)
       || !Number.isSafeInteger(revision) || revision < 0) {
-    throw new ToolError("Передайте ID раздела и пункта, ревизию из отчёта и хотя бы одно поле: статус исправления или комментарий.");
+    throw new ToolError("Передайте ID раздела и пункта, ревизию из отчёта и хотя бы одно поле: статус ответа или комментарий.");
   }
   return { sectionId, rowId, status, comment, revision };
 }

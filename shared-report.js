@@ -121,6 +121,9 @@
     ["fixed", { label: "Исправлено", tone: "positive" }],
     ["not_fixed", { label: "Не исправлено", tone: "negative" }],
     ["needs_clarification", { label: "Требует уточнения", tone: "clarification" }],
+    ["clarified", { label: "Уточнено", tone: "informative" }],
+    ["no_changes_needed", { label: "Изменения не требуются", tone: "positive" }],
+    ["deferred", { label: "Отложено", tone: "muted" }],
   ]);
   const emptyAnswer = { status: "unreviewed", comment: "", revision: 0 };
   const answerRows = new Map();
@@ -1386,7 +1389,7 @@
     let timer;
     let composing = false;
 
-    select.setAttribute("aria-label", `Статус исправления пункта ${number}`);
+    select.setAttribute("aria-label", `Статус ответа пункта ${number}`);
     comment.contentEditable = "true";
     comment.setAttribute("role", "textbox");
     comment.setAttribute("aria-multiline", "true");
@@ -1736,7 +1739,7 @@
     for (const [sectionIndex, section] of report.sections.entries()) {
       const title = section.title || `Раздел ${sectionIndex + 1}`;
       const { section: node, body: points } = createSection(title, section.columns.map(column => column.label), [
-        ["Статус исправления", "correction-status"], ["Комментарий к исправлению", "correction-comment"],
+        ["Статус ответа", "correction-status"], ["Комментарий", "correction-comment"],
       ]);
       const table = node.querySelector("table");
       pins.attach(table);

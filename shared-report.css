@@ -547,7 +547,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .report-home .brand-mark { width: 56px; height: 34px; background: url("/icons/brand-light.png?v=2") center / 155% auto no-repeat; }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .report-home .brand-mark { background-image: url("/icons/brand-dark.png"); background-size: 122% auto; }
 .qa-report-view .toolbar-filters { flex: none; gap: 8px; }
-.qa-report-view { position: relative; --qa-status-width: 125px; --answer-status-width: 180px; --answer-comment-width: 280px; --report-data-min-width: 190px; }
+.qa-report-view { position: relative; --qa-status-width: 125px; --answer-status-width: 230px; --answer-comment-width: 280px; --report-data-min-width: 190px; }
 .qa-report-view > .reply-comment-toolbar { z-index: 8; inset: auto 16px 20px auto; }
 .answer-comment-slot > .reply-comment-toolbar { position: static; margin-top: 8px; max-width: 100%; box-shadow: none; }
 .qa-report-view .toolbar-select { width: 245px; }
@@ -589,7 +589,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view .report-table :is(th, td):is(.point-index, .report-cell) { position: relative; transform: translateX(var(--data-shift, 0px)); }
 .qa-report-view .report-table .report-scroll-spacer { padding: 0; border-inline: 0; pointer-events: none; }
 .qa-report-view .qa-status { width: 125px; min-width: 125px; }
-.qa-report-view .correction-status { width: 180px; min-width: 180px; }
+.qa-report-view .correction-status { width: 230px; min-width: 230px; }
 .qa-report-view .correction-comment { width: 280px; min-width: 280px; }
 .qa-report-view :is(th, td).qa-status,
 .qa-report-view :is(th, td).correction-status,
@@ -597,7 +597,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view :is(th, td).qa-status { inset-inline-end: 0; background: var(--surface); border-inline-start: 1px solid var(--line); }
 .qa-report-view .has-pinned-overlap :is(th, td).qa-status { box-shadow: -12px 0 16px -9px #091e6659; }
 :root:is([data-theme="dark"], [data-theme="graphite"]) .qa-report-view .has-pinned-overlap :is(th, td).qa-status { box-shadow: -12px 0 16px -9px #000c; }
-.qa-report-view[data-answer-view="table"] :is(th, td).qa-status { inset-inline-end: calc(var(--answer-status-width, 180px) + var(--answer-comment-width, 280px)); }
+.qa-report-view[data-answer-view="table"] :is(th, td).qa-status { inset-inline-end: calc(var(--answer-status-width, 230px) + var(--answer-comment-width, 280px)); }
 .qa-report-view :is(th, td).correction-status { inset-inline-end: var(--answer-comment-width, 280px); border-inline-start: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .qa-report-view :is(th, td).correction-comment { inset-inline-end: 0; }
 .qa-report-view .report-table thead :is(th, td) { background: var(--surface-subtle); }
@@ -606,6 +606,8 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 .qa-report-view td:is(.correction-status, .correction-comment)[data-tone="negative"] { background: var(--answer-negative-bg); }
 .qa-report-view td.correction-status[data-tone="negative"] { color: var(--answer-negative); }
 .qa-report-view td:is(.correction-status, .correction-comment)[data-tone="clarification"] { background: var(--clarification-bg); }
+.qa-report-view td:is(.correction-status, .correction-comment)[data-tone="informative"] { background: var(--informative-bg); }
+.qa-report-view td:is(.correction-status, .correction-comment)[data-tone="muted"] { background: var(--surface-subtle); }
 .qa-report-view td.correction-comment { color: var(--text); }
 .qa-report-view td:is(.correction-status, .correction-comment):not([data-tone="neutral"]) {
   border-block-end-color: color-mix(in srgb, var(--text) 32%, var(--line));
@@ -660,7 +662,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 }
 @media (max-width: 760px) {
   .report-document { padding-inline: 12px; }
-  .qa-report-view { --answer-status-width: 160px; --answer-comment-width: 220px; }
+  .qa-report-view { --answer-status-width: 230px; --answer-comment-width: 220px; }
   .shared-workspace:has(.answer-panel:not([hidden])) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 1fr) minmax(180px, 42%); }
   .answer-panel { margin: 0 12px 12px; padding: 12px; }
   .answer-panel-heading { padding-bottom: 10px; }
@@ -679,7 +681,7 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
   .qa-report-view .toolbar-info { gap: 8px; }
   .answer-view-control { gap: 3px; padding-inline-start: 6px; font-size: .78rem; }
   .answer-view-options button { padding-inline: 4px; font-size: .78rem; }
-  .qa-report-view .correction-status { min-width: 160px; }
+  .qa-report-view .correction-status { min-width: 230px; }
   .qa-report-view .correction-comment { min-width: 220px; }
   .qa-report-view[data-answer-view="table"] :is(th, td).qa-status,
   .qa-report-view[data-answer-view="table"] :is(th, td).correction-status,

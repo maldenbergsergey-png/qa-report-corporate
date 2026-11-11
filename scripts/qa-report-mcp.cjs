@@ -163,6 +163,7 @@ function createQaReportMcp(env = process.env) {
   });
 
   const reportScope = new AsyncLocalStorage();
+  let uploading = false;
   async function request(suffix, { method = "GET", json, bytes, headers = {} } = {}) {
     const body = json === undefined ? bytes : JSON.stringify(json);
     if (json !== undefined && (Buffer.byteLength(body) > MB || body.includes(config.token))) {
@@ -250,11 +251,16 @@ function createQaReportMcp(env = process.env) {
     if (config.fileRoot) register("qa_report_upload_attachment", "Загрузить байты локального файла из разрешённой QA_REPORT_FILE_ROOT без Base64. path — относительный или абсолютный путь внутри этой папки; символические ссылки наружу запрещены. Затем передайте fileId в attachmentIds пакета. Сам вызов ещё не прикрепляет файл к отчёту.",
       z.strictObject({ fileId: id, path: z.string().min(1).max(4096), contentType: z.string().regex(/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/).default("application/octet-stream") }), false, false,
       async args => {
-        const bytes = await attachmentBytes(config.fileRoot, args.path);
-        const value = await request(`/files/${args.fileId}`, { method: "PUT", bytes,
-          headers: { "Content-Type": args.contentType, "X-QA-File-Name": encodeURIComponent(path.basename(args.path)) } });
-        if (value?.id !== args.fileId || value.size !== bytes.length || typeof value.name !== "string" || typeof value.type !== "string") throw new ToolError("QA Report не подтвердил загрузку файла.");
-        return { fileId: value.id, name: value.name, type: value.type, size: value.size, attached: false };
+        // Hold the slot through the HTTP request, before allocating any file bytes.
+        if (uploading) throw new ToolError("Дождитесь завершения текущей загрузки файла и повторите запрос.");
+        uploading = true;
+        try {
+          const bytes = await attachmentBytes(config.fileRoot, args.path);
+          const value = await request(`/files/${args.fileId}`, { method: "PUT", bytes,
+            headers: { "Content-Type": args.contentType, "X-QA-File-Name": encodeURIComponent(path.basename(args.path)) } });
+          if (value?.id !== args.fileId || value.size !== bytes.length || typeof value.name !== "string" || typeof value.type !== "string") throw new ToolError("QA Report не подтвердил загрузку файла.");
+          return { fileId: value.id, name: value.name, type: value.type, size: value.size, attached: false };
+        } finally { uploading = false; }
       });
   }
   return server;

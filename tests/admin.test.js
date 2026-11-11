@@ -14,7 +14,7 @@ const adminPath = '/owner';
 const configPromise = passwordHash(password, 'b'.repeat(32)).then(hash => ({ version: 1, path: adminPath, username: 'owner', passwordSalt: 'b'.repeat(32), passwordHash: hash, visitorSecret: 'c'.repeat(64) }));
 const cookie = response => response.headers.get('set-cookie')?.split(';')[0] || '';
 
-async function fixture(t, { configured = true, production = false, trustProxy = false, identities = {} } = {}) {
+async function fixture(t, { configured = true, production = false, trustProxy = false, identities = {}, services = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-admin-'));
   const configFile = path.join(dir, 'credentials.json');
   if (configured) fs.writeFileSync(configFile, JSON.stringify(await configPromise));
@@ -40,7 +40,7 @@ async function fixture(t, { configured = true, production = false, trustProxy = 
         email_addresses: [{ id: 'primary', email_address: account.email }] }) : new Response(null, { status: 404 });
     },
   };
-  service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions });
+  service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions, ...services });
   t.after(async () => { await new Promise(resolve => server.close(resolve)); service.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   async function request(route, { method = 'GET', body, headers = {} } = {}) {
     return fetch(origin + route, { method, redirect: 'manual', headers: {
@@ -57,13 +57,13 @@ async function fixture(t, { configured = true, production = false, trustProxy = 
     return request('/api/usage/visit', { method: 'POST', body: { mode: 'browser' }, ...options });
   }
   return { service, dir, configFile, request, login, signal,
-    restart() { service.close(); service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions }); },
+    restart() { service.close(); service = createAdminService({ root, reportsPath: path.join(dir, 'reports.sqlite'), env, clock: () => now, ...identityOptions, ...services }); },
     setTime(value) { now = typeof value === 'string' ? Date.parse(value) : value; }, advance(ms) { now += ms; } };
 }
 
 test('readable admin paths exclude system routes and accept old generated paths', () => {
   for (const value of ['/owner', '/control-room', '/dashboard']) assert.equal(validAdminPath(value), true);
-  for (const value of ['/api', '/login', '/report', '/admin', '/secrets', '/owner/stats', '//evil.test', '/owner?x=1', '/%6fwner', '/owner/../api', '/.git', '/OWNER', '/owner/']) assert.equal(validAdminPath(value), false, value);
+  for (const value of ['/api', '/login', '/report', '/shared-report', '/admin', '/secrets', '/owner/stats', '//evil.test', '/owner?x=1', '/%6fwner', '/owner/../api', '/.git', '/OWNER', '/owner/']) assert.equal(validAdminPath(value), false, value);
   assert.equal(validAdminPath('/_manage_' + 'a'.repeat(32)), true);
 });
 
@@ -85,6 +85,7 @@ test('automatic setup protects delivery, preserves credentials on repeat and mig
   const changed = run(['--path', '/control-room/']); assert.equal(changed.status, 0, changed.stderr);
   assert.deepEqual(loadConfig(configFile), { ...initial, path: '/control-room' });
   assert.equal(run(['--path', '/api']).status, 1); assert.equal(loadConfig(configFile).path, '/control-room');
+  assert.equal(run(['--path', '/shared-report']).status, 1); assert.equal(loadConfig(configFile).path, '/control-room');
   const legacy = { ...initial, path: '/_manage_' + 'f'.repeat(32) }; fs.writeFileSync(configFile, JSON.stringify(legacy));
   assert.equal(run(['--path', '/owner']).status, 0); assert.deepEqual(loadConfig(configFile), initial);
   const nextFile = path.join(dir, 'private', 'rotated.json');
@@ -94,6 +95,35 @@ test('automatic setup protects delivery, preserves credentials on repeat and mig
   assert.equal(next.passwordHash, await passwordHash(nextAccess.password, next.passwordSalt));
   assert.ok(!(rotated.stdout + rotated.stderr).includes(nextAccess.password));
   assert.equal(run(['--generate', '--rotate-password', '--access-file', accessFile]).status, 1); assert.deepEqual(loadConfig(configFile), next);
+});
+
+test('user directory requires all access services and an admin session', async t => {
+  const services = {
+    accounts: { list(page, search) {
+      assert.equal(page, 2); assert.equal(search, 'tester');
+      return { users: [{ id: 'tester@example.test' }], page, total: 1 };
+    } },
+    publicationSettings: { getUser(id) { assert.equal(id, 'tester@example.test'); return { publish: 'allow', uploadsEnabled: true }; } },
+    cloudSettings: { getUser(id) { assert.equal(id, 'tester@example.test'); return false; } },
+  };
+  for (const missing of Object.keys(services)) {
+    await t.test('missing ' + missing, async t => {
+      const partial = { ...services, [missing]: undefined };
+      if (partial.accounts) partial.accounts = { list() { assert.fail('Incomplete directory must not be queried'); } };
+      const f = await fixture(t, { services: partial }); const session = await f.login();
+      const response = await f.request(adminPath + '/users', { headers: { Cookie: session.cookie } });
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: 'Не найдено' });
+    });
+  }
+  await t.test('complete configuration', async t => {
+    const f = await fixture(t, { services });
+    assert.equal((await f.request(adminPath + '/users')).status, 401);
+    const session = await f.login();
+    const response = await f.request(adminPath + '/users?page=2&search=tester', { headers: { Cookie: session.cookie } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { users: [{ id: 'tester@example.test', access: { publish: 'allow', uploadsEnabled: true, cloudEnabled: false } }], page: 2, total: 1 });
+  });
 });
 
 test('statistics and visitor identity survive service restart while admin sessions are revoked', async t => {

@@ -25,7 +25,7 @@ function validAdminPath(value) {
   // Existing generated addresses remain valid during migration to /owner.
   if (/^\/_manage_[a-f0-9]{32}$/.test(value)) return true;
   return /^\/[a-z][a-z0-9-]{1,47}$/.test(value) &&
-    !['/api', '/report', '/login', '/admin', '/icons', '/downloads', '/agent', '/agent-updates', '/vendor', '/scripts', '/secrets', '/reports-data', '/feedback-data', '/admin-config'].includes(value);
+    !['/api', '/report', '/shared-report', '/login', '/admin', '/icons', '/downloads', '/agent', '/agent-updates', '/vendor', '/scripts', '/secrets', '/reports-data', '/feedback-data', '/admin-config'].includes(value);
 }
 
 function loadConfig(file) {
@@ -277,7 +277,7 @@ function createAdminService({ root, reportsPath, env = process.env, clock = Date
           send(response, 200, state); return true;
         }
       }
-      if (suffix === '/users' && request.method === 'GET' && accounts) {
+      if (suffix === '/users' && request.method === 'GET' && accounts && publicationSettings && cloudSettings) {
         const directory = accounts.list(Number(url.searchParams.get('page') ?? '1'), url.searchParams.get('search') || '');
         for (const user of directory.users) user.access = { ...publicationSettings.getUser(user.id), cloudEnabled: cloudSettings.getUser(user.id) };
         send(response, 200, directory); return true;

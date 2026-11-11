@@ -122,6 +122,49 @@ test("uploads are confined to explicit root, preserve binary bytes and do not at
   assert.deepEqual(Buffer.from(await (await f.browser("/files/file-1")).arrayBuffer()), bytes);
 });
 
+test("uploads allow one in-flight file, keep the 50 MiB limit and recover after failures", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "qa-mcp-upload-"));
+  const file = await fs.open(path.join(directory, "boundary.bin"), "w");
+  await file.truncate(50 * 1024 * 1024); await file.close();
+  const received = [];
+  const firstReady = Promise.withResolvers(), firstRelease = Promise.withResolvers();
+  const server = http.createServer(async (req, res) => {
+    let size = 0;
+    for await (const chunk of req) size += chunk.length;
+    received.push({ url: req.url, size });
+    if (received.length === 1) {
+      firstReady.resolve(); await firstRelease.promise;
+      res.writeHead(500); res.end('{}'); return;
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ id: req.url.split('/').pop(), size, name: "boundary.bin", type: "application/octet-stream" }));
+  });
+  let client;
+  t.after(async () => {
+    firstRelease.resolve(); await client?.close(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  client = await connectMcp({ QA_REPORT_IMPORT_URL: `http://127.0.0.1:${server.address().port}/api/local-import/agent/session`,
+    QA_REPORT_IMPORT_TOKEN: "a".repeat(64), QA_REPORT_FILE_ROOT: directory });
+  const first = client.call("qa_report_upload_attachment", { fileId: "first", path: "boundary.bin" });
+  await Promise.race([firstReady.promise, first.then(() => assert.fail("First upload ended before reaching the service"))]);
+  const blocked = await client.call("qa_report_upload_attachment", { fileId: "second", path: "boundary.bin" });
+  failed(blocked);
+  assert.match(blocked.result.content[0].text, /Дождитесь завершения/);
+  assert.equal(received.length, 1);
+  assert.equal(data(await client.call("qa_report_capabilities")).limits.fileBytes, 50 * 1024 * 1024);
+  firstRelease.resolve(); failed(await first);
+  failed(await client.call("qa_report_upload_attachment", { fileId: "missing", path: "missing.bin" }));
+  const uploaded = data(await client.call("qa_report_upload_attachment", { fileId: "second", path: "boundary.bin" }));
+  assert.equal(uploaded.size, 50 * 1024 * 1024);
+  assert.deepEqual(received, [
+    { url: "/api/local-import/agent/session/files/first", size: uploaded.size },
+    { url: "/api/local-import/agent/session/files/second", size: uploaded.size },
+  ]);
+});
+
 test("read-only discovery excludes mutations; expired and stopped sessions lose access", async t => {
   let now = Date.now();
   const f = await fixture(t, { now: () => now, ttlMs: 1000 });

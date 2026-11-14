@@ -85,7 +85,8 @@
       if (button.dataset.state === state) continue;
       button.dataset.state = state;
       button.classList.toggle("history-ai-active", active);
-      button.querySelector("span").textContent = active ? "AI · ON" : "AI";
+      button.querySelector("span").textContent = "AI";
+      button.setAttribute("aria-description", active ? "Приём включён" : "Приём выключен");
       button.title = active ? "Приём включён: скопировать промпт или остановить" : "Настроить приём результатов от ИИ для этого чек-листа";
     }
     for (const panel of document.querySelectorAll("[data-history-ai-panel]")) panel.__update?.();

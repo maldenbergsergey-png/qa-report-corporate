@@ -75,9 +75,13 @@
     sync();
   }
   function ai(report, trigger) {
+    trigger.classList.add("history-ai-button");
+    const indicator = node("span", "", "history-ai-indicator");
+    indicator.setAttribute("aria-hidden", "true");
+    trigger.append(indicator);
     const content = node("div", "", "history-ai-content");
     const heading = node("div", "", "history-ai-heading");
-    heading.append(node("strong", "Приём результатов от ИИ"));
+    heading.append(node("strong", "Приём от ИИ"));
     const close = node("button", "×", "icon-button");
     close.type = "button"; close.setAttribute("aria-label", "Закрыть приём результатов");
     close.addEventListener("click", () => closeHistoryActionMenus({ restoreFocus: true }));
@@ -85,14 +89,18 @@
     const reportLabel = node("p", `${reportIssueLabel(report)} · ${reportPublicId(report)}`, "history-ai-report");
     const status = node("p", "", "history-ai-status");
     status.setAttribute("role", "status");
-    const hint = node("p", "Скопируйте промпт для ИИ и оставьте вкладку открытой. Результаты сохранятся в этом чек-листе.", "history-ai-hint");
+    const hint = node("p", "", "history-ai-hint");
     const actions = node("div", "", "history-ai-actions");
     const start = node("button", "Включить приём", "button button-primary");
     const copy = node("button", "Скопировать промпт", "button button-secondary");
     const stop = node("button", "Остановить", "button button-ghost");
     for (const button of [start, copy, stop]) button.type = "button";
     actions.append(start, copy, stop);
-    content.append(heading, reportLabel, status, hint, actions);
+    const intro = node("div", "", "history-ai-intro");
+    const body = node("div", "", "history-ai-body");
+    intro.append(heading, reportLabel);
+    body.append(status, hint);
+    content.append(intro, body, actions);
     const panel = createHistoryPopover(trigger, content);
     panel.classList.add("history-ai-popover");
     panel.dataset.historyAiPanel = report.id;
@@ -111,10 +119,11 @@
       copy.disabled = busy || state.stopping;
       stop.hidden = !active;
       stop.disabled = busy || state.stopping;
+      hint.textContent = state.personal ? "Подключено через MCP. Промпт доступен в настройках MCP-сервера."
+        : state.remote ? "Возобновите приём, чтобы получать результаты в этой вкладке."
+        : active ? "Передайте промпт ИИ и оставьте вкладку открытой."
+        : "Включите приём, чтобы получить промпт для ИИ.";
       if (panel.matches(":popover-open")) positionHistoryPopover(panel, trigger);
-      hint.textContent = state.personal ? "Приём включён через личное подключение MCP. Промпт доступен в настройках MCP-сервера."
-        : state.remote ? "Подключение найдено в другой вкладке. Возобновите приём здесь, чтобы получать результаты."
-        : "Скопируйте промпт для ИИ и оставьте вкладку открытой. Результаты сохранятся в этом чек-листе.";
     };
     async function run(action) {
       if (busy) return;

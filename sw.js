@@ -1,8 +1,8 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v183';
+const CACHE_NAME = 'qa-report-corporate-assets-v184';
 const SHELL = [
-  "/history-controls.js?v=1", "/history-controls.css?v=1",
+  "/history-controls.js?v=2", "/history-controls.css?v=2",
   "/task-context.js?v=1", "/task-context-ui.js?v=3", "/task-context.css?v=3",
   "/personal-mcp-settings.js?v=3",
   "/project-mcp-settings.js?v=4",
@@ -26,7 +26,7 @@ const SHELL = [
   "/import-options.js?v=7", "/import-wizard.js?v=6",
   "/attachment-limits.js?v=1",
   "/jira-attachment-reuse.js?v=5",
-  "/attachment-import.js?v=6", "/local-import-client.js?v=13",
+  "/attachment-import.js?v=6", "/local-import-client.js?v=14",
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",

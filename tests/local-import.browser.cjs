@@ -80,17 +80,27 @@ async function main() {
     assert.equal(await page.locator('#localImportModal').isVisible(), false);
     assert.equal(await page.evaluate(() => draft.reportId), before);
     assert.equal(await page.locator('.history-ai-popover:popover-open .history-ai-report').textContent(), `QA-${101 + index} · abc100${index + 1}`);
+    assert.equal(await page.locator('.history-ai-popover:popover-open').evaluate(panel => {
+      const hint = panel.querySelector('.history-ai-hint').getBoundingClientRect();
+      const buttons = [...panel.querySelectorAll('.history-ai-actions button')].filter(button => !button.hidden);
+      return buttons.every(button => button.getBoundingClientRect().top - hint.bottom >= 14);
+    }), true, 'AI actions stay separated from their explanation');
   }
   const connections = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')));
   for (let index = 0; index < 3; index++) {
     await open(index);
+    assert.equal(await page.locator(`[data-history-ai="receiver-${index}"] .history-ai-indicator`).evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(152, 163, 191)');
+    if (screenshots && index === 0) {
+      fs.mkdirSync(screenshots, { recursive: true });
+      await page.locator('.history-ai-popover:popover-open').screenshot({ path: path.join(screenshots, 'history-ai-off.png') });
+    }
     await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Включить приём', exact: true }).click();
     await page.waitForFunction(index => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === index + 1, index);
     assert.match(await page.locator('.history-ai-popover:popover-open .history-ai-status').textContent(), /Приём включён/);
     assert.equal(await page.evaluate(() => draft.reportId), 'receiver-0');
   }
   // Popovers remain inside narrow screens in each theme, and Escape preserves history.
-  for (const width of [390, 1600]) {
+  for (const width of [320, 390, 1600]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark', 'graphite']) {
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
@@ -102,6 +112,15 @@ async function main() {
       if (screenshots) {
         fs.mkdirSync(screenshots, { recursive: true });
         await page.screenshot({ path: path.join(screenshots, `history-ai-${width}-${theme}.png`) });
+        if (width === 1600 && theme === 'graphite') {
+          const panel = await page.locator('.history-ai-popover:popover-open').boundingBox();
+          const trigger = await page.locator('[data-history-ai="receiver-2"]').boundingBox();
+          const left = Math.min(panel.x, trigger.x) - 8, top = Math.min(panel.y, trigger.y) - 8;
+          await page.screenshot({ path: path.join(screenshots, 'history-ai-preview.png'), clip: {
+            x: left, y: top, width: Math.max(panel.x + panel.width, trigger.x + trigger.width) - left + 8,
+            height: Math.max(panel.y + panel.height, trigger.y + trigger.height) - top + 8,
+          } });
+        }
       }
       await page.keyboard.press('Escape');
       assert.equal(await page.locator('#historyModal').isVisible(), true);
@@ -128,7 +147,9 @@ async function main() {
   await page.click('#historyButton');
   await page.locator('[data-history-ai="receiver-0"]').waitFor();
   assert.equal(await page.locator('[data-history-ai][data-state="on"]').count(), 3);
-  assert.equal(await page.locator('[data-history-ai="receiver-0"]').textContent(), 'AI · ON');
+  assert.equal(await page.locator('[data-history-ai="receiver-0"]').textContent(), 'AI');
+  assert.equal(await page.locator('[data-history-ai="receiver-0"]').getAttribute('aria-description'), 'Приём включён');
+  assert.equal(await page.locator('[data-history-ai="receiver-0"] .history-ai-indicator').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(21, 184, 137)');
   const targetCard = page.locator('.history-item').filter({ has: page.locator('[data-history-ai="receiver-0"]') });
   await targetCard.locator('.history-note-edit').click();
   await targetCard.locator('.history-comment-field').fill('Receive retest results');

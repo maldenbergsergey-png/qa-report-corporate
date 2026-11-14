@@ -391,3 +391,15 @@ test("each report expires at its own deadline without extending or stopping anot
   assert.equal(stored.length, 1);
   assert.equal(stored[0].reportId, "later-report");
 });
+
+test("a stale history control never copies or stops another report's active connection", async () => {
+  const r = receiver();
+  await r.click("startLocalImport");
+  await r.ctx.QaLocalImport.stop("deleted-history-report");
+  await assert.rejects(r.ctx.QaLocalImport.copy("deleted-history-report"), /выключен/);
+  assert.equal(r.deleted.length, 0);
+  assert.equal(r.clipboard.length, 0);
+  assert.equal(JSON.parse(r.storage.get("qa-report-local-import-session-v1")).length, 1);
+  await r.ctx.QaLocalImport.copy("report");
+  assert.match(r.clipboard[0], /"reportId": "report"/);
+});

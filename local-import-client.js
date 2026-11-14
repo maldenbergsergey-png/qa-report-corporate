@@ -70,7 +70,7 @@
   const sessions = new Map();
   const endingSessions = new WeakSet();
   let sessionGeneration = 0; let syncing;
-  let starting = false; let busy = false; let timer; let clockTimer; let displayedReportId;
+  let starting = false; let startingReportId; let busy = false; let timer; let clockTimer; let displayedReportId;
   const currentSession = () => sessions.get(draft.reportId);
   const needsPolling = () => [...sessions.values()].some(item => (!item.personal && !item.remote) || item.stopping);
   root.QaReportMcpEditor = {
@@ -88,6 +88,7 @@
       button.querySelector("span").textContent = active ? "AI · ON" : "AI";
       button.title = active ? "Приём включён: скопировать промпт или остановить" : "Настроить приём результатов от ИИ для этого чек-листа";
     }
+    for (const panel of document.querySelectorAll("[data-history-ai-panel]")) panel.__update?.();
   }
   function message(value, current = currentSession()) {
     if (current) current.note = value;
@@ -295,35 +296,62 @@
     (currentSession() ? copy : starting ? document.getElementById("closeLocalImport") : start).focus();
     return syncSessions();
   }
-  Object.assign(root.QaLocalImport, { open, updateHistoryButtons });
+  function historyState(reportId) {
+    const session = sessions.get(reportId);
+    return { active: Boolean(session && session.expiresAt > Date.now()), remote: Boolean(session?.remote),
+      stopping: Boolean(session?.stopping), personal: Boolean(session?.personal), expiresAt: session?.expiresAt,
+      starting: starting && startingReportId === reportId };
+  }
+  Object.assign(root.QaLocalImport, { open, updateHistoryButtons, historyState, start: startReport,
+    async stop(reportId) {
+      const session = sessions.get(reportId);
+      if (!session) return;
+      await endSession(session);
+      if (session && sessions.get(reportId) === session) throw new Error(session.note || "Не удалось остановить подключение");
+    },
+    async copy(reportId) {
+      const session = sessions.get(reportId);
+      if (!session || session.stopping || session.expiresAt <= Date.now()) throw new Error("Приём в этом чек-листе выключен или срок подключения истёк");
+      if (!await copyPrompt(session)) throw new Error("Не удалось скопировать промпт. Разрешите доступ к буферу обмена");
+    }, syncSessions });
   trigger.addEventListener("click", open);
   document.getElementById("closeLocalImport").addEventListener("click", () => { panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); });
   panel.addEventListener("keydown", event => { if (event.key === "Escape") { event.stopPropagation(); panel.hidden = true; syncBodyModalOverflow(); trigger.focus(); } });
-  start.addEventListener("click", async () => {
-    if ((currentSession() && (!currentSession().remote || currentSession().stopping)) || starting) return;
+  start.addEventListener("click", () => {
     const reportId = draft.reportId;
-    starting = true; updateControls(); message("Включаем приём результатов…");
+    const validate = () => { if (draft.reportId !== reportId) throw new Error("Открыт другой отчёт. Включите приём в нужном отчёте"); };
+    return startReport(reportId, validate).catch(error => message(`Не удалось включить приём: ${error.message}`));
+  });
+  async function startReport(reportId, validate = () => {}) {
+    if (starting) throw new Error("Дождитесь включения приёма в другом чек-листе");
+    const existing = sessions.get(reportId);
+    if (existing && !existing.remote && !existing.stopping && existing.expiresAt > Date.now()) return;
+    if (existing?.stopping) throw new Error("Дождитесь остановки предыдущего подключения");
+    starting = true; startingReportId = reportId; updateControls();
     try {
-      const checkReport = () => { if (draft.reportId !== reportId) throw new Error("Открыт другой отчёт. Включите приём в нужном отчёте"); };
       await syncSessions();
-      checkReport();
+      validate();
+      const recovered = sessions.get(reportId);
+      if (recovered && !recovered.remote && !recovered.stopping && recovered.expiresAt > Date.now()) return;
       await checkBackendCompatibility();
-      checkReport();
-      await saveReportSnapshot("before-local-agent");
-      checkReport();
-      const body = { reportId, context: await context() };
+      validate();
+      if (draft.reportId === reportId) await saveReportSnapshot("before-local-agent");
+      const value = (await getReportRecord(reportId))?.document;
+      validate();
+      if (!value) throw new Error("Отчёт больше не доступен в истории");
+      const body = { reportId, context: await context(value) };
       if (typeof authCsrfToken === "function") body.csrfToken = await authCsrfToken();
+      validate();
       const session = await browserRequest("", { method: "POST", body: JSON.stringify(body) }, null);
       session.title = body.context.metadata.issueUrl.text || body.context.title;
-      session.publicId = draft.publicId;
+      session.publicId = value.publicId;
       sessions.set(session.reportId, session);
       sessionGeneration++;
       storeSessions();
       message("Скопируйте промпт для агента и оставьте вкладку открытой. Можно переключаться между отчётами", session);
       clearTimeout(timer); timer = setTimeout(poll, 500);
-    } catch (error) { message(`Не удалось включить приём: ${error.message}`); }
-    finally { starting = false; updateControls(); }
-  });
+    } finally { starting = false; startingReportId = undefined; updateControls(); }
+  }
   async function startPersonal(reportId, accountHeaders, validate = () => {}) {
     validate();
     const existing = sessions.get(reportId);
@@ -355,8 +383,8 @@
   async function copyPrompt(session = currentSession()) {
     if (!session) return;
     const instruction = `Заполни указанный отчёт QA Report через временный API. Не используй это подключение для других отчётов. Подключение:\n${JSON.stringify({ reportId: session.reportId, title: session.title, ...session.connection }, null, 2)}\n\nИспользуй заголовок X-QA-Import-Token: token.\nGET url/context возвращает строки, столбцы, hash каждой ячейки и context.metadata: issueUrl (ссылка или ключ задачи), environment (окружение или адрес стенда), overallStatus (общий Итог), intro (вводный текст); у каждого поля text и hash.\nPUT url/files/<уникальный-id> принимает байты файла; X-QA-File-Name — имя в encodeURIComponent, Content-Type — MIME-тип.\nPOST url/batches принимает JSON {id, kind:"cells", updates:[{sectionId,rowId,columnId,expectedHash,text,attachmentIds:["id-файла"]}]}. expectedHash берётся из контекста. text заменяет содержимое ячейки; mode:"append" дописывает. attachmentIds без text добавляет файлы к существующему тексту. status необязателен.\nДля полного чек-листа: {id,kind:"checklist",format:"jira",content:"разметка",attachmentIds:["id-файла"]}; ссылки на вложения: !имя.png! и [^имя.pdf]. Полный чек-лист заменяет указанный отчёт целиком без дополнительного подтверждения, пока приём включён. Для дозагрузки результатов и файлов в существующие ячейки используй kind:"cells" с актуальными expectedHash; если меняешь весь чек-лист, отправляй его целиком, включая ранее принятые данные.\nДля изменения полей отчёта: {id,kind:"metadata",metadata:{issueUrl:{value:"https://tasks.example.test/browse/QA-123",expectedHash:"hash поля issueUrl из context.metadata"},overallStatus:{value:"НЕ ОК",expectedHash:"hash поля overallStatus"}}}. Таким же способом передавай environment и intro. intro — обычный текст с переносами строк, без HTML. Итог: OK, НЕ ОК, ПОЧТИ ОК, НЕ ПРОВЕРЕНО, ЗАБЛОКИРОВАНО, ЧАСТИЧНО ПРОВЕРЕНО, ТРЕБУЕТ УТОЧНЕНИЯ. Передавай только изменяемые поля; metadata можно добавить и в пакет cells или checklist — всё сохранится вместе. При конфликте весь пакет отклоняется.\nGET url/batches/<id> возвращает pending, saved или rejected. Успех — только saved: браузер подтвердил сохранение. Повтор POST с тем же id и содержимым безопасен. При изменении содержимого используй новый id.\nЗагружай реальные файлы бинарными запросами; не генерируй Base64. Сессия временная, предназначена только для этого отчёта.`;
-    try { await navigator.clipboard.writeText(instruction); showToast("Подключение и инструкции для агента скопированы"); }
-    catch { message("Не удалось скопировать подключение. Разрешите доступ к буферу обмена", session); }
+    try { await navigator.clipboard.writeText(instruction); showToast("Подключение и инструкции для агента скопированы"); return true; }
+    catch { message("Не удалось скопировать подключение. Разрешите доступ к буферу обмена", session); return false; }
   }
   copy.addEventListener("click", () => copyPrompt());
   otherReports.addEventListener("click", event => {

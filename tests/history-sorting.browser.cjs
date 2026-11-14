@@ -41,6 +41,10 @@ async function main() {
     await context.addCookies([{ name: 'query-port-session', value: createSessionToken('qa@example.com', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
   }
   const page = await context.newPage();
+  async function chooseFilter(id, value) {
+    await page.click(`#${id}Button`);
+    await page.locator(`.history-filter-popover:popover-open button[data-value="${value}"]`).click();
+  }
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -100,13 +104,13 @@ async function main() {
   await page.selectOption('#historySort', 'updated');
   await page.waitForFunction(() => document.querySelector('.history-item h3')?.textContent === 'SHOP-1');
   assert.equal(await page.locator('[data-history-select="sort-0"]').isChecked(), true);
-  await page.selectOption('#historyProjectFilter', 'SHOP');
+  await chooseFilter('historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);
   await page.fill('#historySearch', 'SHOP-2');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 1);
   assert.match(await page.locator('#historySelectionCount').innerText(), /Скрыто фильтром: 1/);
   await page.fill('#historySearch', '');
-  await page.selectOption('#historyProjectFilter', '');
+  await chooseFilter('historyProjectFilter', '');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 3);
   await close();
   await open();

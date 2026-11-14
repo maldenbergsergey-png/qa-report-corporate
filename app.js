@@ -4994,6 +4994,8 @@ function updateHistorySelectionUi() {
   elements.historySelectionExit.disabled = historyDeleting;
   elements.historySearch.disabled = historyDeleting;
   elements.historyProjectFilter.disabled = historyDeleting;
+  if (elements.historyParentFilter) elements.historyParentFilter.disabled = historyDeleting;
+  elements.historyList.classList.toggle("history-selecting", historySelectionMode);
   elements.historySort.disabled = historyDeleting;
   elements.closeHistoryButton.disabled = historyDeleting;
   elements.historyList.querySelectorAll("[data-history-select]").forEach(checkbox => {
@@ -5396,6 +5398,10 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     const item = document.createElement("article");
     item.className = "history-item";
     item.classList.toggle("current", report.id === draft.reportId);
+    item.addEventListener("click", event => {
+      if (!historySelectionMode || historyDeleting || event.target.closest("input, textarea, button, a, .history-note")) return;
+      item.querySelector("[data-history-select]")?.click();
+    });
     const info = document.createElement("div");
     info.className = "history-item-info";
     const publicId = reportPublicId(report);
@@ -5475,18 +5481,11 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       } catch (error) { showToast(`Не удалось открыть отчёт: ${error.message}`, 9000); }
       finally { openButton.disabled = false; }
     }, false, "eye");
-    const aiButton = createSmallButton("AI", async () => {
-      aiButton.disabled = true;
-      try {
-        await openHistoryReport(report);
-        window.QaLocalImport.open();
-      } catch (error) { showToast(`Не удалось открыть приём результатов: ${error.message}`, 9000); }
-      finally { aiButton.disabled = false; }
-    }, false, "robot");
+    const aiButton = createSmallButton("AI", () => {}, false, "robot");
     aiButton.setAttribute("data-history-ai", report.id);
     aiButton.setAttribute("aria-label", `Приём результатов от ИИ для ${issueLabel}, ${publicId}`);
     aiButton.setAttribute("aria-haspopup", "dialog");
-    aiButton.setAttribute("aria-controls", "localImportModal");
+    const aiPanel = window.QaHistoryControls?.ai(report, aiButton);
     const copyButton = createSmallButton("Создать копию", async () => {
       copyButton.disabled = true;
       try {
@@ -5533,7 +5532,7 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
     }, false, "link");
     linkButton.title = report.source === "local" ? "Локальный отчёт: ссылка работает в этом браузере" : "Скопировать ссылку на этот отчёт";
     const cloudMenuButton = createSmallButton("Сохранить в облако", () => historyReportAction(report, () => personalCloud.open()), false, "cloud-upload");
-    actions.append(openButton, aiButton, createHistoryMoreMenu(report, [linkButton, copyButton, cloudMenuButton, deleteButton]));
+    actions.append(openButton, aiButton, ...(aiPanel ? [aiPanel] : []), createHistoryMoreMenu(report, [linkButton, copyButton, cloudMenuButton, deleteButton]));
     item.append(info, actions, note);
     const publications = createHistoryPublications(report);
     if (publications.children.length) item.append(publications);
@@ -10465,6 +10464,7 @@ elements.historySearch.addEventListener("input", () => {
   if (!historyLoading) renderHistoryList().catch(() => {});
 });
 elements.historyProjectFilter.addEventListener("change", () => {
+  if (elements.historyParentFilter) elements.historyParentFilter.value = "";
   if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
 });
 elements.historySort.addEventListener("change", () => {

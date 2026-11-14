@@ -87,3 +87,13 @@ test('Docker image includes every asset required to install the PWA, including w
     assert.equal(copied, true, `Required PWA asset absent from Docker image: ${relative}`);
   }
 });
+
+// Portable/shared snapshots capture their task parser when the script loads.
+// A missing dependency fails later while history compares a published report.
+test("task metadata dependencies load before portable report snapshots", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const scripts = [...html.matchAll(/<script\b[^>]*src="([^"?]+)(?:\?[^"\s]*)?"/g)].map(match => match[1]);
+  for (const [dependency, consumer] of [["/tracker-links.js", "/task-context.js"], ["/task-context.js", "/report-file.js"]]) {
+    assert.ok(scripts.indexOf(dependency) >= 0 && scripts.indexOf(dependency) < scripts.indexOf(consumer), `${dependency} must precede ${consumer}`);
+  }
+});

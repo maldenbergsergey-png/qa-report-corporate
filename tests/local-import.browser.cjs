@@ -72,23 +72,42 @@ async function main() {
   await page.locator('#introEditor').fill('Unsaved context from open report');
   async function open(index) {
     if (await page.locator('#localImportModal').isVisible()) await page.click('#closeLocalImport');
-    await page.click('#historyButton');
-    const button = page.locator(`[data-history-ai="receiver-${index}"]`);
-    await button.waitFor();
-    await button.click();
-    await page.locator('#localImportModal').waitFor();
-    assert.equal(await page.locator('#historyModal').isVisible(), false);
-    assert.equal(await page.evaluate(() => draft.reportId), `receiver-${index}`);
-    assert.equal(await page.locator('#localImportReport').textContent(), `QA-${101 + index} · abc100${index + 1}`);
+    if (!await page.locator('#historyModal').isVisible()) await page.click('#historyButton');
+    const before = await page.evaluate(() => draft.reportId);
+    await page.locator(`[data-history-ai="receiver-${index}"]`).click();
+    await page.locator('.history-ai-popover:popover-open').waitFor();
+    assert.equal(await page.locator('#historyModal').isVisible(), true);
+    assert.equal(await page.locator('#localImportModal').isVisible(), false);
+    assert.equal(await page.evaluate(() => draft.reportId), before);
+    assert.equal(await page.locator('.history-ai-popover:popover-open .history-ai-report').textContent(), `QA-${101 + index} · abc100${index + 1}`);
   }
   const connections = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')));
   for (let index = 0; index < 3; index++) {
     await open(index);
-    await page.click('#startLocalImport');
+    await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Включить приём', exact: true }).click();
     await page.waitForFunction(index => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === index + 1, index);
-    assert.equal(await page.locator('#localImportCountdown').isVisible(), true);
-    assert.match(await page.locator('#localImportRemaining').textContent(), /^0[45]:[0-5]\d:[0-5]\d$/);
+    assert.match(await page.locator('.history-ai-popover:popover-open .history-ai-status').textContent(), /Приём включён/);
+    assert.equal(await page.evaluate(() => draft.reportId), 'receiver-0');
   }
+  // Popovers remain inside narrow screens in each theme, and Escape preserves history.
+  for (const width of [390, 1600]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const theme of ['light', 'dark', 'graphite']) {
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+      await open(2);
+      assert.equal(await page.locator('.history-ai-popover:popover-open').evaluate(panel => {
+        const rect = panel.getBoundingClientRect();
+        return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight && panel.scrollWidth <= panel.clientWidth;
+      }), true);
+      if (screenshots) {
+        fs.mkdirSync(screenshots, { recursive: true });
+        await page.screenshot({ path: path.join(screenshots, `history-ai-${width}-${theme}.png`) });
+      }
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#historyModal').isVisible(), true);
+    }
+  }
+  await page.click('#closeHistoryButton');
   const active = await connections();
   assert.equal(active.length, 3);
   // A fresh tab has no reader keys in sessionStorage but can recover this browser's sessions.
@@ -106,7 +125,6 @@ async function main() {
   await recovered.close();
   assert.match(await page.evaluate(async () => (await getReportRecord('receiver-0')).document.intro), /Unsaved context from open report/);
   // History reflects each connection and reopening it keeps the same key and expiry.
-  await page.click('#closeLocalImport');
   await page.click('#historyButton');
   await page.locator('[data-history-ai="receiver-0"]').waitFor();
   assert.equal(await page.locator('[data-history-ai][data-state="on"]').count(), 3);
@@ -115,12 +133,14 @@ async function main() {
   await targetCard.locator('.history-note-edit').click();
   await targetCard.locator('.history-comment-field').fill('Receive retest results');
   await page.locator('[data-history-ai="receiver-0"]').click();
-  assert.equal(await page.locator('#copyLocalImport').isEnabled(), true);
-  await page.click('#copyLocalImport');
+  assert.equal(await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Скопировать промпт' }).isEnabled(), true);
+  await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Скопировать промпт' }).click();
   await until(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes('"reportId": "receiver-0"')));
   assert.equal(await page.evaluate(async () => (await getReportRecord('receiver-0')).historyComment), 'Receive retest results');
   assert.deepEqual((await connections()).map(item => [item.id, item.expiresAt]), active.map(item => [item.id, item.expiresAt]));
-  await open(2);
+  await page.click('#closeHistoryButton');
+  await page.evaluate(async () => applyDraftLocally((await getReportRecord('receiver-2')).document));
+  await page.click('#localImportButton');
   assert.equal(await page.locator('.local-import-report').count(), 2);
   const before = await page.locator('#localImportRemaining').textContent();
   await page.clock.fastForward(2100);
@@ -234,22 +254,21 @@ async function main() {
   const previousId = await page.evaluate(() => draft.reportId);
   await page.click('#historyButton');
   await page.locator('[data-history-ai="cloud-receiver"]').click();
-  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('Synthetic history load failure'));
+  await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Включить приём', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.history-ai-popover:popover-open .history-ai-status').textContent.includes('Synthetic history load failure'));
   assert.equal(await page.evaluate(() => draft.reportId), previousId);
   assert.equal(await page.locator('#localImportModal').isVisible(), false);
   assert.equal(await page.locator('#historyModal').isVisible(), true);
   await page.evaluate(() => { getReportRecord = originalGetReportRecord; });
-  await page.locator('[data-history-ai="cloud-receiver"]').click();
-  await page.locator('#localImportModal').waitFor();
-  assert.equal(await page.locator('#localImportReport').textContent(), 'QA-104 · abc1004');
-  assert.equal(await page.evaluate(async () => (await getReportRecord('cloud-receiver')).document.reportId), 'cloud-receiver');
-  await page.click('#startLocalImport');
-  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 1).catch(async error => {
-    console.error('Receiver status:', await page.locator('#localImportStatus').textContent());
-    throw error;
-  });
-  await page.click('#copyLocalImport');
+  await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Включить приём', exact: true }).click();
+  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 1);
+  await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Скопировать промпт' }).click();
   await until(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes('"reportId": "cloud-receiver"')));
+  assert.equal(await page.evaluate(() => draft.reportId), previousId);
+  await page.locator('.history-ai-popover:popover-open').getByRole('button', { name: 'Остановить', exact: true }).click();
+  await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('qa-report-local-import-session-v1')).length === 0);
+  assert.equal(await page.locator('#historyModal').isVisible(), true);
+  assert.equal(await page.evaluate(() => draft.reportId), previousId);
   assert.deepEqual(errors, []);
   console.log('Passed: history AI entry, new-tab recovery, failed history load, unsaved text and comments, three independent connections, prompts and stop by report, unchanged expiry, delivery, reload, three themes and narrow layout.');
 }

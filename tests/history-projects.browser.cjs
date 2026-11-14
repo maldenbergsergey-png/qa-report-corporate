@@ -41,6 +41,10 @@ async function main() {
     await context.addCookies([{ name: 'query-port-session', value: createSessionToken('qa@example.com', { env: { AUTH_SECRET: secret } }), url: origin, httpOnly: true, sameSite: 'Lax' }]);
   }
   const page = await context.newPage();
+  async function chooseFilter(id, value) {
+    await page.click(`#${id}Button`);
+    await page.locator(`.history-filter-popover:popover-open button[data-value="${value}"]`).click();
+  }
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -106,7 +110,7 @@ async function main() {
   assert.equal(await page.locator('#historyProjectFilter').evaluate(node => getComputedStyle(node).backgroundPositionX), 'calc(100% - 12px)');
   assert.deepEqual(await page.locator('#historyProjectFilter option').evaluateAll(options => options.map(option => option.value)), ['', 'APP', 'CLOUD', 'SHOP', 'none']);
   assert.equal(await page.locator('.history-project-label').filter({ hasText: /^SHOP$/ }).count(), 2);
-  await page.selectOption('#historyProjectFilter', 'SHOP');
+  await chooseFilter('historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);
   await page.fill('#historySearch', 'оплаты');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 1);
@@ -114,14 +118,14 @@ async function main() {
   // Preserve a pending comment before switching projects.
   await page.locator('.history-note-edit').click();
   await page.locator('.history-comment-field').fill('Ретест оплаты — сохранён');
-  await page.selectOption('#historyProjectFilter', 'APP');
+  await chooseFilter('historyProjectFilter', 'APP');
   await page.waitForSelector('.history-empty');
   await page.fill('#historySearch', '');
   await page.waitForSelector('.history-note-edit');
   assert.equal(await page.locator('.history-item h3').innerText(), 'APP-3');
-  await page.selectOption('#historyProjectFilter', 'none');
+  await chooseFilter('historyProjectFilter', 'none');
   await page.waitForFunction(() => document.querySelector('.history-item h3')?.textContent === 'Без задачи');
-  await page.selectOption('#historyProjectFilter', '');
+  await chooseFilter('historyProjectFilter', '');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 5);
   await page.click('#closeHistoryButton');
 
@@ -195,9 +199,47 @@ async function main() {
   assert.equal(await page.locator('.history-project-label').filter({ hasText: /^SHOP$/ }).first().getAttribute('style'), null);
   assert.equal(await page.evaluate(async () => (await getReportRecord('fixture-1')).historyComment), 'Ретест оплаты — сохранён');
   assert.equal(await page.evaluate(async () => JSON.stringify((await getReportRecord('fixture-1')).document)), oldDocument);
-  await page.selectOption('#historyProjectFilter', 'SHOP');
+  await chooseFilter('historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);
   await page.click('#closeHistoryButton');
+  await openHistory();
+  // Parent choices are unique and searchable. Project changes clear a narrower parent.
+  await chooseFilter('historyProjectFilter', '');
+  await page.evaluate(async () => {
+    const report = await getReportRecord('fixture-1');
+    report.document.taskInfo = { issueUrl: report.document.issueUrl, summary: 'Оплата с длинным названием задачи',
+      parent: { issueUrl: 'https://tasks.example.test/project/Task/SHOP-100', summary: 'Оформление заказа' } };
+    await dbTransaction('readwrite', store => store.put(report));
+    await renderHistoryList();
+  });
+  await page.click('#historyParentFilterButton');
+  assert.equal(await page.locator('.history-filter-popover:popover-open button').filter({ hasText: /^Без родительской задачи$/ }).count(), 1);
+  for (const width of [390, 1600]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.click('#historyParentFilterButton');
+    assert.equal(await page.locator('.history-filter-popover:popover-open').evaluate(panel => {
+      const rect = panel.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight && panel.scrollWidth <= panel.clientWidth;
+    }), true);
+    await screenshot(`${width}-parent-filter`);
+    await page.keyboard.press('Escape');
+  }
+  await page.click('#historyParentFilterButton');
+  await page.locator('.history-filter-popover:popover-open input').fill('Оформление');
+  assert.equal(await page.locator('.history-filter-popover:popover-open button').count(), 1);
+  await page.locator('.history-filter-popover:popover-open button').click();
+  await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 1);
+  assert.equal(await page.locator('.history-item h3').innerText(), 'SHOP-2');
+  await chooseFilter('historyProjectFilter', '');
+  await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 5);
+  assert.equal(await page.inputValue('#historyParentFilter'), '');
+  await page.click('#historyParentFilterButton');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#historyModal').isVisible(), true);
+  assert.equal(await page.locator('#historyParentFilterButton').evaluate(node => node === document.activeElement), true);
+  await chooseFilter('historyProjectFilter', 'SHOP');
+  await page.click('#closeHistoryButton');
+
   // The chosen project remains usable while history is loading.
   await page.evaluate(() => {
     window.originalHistoryRead = getAllHistoryReports;
@@ -208,7 +250,7 @@ async function main() {
   });
   await page.click('#historyButton');
   await page.waitForSelector('.history-skeleton');
-  await page.selectOption('#historyProjectFilter', 'APP');
+  await chooseFilter('historyProjectFilter', 'APP');
   await page.waitForFunction(() => typeof window.releaseProjectHistory === 'function');
   await page.evaluate(() => window.releaseProjectHistory());
   await page.waitForFunction(() => document.querySelector('.history-item h3')?.textContent === 'APP-3');
@@ -230,15 +272,20 @@ async function main() {
   assert.equal(await page.locator('#saveHistorySnapshotButton').count(), 0);
   assert.equal(await page.locator('[data-history-select]').count(), 0);
   assert.equal(await page.locator('#deleteSelectedHistoryButton').isHidden(), true);
-  await page.selectOption('#historyProjectFilter', 'SHOP');
+  await chooseFilter('historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);
   await page.click('#historySelectionToggle');
   await page.waitForSelector('[data-history-select="fixture-0"]');
-  await page.locator('[data-history-select="fixture-0"]').check();
+  const selectedReport = await page.evaluate(() => draft.reportId);
+  await page.locator('.history-item').filter({ has: page.locator('[data-history-select="fixture-1"]') }).locator('.history-task-title').click();
+  assert.equal(await page.locator('[data-history-select="fixture-1"]').isChecked(), true);
+  assert.equal(await page.locator('#historyModal').isVisible(), true);
+  assert.equal(await page.evaluate(() => draft.reportId), selectedReport);
+  assert.equal(await page.locator('[data-history-ai]:visible').count(), 0);
   assert.equal(await page.locator('#historySelectAll').evaluate(input => input.indeterminate), true);
   await page.locator('#historySelectAll').check();
   assert.equal(await page.locator('[data-history-select]:checked').count(), 2);
-  await page.selectOption('#historyProjectFilter', 'APP');
+  await chooseFilter('historyProjectFilter', 'APP');
   await page.waitForSelector('[data-history-select="fixture-2"]');
   await page.locator('#historySelectAll').check();
   assert.equal(await page.locator('#historySelectionCount').innerText(), 'Выбрано: 3 · Скрыто фильтром: 2');
@@ -248,7 +295,7 @@ async function main() {
   assert.match(await page.locator('#confirmModalMessage').innerText(), /скрытых текущим фильтром: 2/);
   await page.click('#cancelConfirmButton');
   assert.equal(await page.locator('#historySelectionCount').innerText(), 'Выбрано: 3 · Скрыто фильтром: 2');
-  await page.selectOption('#historyProjectFilter', '');
+  await chooseFilter('historyProjectFilter', '');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 5);
   await screenshot('history-selection');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -275,7 +322,7 @@ async function main() {
   assert.equal(await page.evaluate(async () => (await getReportRecord('cloud')) === undefined), true);
   assert.equal(await page.evaluate(() => window.bulkCloud.length), 1, 'deleting a browser copy keeps its cloud copy');
   assert.equal(await page.locator('#deleteSelectedHistoryButton').isDisabled(), true);
-  await page.selectOption('#historyProjectFilter', 'SHOP');
+  await chooseFilter('historyProjectFilter', 'SHOP');
   await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 2);
   await page.locator('#historySelectAll').check();
   await page.click('#deleteSelectedHistoryButton');

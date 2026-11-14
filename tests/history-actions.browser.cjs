@@ -93,6 +93,22 @@ async function main() {
   };
   await open();
   const first = page.locator('.history-item').filter({ has: page.locator('h3', { hasText: /^QA-1$/ }) });
+  // Comparing published snapshots also runs when selection or project filters rebuild history.
+  const initialReport = await page.evaluate(() => draft.reportId);
+  await page.click('#historySelectionToggle');
+  await first.locator('h3').click();
+  assert.equal(await first.locator('[data-history-select]').isChecked(), true);
+  for (const value of ['QA', '']) {
+    await page.click('#historyProjectFilterButton');
+    await page.locator(`.history-filter-popover:popover-open button[data-value="${value}"]`).click();
+    await page.waitForFunction(() => document.querySelectorAll('.history-item').length === 6);
+    assert.equal(await first.locator('[data-history-select]').isChecked(), true);
+    assert.equal(await page.locator('#historyModal').isVisible(), true);
+  }
+  assert.equal(await page.evaluate(() => draft.reportId), initialReport);
+  await page.click('#historySelectionExit');
+  await page.waitForFunction(() => !document.querySelector('[data-history-select]'));
+
   const link = first.getByRole('link', { name: 'Комментарий в Jira', exact: true });
   assert.equal(await link.getAttribute('href'), 'https://jira.example/browse/QA-1?focusedCommentId=10001#comment-10001');
   assert.equal(await link.getAttribute('target'), '_blank');

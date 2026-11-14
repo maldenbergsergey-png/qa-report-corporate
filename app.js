@@ -423,6 +423,8 @@ let historyLoading = false;
 let historySelectionMode = false;
 let historyDeleting = false;
 let historyFilteredReports = [];
+let historyReportsCache = null;
+let historyStoreRevision = 0;
 const selectedHistoryReportIds = new Set();
 let projectSettingsRequestId = 0;
 let projectSettingsLoaded = false;
@@ -801,7 +803,10 @@ async function dbTransaction(mode, action) {
       reject(error);
       return;
     }
-    transaction.oncomplete = () => resolve(result?.result);
+    transaction.oncomplete = () => {
+      if (mode === "readwrite") { historyReportsCache = null; historyStoreRevision++; }
+      resolve(result?.result);
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -1342,6 +1347,7 @@ function readDraftLocation() {
 
 async function handleDraftSyncMessage(message) {
   if (message?.type !== "draft-updated" || message.storageKey !== STORAGE_KEY) return;
+  historyReportsCache = null; historyStoreRevision++;
   // Accept messages from a tab that still runs the previous application version.
   if (message.draft) { handleRemoteDraftUpdate(message.draft); return; }
   if (!isSameDraftLineage(message) || !isNewerDraft(message) || message.tabId === tabId) return;
@@ -5015,7 +5021,7 @@ async function setHistorySelectionMode(enabled) {
   if (!enabled) selectedHistoryReportIds.clear();
   updateHistorySelectionUi();
   await flushVisibleHistoryComments();
-  await renderHistoryList();
+  await renderHistoryList({ reuseReports: true });
 }
 
 async function deleteHistoryReport(report) {
@@ -5115,6 +5121,9 @@ function closeHistory() {
   historyRenderRequestId++;
   setHistoryLoading(false);
   elements.historyModal.hidden = true;
+  elements.historyList.innerHTML = "";
+  historyReportsCache = null;
+  window.QaReportTaskUI.releaseHistory?.();
   syncBodyModalOverflow();
 }
 
@@ -5341,7 +5350,8 @@ function createHistoryPublications(report) {
   return group;
 }
 
-async function renderHistoryList({ showLoading = false, saveSnapshot = false } = {}) {
+async function renderHistoryList({ showLoading = false, saveSnapshot = false, reuseReports = false } = {}) {
+  if (reuseReports && elements.historyModal.hidden) return;
   closeHistoryActionMenus();
   const requestId = ++historyRenderRequestId;
   if (showLoading) setHistoryLoading(true);
@@ -5354,7 +5364,14 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false } =
       await saveReportSnapshot("open-history").catch(() => {});
     }
     if (requestId !== historyRenderRequestId) return;
-    reports = await getAllHistoryReports();
+    const revision = historyStoreRevision;
+    // View-only changes must not clone every saved attachment again. Any completed
+    // local write or message from another tab invalidates this open-window snapshot.
+    reports = reuseReports && historyReportsCache?.revision === revision
+      ? historyReportsCache.reports : await getAllHistoryReports();
+    if (requestId === historyRenderRequestId && !elements.historyModal.hidden) {
+      historyReportsCache = { reports, revision };
+    }
   } catch {
     if (requestId !== historyRenderRequestId) return;
     setHistoryLoading(false);
@@ -10461,14 +10478,14 @@ document.addEventListener("pointerdown", event => {
   }
 });
 elements.historySearch.addEventListener("input", () => {
-  if (!historyLoading) renderHistoryList().catch(() => {});
+  if (!historyLoading) renderHistoryList({ reuseReports: true }).catch(() => {});
 });
 elements.historyProjectFilter.addEventListener("change", () => {
   if (elements.historyParentFilter) elements.historyParentFilter.value = "";
-  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
+  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList({ reuseReports: true })).catch(() => {});
 });
 elements.historySort.addEventListener("change", () => {
-  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList()).catch(() => {});
+  if (!historyLoading) flushVisibleHistoryComments().then(() => renderHistoryList({ reuseReports: true })).catch(() => {});
 });
 elements.historySelectionToggle.addEventListener("click", () => {
   setHistorySelectionMode(!historySelectionMode).catch(() => {});
@@ -11066,7 +11083,7 @@ const personalCloud = window.QaReportCloud.create({
 window.QaReportTaskUI.init({
   getDraft: () => draft,
   apply: (info, url) => { flushDraftFromDom(); draft.issueUrl = url; draft.taskInfo = window.QaReportTaskContext.normalize(info, url); render(); scheduleSave({ collect: false }); },
-  historyRender: async () => { await flushVisibleHistoryComments(); await renderHistoryList(); }, toast: showToast,
+  historyRender: async () => { await flushVisibleHistoryComments(); await renderHistoryList({ reuseReports: true }); }, toast: showToast,
   start: async info => { const previous = draft.reportId; await resetDraft(); if (draft.reportId === previous) return; closeHistory(); draft.issueUrl = info.issueUrl; draft.taskInfo = window.QaReportTaskContext.normalize(info, info.issueUrl); render(); scheduleSave({ collect: false }); },
   connections: async () => { const { instances } = await reportApi("/api/jira/connections"); return instances.filter(item => item.connected).map(item => ({ provider: "jira", baseUrl: item.baseUrl })); },
   request: async (action, target) => { const { instances } = await reportApi("/api/jira/connections");

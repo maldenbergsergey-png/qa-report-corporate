@@ -154,5 +154,5 @@
   field.addEventListener("input", () => { message(); render(); });
   parentFilter.addEventListener("change", () => { inventory = null; api.historyRender().catch(error => api.toast(error.message)); });
   loadChildren.addEventListener("click", fetchChildren);
-  window.QaReportTaskUI = { init(value) { api = value; render(); }, render, historyParents, historyMatches, decorateHistory, renderInventory };
+  window.QaReportTaskUI = { init(value) { api = value; render(); }, render, historyParents, historyMatches, decorateHistory, renderInventory, releaseHistory() { historyReports = []; } };
 })();

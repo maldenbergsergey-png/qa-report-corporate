@@ -97,6 +97,9 @@ async function main() {
   await page.check('#selectionStatusOptions input[value="OK"]');
   await page.click('#selectionStatusApply');
   assert.equal(await page.locator('#selectionCount').textContent(), 'Выбрано: 0');
+  assert.deepEqual(await rows(), ['row-1', 'row-4', 'second-fail']);
+  assert.deepEqual(await page.locator('.report-status-filter-chip > span').allTextContents(), ['Не ОК', 'Заблокировано']);
+  assert.equal(await page.locator('#selectionStatusButton').textContent().then(s => s.trim()), 'Выбрать по статусу');
   await page.check('#selectionAll');
   assert.equal(await page.locator('#selectionCount').textContent(), 'Выбрано: 3');
   // Cancel and Escape do not apply staged options.
@@ -264,12 +267,13 @@ async function main() {
     await page.screenshot({ path: path.join(temp, `${theme}-${width}.png`), fullPage: true });
     await page.keyboard.press('Escape');
     assert.ok(await page.locator('#reportStatusFilterBar').evaluate(n => n.getBoundingClientRect().right <= innerWidth));
-    assert.ok(await page.locator('.report-status-filter-chip, .report-status-filter-remove, #resetReportStatusFilter, #selectionDelete, #selectionCopyButton').evaluateAll(nodes => nodes.every(node => {
+    assert.ok(await page.locator('.report-status-filter-chip, .report-status-filter-remove, #resetReportStatusFilter, #selectionDelete').evaluateAll(nodes => nodes.every(node => {
       const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth;
     })));
     const deletion = await page.locator('#selectionDelete').boundingBox();
-    const actions = await page.locator('.selection-actions').boundingBox();
-    assert.ok(deletion.x + deletion.width >= actions.x + actions.width - 1, 'Delete stays at the right edge of the action group');
+    const tags = await page.locator('#selectionTagsButton').boundingBox();
+    assert.ok(Math.abs(deletion.y - tags.y) <= 1, 'Delete shares the tags row');
+    assert.ok(deletion.x - tags.x - tags.width >= 5 && deletion.x - tags.x - tags.width <= 9, 'Delete immediately follows tags without empty space');
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   // Destructive bulk actions cannot include filtered-out rows.

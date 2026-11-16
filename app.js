@@ -2129,7 +2129,7 @@ async function copySelectedRowsToNewChecklist() {
   } finally {
     selectionCopyBusy = false;
     updateSelectionUi();
-    if (draft.draftId === documentId && selectionMode && elements.confirmModal.hidden) selectionUi.CopyButton.focus();
+    if (draft.draftId === documentId && selectionMode && elements.confirmModal.hidden) selectionUi.MoveButton.focus();
   }
 }
 

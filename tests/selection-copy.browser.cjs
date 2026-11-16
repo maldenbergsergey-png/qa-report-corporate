@@ -72,6 +72,7 @@ async function main() {
   await page.uncheck('[data-selection-row="two"]');
   const originalUrl = page.url();
   const historyBeforeCancel = await page.evaluate(async () => (await getAllReports()).length);
+  await page.click('#selectionMoveButton');
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -84,6 +85,7 @@ async function main() {
   await page.waitForFunction(() => !selectionCopyBusy);
   assert.equal(await page.evaluate(async () => (await getAllReports()).length), historyBeforeCancel);
   assert.equal(await page.evaluate(() => selectedRowIds.size), 2);
+  assert.equal(await page.locator('#selectionMoveButton').evaluate(n => n === document.activeElement), true);
 
   if (process.env.QA_REPORT_COPY_SCREENSHOTS) {
     await page.screenshot({ path: path.join(temp, 'copy-desktop.png') });
@@ -92,6 +94,7 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 1000 });
     console.log(`Screenshots: ${temp}`);
   }
+  await page.click('#selectionMoveButton');
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.click('#acceptSelectionCopyOptions');
@@ -116,6 +119,7 @@ async function main() {
   assert.equal(copies.sections[0].rows[0].manualNumber, '7');
   assert.match(copies.sections[1].rows[0].cells.extra, /data:image/);
   assert.equal(copies.sections[1].collapsed, false);
+  await page.click('#selectionMoveButton');
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.click('#acceptSelectionCopyOptions');
@@ -137,6 +141,7 @@ async function main() {
     window.realOpenDatabase = openDatabase;
     openDatabase = async () => { throw Error('Test storage failure'); };
   });
+  await page.click('#selectionMoveButton');
   await page.click('#selectionCopyButton');
   await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
   await page.click('#acceptSelectionCopyOptions');
@@ -197,6 +202,7 @@ async function main() {
         window.historyBeforeNumbering = new Set((await getAllReports()).map(r => r.id));
         return [numbers.get('pick'), numbers.get('last')];
       }, { mode });
+      await page.click('#selectionMoveButton');
       await page.click('#selectionCopyButton');
       await page.waitForSelector('#selectionCopyOptionsModal:not([hidden])');
       await page.locator('#selectionCopyPreserveRowNumbers').setChecked(preserve);

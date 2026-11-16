@@ -1,8 +1,8 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v190';
+const CACHE_NAME = 'qa-report-corporate-assets-v191';
 const SHELL = [
-  "/checklist-tags.js?v=5", "/checklist-tags.css?v=6",
+  "/checklist-tags.js?v=6", "/checklist-tags.css?v=7",
   "/history-controls.js?v=2", "/history-controls.css?v=2",
   "/task-context.js?v=1", "/task-context-ui.js?v=3", "/task-context.css?v=3",
   "/personal-mcp-settings.js?v=3",
@@ -31,7 +31,7 @@ const SHELL = [
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=9', '/report-view.js?v=14', '/styles.css?v=162', '/app.js?v=181', '/pwa.js?v=6',
+  '/report-view.css?v=9', '/report-view.js?v=14', '/styles.css?v=162', '/app.js?v=182', '/pwa.js?v=6',
   '/jira-markup-import.js?v=15', '/checklist-selection.js?v=7',
   '/checklist-numbering.js?v=4', '/release-notes.js?v=147',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',

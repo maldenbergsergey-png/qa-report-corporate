@@ -3,7 +3,7 @@ function mountTagScope(name, anchor, source, initial, changed = () => {}) {
   let host = document.getElementById(`tagScope-${name}`);
   if (!host) { host = document.createElement("div"); host.id = `tagScope-${name}`; host.className = "qa-tags-filter-host"; anchor.before(host); }
   tagScopes[name] = window.QaReportTags.scope(initial ?? window.QaReportTags.editorScope);
-  host.replaceChildren(window.QaReportTags.createFilter(source, tagScopes[name], value => { tagScopes[name] = value; changed(); }));
+  host.replaceChildren(window.QaReportTags.createPublicationFilter(source, tagScopes[name], value => { tagScopes[name] = value; changed(); }));
 }
 function updateTagToolbar() {
   const button = document.getElementById("tagFilterButton");
@@ -4547,7 +4547,8 @@ function askPublishScope(link = null) {
   updatePublishScopeState();
   elements.publishScopeModal.hidden = false;
   syncBodyModalOverflow();
-  elements.publishScopeSelectAll.focus();
+  elements.publishScopeModal.querySelector(".publish-scope-body").scrollTop = 0;
+  document.getElementById("publishStatusSelectAll").focus({ preventScroll: true });
   return new Promise((resolve) => {
     publishScopeResolver = resolve;
   });
@@ -8261,6 +8262,7 @@ function updateSharedTagCount() {
     if (content && window.QaReportTags.matches(row, scope) && !excluded.has(JSON.stringify([section.id, row.id]))) count++;
   }
   summary.textContent = `К публикации: ${count} из ${total} пунктов`;
+  if (shareReportContext) { shareReportContext.tagRowCount = count; updateShareReportControls(); }
 }
 
 function renderSharedExclusions(excludedRows = []) {
@@ -8634,7 +8636,7 @@ function updateShareReportControls() {
   shareReport.Publish.textContent = context?.paused ? "Продолжить загрузку" : recovering
     ? sharedAttemptScope(context.reportId, pending) && !context.archivedPending ? "Продолжить загрузку" : "Восстановить ссылку"
     : creatingNew ? "Создать ссылку" : updating ? "Обновить отчёт" : "Опубликовать отчёт";
-  shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || context.publicationDenied || (context.publicationPaused && !recovering);
+  shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || (publishing && context?.tagRowCount === 0) || context.publicationDenied || (context.publicationPaused && !recovering);
   shareReport.SignOut.hidden = shareReportBusy || !context?.accountSignedIn;
   shareReport.SignOut.disabled = Boolean(context?.accountBusy);
   shareReport.Minimize.hidden = !shareReportOperation && !context?.paused;

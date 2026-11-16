@@ -1772,8 +1772,30 @@ function updateReportStatusFilterUi() {
   const count = rows.filter(matchesReportStatusFilter).length;
   const active = reportStatusFilter !== null;
   document.getElementById("reportStatusFilterBar").hidden = !active;
-  document.getElementById("reportStatusFilterSummary").textContent =
-    `Показано пунктов: ${count} из ${rows.length}. Статусы: ${[...(reportStatusFilter || [])].join(", ") || "не выбраны"}`;
+  const summary = document.getElementById("reportStatusFilterSummary");
+  const total = document.createElement("strong");
+  total.textContent = `${count} из ${rows.length}`;
+  summary.replaceChildren("Показано ", total, " пунктов");
+  const chips = document.getElementById("reportStatusFilterChips");
+  chips.replaceChildren();
+  for (const status of reportStatusFilter || []) {
+    const label = { OK: "OK", "НЕ ОК": "Не ОК", "ПОЧТИ ОК": "Почти ОК" }[status]
+      || status[0] + status.slice(1).toLocaleLowerCase("ru");
+    const chip = document.createElement("span");
+    chip.className = `report-status-filter-chip ${STATUS_META[status].className}`;
+    const text = document.createElement("span");
+    text.textContent = label;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "report-status-filter-remove";
+    remove.dataset.filterStatus = status;
+    remove.setAttribute("aria-label", `Убрать статус «${label}» из фильтра`);
+    remove.title = `Убрать статус «${label}» из фильтра`;
+    remove.append(createUiIcon("x"));
+    chip.append(text, remove);
+    chips.append(chip);
+  }
+  if (active && !reportStatusFilter.size) chips.textContent = "Статусы не выбраны";
   document.getElementById("selectionFilterLabel").textContent = active
     ? `Показывать: ${reportStatusFilter.size} из ${Object.keys(STATUS_META).length}` : "Показывать: все статусы";
   selectionUi.FilterButton.classList.toggle("filter-active", active);
@@ -9490,9 +9512,16 @@ document.getElementById("resetReportStatusFilter").addEventListener("click", () 
   setReportStatusFilter(null);
   selectionUi.Toggle.focus();
 });
-document.getElementById("editReportStatusFilter").addEventListener("click", () => {
-  if (!selectionMode) setSelectionMode(true);
-  openSelectionMenu("Filter");
+document.getElementById("reportStatusFilterChips").addEventListener("click", (event) => {
+  const remove = event.target.closest("button[data-filter-status]");
+  if (!remove || !reportStatusFilter?.has(remove.dataset.filterStatus)) return;
+  const buttons = [...document.querySelectorAll(".report-status-filter-remove")];
+  const index = buttons.indexOf(remove);
+  const statuses = new Set(reportStatusFilter);
+  statuses.delete(remove.dataset.filterStatus);
+  setReportStatusFilter(statuses.size ? statuses : null);
+  const remaining = [...document.querySelectorAll(".report-status-filter-remove")];
+  (remaining[index] || remaining.at(-1) || selectionUi.Toggle).focus();
 });
 selectionUi.StatusButton.addEventListener("click", () => openSelectionMenu("Status"));
 selectionUi.MoveButton.addEventListener("click", () => openSelectionMenu("Move"));

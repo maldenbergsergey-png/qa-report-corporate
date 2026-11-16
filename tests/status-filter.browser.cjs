@@ -208,7 +208,7 @@ async function main() {
   assert.equal(await preview.getByText('Пунктов с выбранными статусами нет', { exact: true }).isVisible(), true);
   assert.match(await preview.locator('.counts').textContent(), /0 из 9/);
   await previewReset.click();
-  assert.equal(await page.locator('#previewFilterValue').textContent(), 'Все пункты');
+  assert.equal(await page.locator('#previewFilterValue').textContent(), 'Все');
   assert.equal(await page.locator('#previewFilter summary').evaluate(node => node === document.activeElement), true);
   assert.match(await preview.locator('.counts').textContent(), /9 из 9/);
   assert.equal(await previewReset.isHidden(), true);
@@ -225,10 +225,35 @@ async function main() {
   await page.click('#selectionFilterButton');
   await page.click('#selectionFilterReset');
   assert.equal((await rows()).length, 10);
+  // Removable status chips work outside selection mode and preserve hidden edits.
+  await chooseFilter(['НЕ ПРОВЕРЕНО', 'ЧАСТИЧНО ПРОВЕРЕНО']);
+  assert.deepEqual(await page.locator('.report-status-filter-chip > span').allTextContents(), ['Не проверено', 'Частично проверено']);
+  assert.equal(await page.locator('#editReportStatusFilter').count(), 0);
+  await page.locator('[data-row-id="blank"] .cell-editor').fill('Pending edit before removing status');
+  await page.click('#selectionExit');
+  const removeUnchecked = page.getByRole('button', { name: 'Убрать статус «Не проверено» из фильтра', exact: true });
+  await removeUnchecked.press('Enter');
+  assert.deepEqual(await rows(), ['row-5']);
+  assert.equal(await page.locator('#selectionToolbar').isHidden(), true);
+  assert.equal(await page.locator('#selectionFilterMenu').isHidden(), true);
+  assert.equal(await page.locator('#selectionFilterLabel').textContent(), 'Показывать: 1 из 7');
+  const removePartial = page.getByRole('button', { name: 'Убрать статус «Частично проверено» из фильтра', exact: true });
+  assert.equal(await removePartial.evaluate(n => n === document.activeElement), true);
+  await removePartial.press('Space');
+  assert.equal((await rows()).length, 10);
+  assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);
+  assert.equal(await page.locator('#selectionToggle').evaluate(n => n === document.activeElement), true);
+  assert.equal(await page.locator('[data-row-id="blank"] .cell-editor').textContent(), 'Pending edit before removing status');
+  assert.equal(await page.evaluate(() => draft.sections.flatMap(s => s.rows).length), 10);
+  // Removing the final chip resets to all; applying an explicitly empty menu remains empty.
+  await chooseFilter(['OK']);
+  assert.deepEqual(await page.locator('.report-status-filter-chip > span').allTextContents(), ['OK']);
+  await page.locator('.report-status-filter-remove').click();
+  assert.equal((await rows()).length, 10);
   // Inspect menu and banner across themes and narrow/wide viewports.
   await page.waitForFunction(() => !document.getElementById('toast').classList.contains('visible'));
   await chooseFilter(['НЕ ОК', 'ЗАБЛОКИРОВАНО']);
-  for (const [theme, width] of [['light', 1440], ['graphite', 1440], ['graphite', 390]]) {
+  for (const [theme, width] of [['light', 1440], ['dark', 1440], ['graphite', 1440], ['graphite', 1100], ['graphite', 820], ['graphite', 390]]) {
     await page.evaluate(theme => applyTheme(theme), theme);
     await page.setViewportSize({ width, height: 900 });
     await page.click('#selectionFilterButton');
@@ -239,6 +264,12 @@ async function main() {
     await page.screenshot({ path: path.join(temp, `${theme}-${width}.png`), fullPage: true });
     await page.keyboard.press('Escape');
     assert.ok(await page.locator('#reportStatusFilterBar').evaluate(n => n.getBoundingClientRect().right <= innerWidth));
+    assert.ok(await page.locator('.report-status-filter-chip, .report-status-filter-remove, #resetReportStatusFilter, #selectionDelete, #selectionCopyButton').evaluateAll(nodes => nodes.every(node => {
+      const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth;
+    })));
+    const deletion = await page.locator('#selectionDelete').boundingBox();
+    const actions = await page.locator('.selection-actions').boundingBox();
+    assert.ok(deletion.x + deletion.width >= actions.x + actions.width - 1, 'Delete stays at the right edge of the action group');
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   // Destructive bulk actions cannot include filtered-out rows.

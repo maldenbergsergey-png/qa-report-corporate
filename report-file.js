@@ -1,6 +1,7 @@
 /* Portable .report v1: a bounded, uncompressed ZIP with verified binary assets. */
 (function (root) {
   "use strict";
+  const Tags = typeof module === "object" && module.exports ? require("./checklist-tags") : root.QaReportTags;
   const TaskContext = typeof module === "object" && module.exports ? require("./task-context") : root.QaReportTaskContext;
   const MAX_BYTES = 250 * 1024 * 1024;
   const MAX_FILES = 1000;
@@ -419,24 +420,25 @@
     const { attachments: _introFiles, ...intro } = inspectPart(report.intro, "intro");
     const structure = [], statuses = [], checks = [];
     for (const section of report.sections) {
+      const columns = section.columns.filter(column => Tags.scope(options.tagFilter).showTags || !Tags.isColumn(column));
       const rows = [];
       for (const row of section.rows) {
         if (options.includeRow && !options.includeRow(section, row)) continue;
-        const entries = section.columns.map(column => [column.id, inspectPart(row.cells[column.id], [row.id, column.id])]);
+        const entries = columns.map(column => [column.id, inspectPart(row.cells[column.id], [row.id, column.id])]);
         const bugs = sharedBugs(row);
         if (!sharedRowVisible(row, bugs, entries)) continue;
         rows.push([row.id, options.rowNumbers.get(row.id)]);
         statuses.push(row.status);
         checks.push([bugs, entries.map(([, { attachments: _cellFiles, ...part }]) => part)]);
       }
-      if (rows.length) structure.push([section.id, options.sectionTitle(section), section.columns.map(column => [column.id, column.title]), rows]);
+      if (rows.length) structure.push([section.id, options.sectionTitle(section), columns.map(column => [column.id, column.title, ...(column.type === "tags" ? ["tags"] : [])]), rows]);
     }
     return { metadata: [options.title, shareLink(shareUrl(report.issueUrl)), report.environment, report.overallStatus, ...(report.taskInfo ? [report.taskInfo] : [])],
       intro, structure, statuses, checks, attachments };
   }
 
   async function prepareSharedSnapshot(value, {
-    title, load, toText, toCode, rowNumbers, sectionTitle, includeImages, includeFiles, onProgress, onAttachment, signal, includeRow = () => true,
+    title, load, toText, toCode, rowNumbers, sectionTitle, includeImages, includeFiles, onProgress, onAttachment, signal, tagFilter, includeRow = () => true,
   }) {
     const report = documentFields(value);
     const maximumFile = 50 * 1024 * 1024;
@@ -484,15 +486,16 @@
       return { ...part, ...(fragments && { fragments }), attachments: [...attachments] };
     }
 
+    const optionsTagScope = Tags.scope(tagFilter);
     const intro = await preparePart(report.intro);
     const sections = [];
     for (const section of report.sections) {
-      const columns = section.columns.map(column => ({ id: column.id, label: column.title }));
+      const columns = section.columns.filter(column => optionsTagScope.showTags || !Tags.isColumn(column)).map(column => ({ id: column.id, label: column.title, ...(Tags.isColumn(column) && { type: "tags" }) }));
       const rows = [];
       for (const row of section.rows) {
         if (!includeRow(section, row)) continue;
         const entries = [];
-        for (const column of columns) entries.push([column.id, await preparePart(row.cells[column.id])]);
+        for (const column of columns) entries.push([column.id, column.type === "tags" ? { text: Tags.read(row.cells[column.id]).join("\n"), attachments: [] } : await preparePart(row.cells[column.id])]);
         const bugs = sharedBugs(row);
         if (!sharedRowVisible(row, bugs, entries)) continue;
         rows.push({ id: row.id, number: rowNumbers.get(row.id), status: row.status, cells: Object.fromEntries(entries), bugs });

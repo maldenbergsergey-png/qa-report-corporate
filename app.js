@@ -1,3 +1,61 @@
+const tagScopes = {};
+function mountTagScope(name, anchor, source, initial, changed = () => {}) {
+  let host = document.getElementById(`tagScope-${name}`);
+  if (!host) { host = document.createElement("div"); host.id = `tagScope-${name}`; host.className = "qa-tags-filter-host"; anchor.before(host); }
+  tagScopes[name] = window.QaReportTags.scope(initial ?? window.QaReportTags.editorScope);
+  host.replaceChildren(window.QaReportTags.createFilter(source, tagScopes[name], value => { tagScopes[name] = value; changed(); }));
+}
+function updateTagToolbar() {
+  const button = document.getElementById("tagFilterButton");
+  const api = window.QaReportTags, scope = api.editorScope;
+  const count = scope.include.length + scope.exclude.length;
+  button.querySelector("[data-tag-filter-label]").textContent = count ? `Метки · ${count}` : "Метки";
+  button.classList.toggle("filter-active", api.active(scope));
+  button.setAttribute("aria-expanded", String(Boolean(document.getElementById("tagFilterPanel").firstElementChild?.open)));
+  document.getElementById("selectionTagsButton").disabled = !selectedRowIds.size;
+}
+function openTagFilter() {
+  const host = document.getElementById("tagFilterPanel");
+  if (host.firstElementChild?.open) { host.replaceChildren(); document.getElementById("tagFilterButton").setAttribute("aria-expanded", "false"); return; }
+  const api = window.QaReportTags;
+  const panel = api.createFilter(draft, api.editorScope, value => {
+    flushDraftFromDom(); api.editorScope = value;
+    renderSections(); renderSummary();
+  });
+  panel.open = true; host.replaceChildren(panel);
+  const button = document.getElementById("tagFilterButton"), rect = button.getBoundingClientRect();
+  button.setAttribute("aria-expanded", "true");
+  panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - Math.min(420, innerWidth - 24) - 12))}px`;
+  panel.style.top = `${Math.min(rect.bottom + 8, Math.max(12, innerHeight - 180))}px`;
+}
+function tagSelectedRows() {
+  flushDraftFromDom();
+  const reportId = draft.draftId, ids = new Set(selectedRowIds);
+  if (!ids.size) return;
+  window.QaReportTags.picker(document.getElementById("selectionTagsButton"), { source: draft, bulk: true, change(values, action) {
+    if (draft.draftId !== reportId) return;
+    flushDraftFromDom();
+    commitSelectionMutation(() => {
+      const api = window.QaReportTags;
+      for (const section of draft.sections) {
+        const rows = section.rows.filter(row => ids.has(row.id)); if (!rows.length) continue;
+        let column = section.columns.find(api.isColumn);
+        if (!column && action === "remove") continue;
+        if (!column) { column = { id: crypto.randomUUID(), title: "Метки", type: "tags", width: 200 }; section.columns.push(column); section.rows.forEach(row => { row.cells[column.id] = ""; }); }
+        for (const row of rows) {
+          const existing = api.read(row.cells[column.id]);
+          row.cells[column.id] = api.html(action === "remove" ? existing.filter(tag => !values.some(value => api.key(value) === api.key(tag))) : [...existing, ...values]);
+        }
+      }
+    });
+  } });
+}
+document.getElementById("tagFilterButton").addEventListener("click", openTagFilter);
+document.getElementById("selectionTagsButton").addEventListener("click", tagSelectedRows);
+document.addEventListener("pointerdown", event => {
+  if (!event.target.closest(".qa-tags-toolbar")) { document.getElementById("tagFilterPanel").replaceChildren(); document.getElementById("tagFilterButton").setAttribute("aria-expanded", "false"); }
+});
+
 const STORAGE_KEY = "qa-report-editor-draft-v2";
 const DRAFT_LOCATION_KEY = "qa-report-draft-location-v1";
 const LOCAL_DRAFT_COPY_LIMIT = 1024 * 1024;
@@ -520,6 +578,7 @@ function normalizeSections(sections) {
         const cells = { ...(row.cells || {}) };
         columns.forEach((column) => {
           if (!Object.hasOwn(cells, column.id)) cells[column.id] = "";
+          if (column.type === "tags") cells[column.id] = window.QaReportTags.html(window.QaReportTags.read(cells[column.id]));
         });
         return {
           ...row,
@@ -1701,7 +1760,7 @@ function render() {
 }
 
 function matchesReportStatusFilter(row) {
-  return reportStatusFilter === null || reportStatusFilter.has(row.status);
+  return (reportStatusFilter === null || reportStatusFilter.has(row.status)) && window.QaReportTags.matches(row, window.QaReportTags.editorScope);
 }
 
 function checklistRows(section) {
@@ -1763,6 +1822,7 @@ function setSelectionMode(enabled) {
 }
 
 function updateSelectionUi() {
+  document.getElementById("selectionTagsButton").disabled = !selectedRowIds.size;
   const rows = draft.sections.flatMap(checklistRows);
   const currentIds = new Set(rows.map((row) => row.id));
   selectedRowIds = new Set([...selectedRowIds].filter((id) => currentIds.has(id)));
@@ -2111,6 +2171,7 @@ function renderSections() {
   const revision = ++renderSectionsRevision;
   if (selectionDraftId !== draft.draftId) {
     reportStatusFilter = null;
+    window.QaReportTags.editorScope = window.QaReportTags.scope();
     selectedRowIds.clear();
     selectionDraftId = draft.draftId;
     closeSelectionMenus();
@@ -2119,7 +2180,7 @@ function renderSections() {
   const sectionNumbers = ChecklistNumbering.sectionNumbers(draft);
   elements.sections.innerHTML = "";
   draft.sections.forEach((section) => {
-    if (reportStatusFilter !== null && !checklistRows(section).length) return;
+    if ((reportStatusFilter !== null || window.QaReportTags.active(window.QaReportTags.editorScope)) && !checklistRows(section).length) return;
     const fragment = elements.sectionTemplate.content.cloneNode(true);
     const sectionElement = fragment.querySelector(".check-section");
     sectionElement.dataset.sectionId = section.id;
@@ -2169,6 +2230,12 @@ function renderSections() {
       renderSections();
       saveLocalMutationNow();
     });
+    if (!section.columns.some(window.QaReportTags.isColumn)) {
+      const addTags = document.createElement("button"); addTags.type = "button";
+      addTags.className = "qa-tags-add-column"; addTags.textContent = "+ Столбец меток";
+      addTags.addEventListener("click", () => insertColumn(section, section.columns.length, "tags"));
+      fragment.querySelector(".add-row-button").after(addTags);
+    }
     renderTable(fragment, section, rowNumbers);
     enableSectionDragging(sectionElement, section.id);
     elements.sections.append(fragment);
@@ -2176,13 +2243,14 @@ function renderSections() {
     enhanceImageControls(sectionElement);
     enhanceFileControls(sectionElement);
   });
-  if (reportStatusFilter !== null && !elements.sections.childElementCount) {
+  if ((reportStatusFilter !== null || window.QaReportTags.active(window.QaReportTags.editorScope)) && !elements.sections.childElementCount) {
     const empty = document.createElement("p");
     empty.className = "report-filter-empty";
-    empty.textContent = "Нет пунктов с выбранными статусами. Измените фильтр или нажмите «Сбросить».";
+    empty.textContent = "Нет пунктов с выбранными статусами и метками. Измените или сбросьте отбор.";
     elements.sections.append(empty);
   }
   updateReportStatusFilterUi();
+  updateTagToolbar();
   updateSelectionUi();
   applyPinnedColumns();
   if (viewport) {
@@ -2225,6 +2293,7 @@ function renderTable(fragment, section, rowNumbers) {
 
   let totalWidth = Math.max(56, ChecklistNumbering.columnWidth(draft)) + 164 + 40 + (selectionMode ? 44 : 0);
   section.columns.forEach((column, index) => {
+    if (column.type === "tags" && !window.QaReportTags.editorScope.showTags) return;
     column.width = Math.max(140, Number(column.width) || 240);
     bodyColgroup.append(createColumnElement("dynamic-col", column.width));
     headerColgroup.append(createColumnElement("dynamic-col", column.width));
@@ -2299,7 +2368,7 @@ function createColumnElement(className, width = null) {
 }
 
 function getSectionTableWidth(section) {
-  return Math.max(56, ChecklistNumbering.columnWidth(draft)) + 164 + 40 + (selectionMode ? 44 : 0) + section.columns.reduce((sum, item) => sum + (Number(item.width) || 240), 0);
+  return Math.max(56, ChecklistNumbering.columnWidth(draft)) + 164 + 40 + (selectionMode ? 44 : 0) + section.columns.filter(column => column.type !== "tags" || window.QaReportTags.editorScope.showTags).reduce((sum, item) => sum + (Number(item.width) || 240), 0);
 }
 
 function getStickyOffset() {
@@ -2469,6 +2538,7 @@ function createColumnHeader(section, column, index) {
     const items = [
       { label: "Вставить столбец слева", icon: "column-insert-left", action: () => insertColumn(section, index) },
       { label: "Вставить столбец справа", icon: "column-insert-right", action: () => insertColumn(section, index + 1) },
+      { label: "Добавить столбец меток", icon: "tag", disabled: section.columns.some(window.QaReportTags.isColumn), action: () => insertColumn(section, index + 1, "tags") },
     ];
     if (index > 0) {
       items.push({ label: "Переместить влево", icon: "arrow-left", action: () => moveColumn(section, column.id, -1) });
@@ -2687,6 +2757,7 @@ function createRowElement(section, row, number) {
   tr.append(numberCell);
 
   section.columns.forEach((column) => {
+    if (column.type === "tags" && !window.QaReportTags.editorScope.showTags) return;
     const td = document.createElement("td");
     td.className = "editor-cell";
     td.dataset.columnId = column.id;
@@ -2707,6 +2778,17 @@ function createRowElement(section, row, number) {
       const rect = td.getBoundingClientRect();
       moveColumnTo(section, sourceId, column.id, event.clientX > rect.left + rect.width / 2);
     });
+    if (window.QaReportTags.isColumn(column)) {
+      td.classList.add("qa-tags-column");
+      td.append(window.QaReportTags.cell(row.cells[column.id], draft, values => {
+        flushDraftFromDom();
+        const current = draft.sections.find(item => item.id === section.id)?.rows.find(item => item.id === row.id);
+        if (!current) return;
+        current.cells[column.id] = window.QaReportTags.html(values);
+        scheduleSave(); renderSummary();
+      }, () => { renderSections(); renderSummary(); }));
+      tr.append(td); return;
+    }
     const editor = document.createElement("div");
     editor.className = "cell-editor";
     editor.contentEditable = "true";
@@ -2749,6 +2831,15 @@ function createRowElement(section, row, number) {
     event.stopPropagation();
     showFloatingMenu(menuButton, [
       { label: row.pendingBug ? "Проверить создание бага" : row.bugs?.some(b => b.attachmentsPending || b.evidencePending) ? "Завершить создание бага" : "Завести баг-репорт", icon: "bug", action: () => window.QaReportBugUI.open(section.id, row.id, menuButton) },
+      { label: "Метки пункта", icon: "tag", action: () => {
+        flushDraftFromDom();
+        const current = draft.sections.find(item => item.id === section.id);
+        let column = current.columns.find(item => item.type === "tags");
+        if (!column) { insertColumn(current, current.columns.length, "tags"); column = current.columns.find(item => item.type === "tags"); }
+        if (!window.QaReportTags.editorScope.showTags) { window.QaReportTags.editorScope.showTags = true; renderSections(); }
+        const cell = elements.sections.querySelector(`[data-row-id="${CSS.escape(row.id)}"] [data-column-id="${CSS.escape(column.id)}"] .qa-tags-cell`);
+        if (cell) cell.click();
+      } },
       { label: "Добавить строку выше", icon: "row-insert-above", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-above") },
       { label: "Добавить строку ниже", icon: "row-insert-below", disabled: Boolean(section.statusSort), action: () => applyRowAction(section, row.id, "insert-below") },
       { label: "Дублировать", icon: "copy", action: () => applyRowAction(section, row.id, "duplicate") },
@@ -2825,11 +2916,12 @@ function createStatusSelect(value) {
   return select;
 }
 
-function insertColumn(section, index) {
+function insertColumn(section, index, type = "text") {
   flushDraftFromDom();
   const currentSection = draft.sections.find((item) => item.id === section.id);
   if (!currentSection) return;
-  const column = { id: `column-${crypto.randomUUID()}`, title: "Новый столбец" };
+  if (type === "tags") window.QaReportTags.editorScope.showTags = true;
+  const column = { id: `column-${crypto.randomUUID()}`, title: type === "tags" ? "Метки" : "Новый столбец", ...(type === "tags" && { type, width: 200 }) };
   const insertionIndex = Math.max(0, Math.min(index, currentSection.columns.length));
   currentSection.columns.splice(insertionIndex, 0, column);
   currentSection.rows.forEach((row) => (row.cells[column.id] = ""));
@@ -2931,18 +3023,26 @@ function normalizeColumnTitle(value) {
 
 function adaptRowCellsForSection(row, sourceSection, targetSection) {
   if (sourceSection.id === targetSection.id) return row;
+  const sourceTags = sourceSection.columns.find(column => column.type === "tags");
+  if (sourceTags && !targetSection.columns.some(column => column.type === "tags")) {
+    const column = { ...sourceTags, id: crypto.randomUUID() };
+    targetSection.columns.push(column);
+    targetSection.rows.forEach(item => { item.cells[column.id] = ""; });
+  }
   const sourceColumnsByTitle = new Map(
     sourceSection.columns.map((column) => [normalizeColumnTitle(column.title), column]),
   );
   const usedSourceIds = new Set();
   const mappedCells = {};
   targetSection.columns.forEach((targetColumn, index) => {
-    let sourceColumn = sourceSection.columns.find((column) => column.id === targetColumn.id);
+    let sourceColumn = sourceSection.columns.find((column) => (column.type === "tags") === (targetColumn.type === "tags") && (column.id === targetColumn.id || (column.type === "tags" && targetColumn.type === "tags")));
     if (!sourceColumn) {
       sourceColumn = sourceColumnsByTitle.get(normalizeColumnTitle(targetColumn.title));
+      if ((sourceColumn?.type === "tags") !== (targetColumn.type === "tags")) sourceColumn = null;
     }
     if (!sourceColumn || usedSourceIds.has(sourceColumn.id)) {
       sourceColumn = sourceSection.columns[index];
+      if ((sourceColumn?.type === "tags") !== (targetColumn.type === "tags")) sourceColumn = null;
     }
     if (sourceColumn) usedSourceIds.add(sourceColumn.id);
     mappedCells[targetColumn.id] = sourceColumn ? row.cells[sourceColumn.id] || "" : "";
@@ -3196,7 +3296,7 @@ function hasRowContent(row) {
 
 function renderSummary() {
   const rows = draft.sections.flatMap((section) => section.rows).filter(matchesReportStatusFilter).filter(hasRowContent);
-  document.getElementById("summaryNote").textContent = reportStatusFilter !== null
+  document.getElementById("summaryNote").textContent = reportStatusFilter !== null || window.QaReportTags.active(window.QaReportTags.editorScope)
     ? "Сводка по показанным пунктам. Незаполненные строки не учитываются."
     : "Статусы пересчитываются автоматически. Незаполненные строки не попадают в сводку.";
   elements.summaryTotal.textContent = rows.length;
@@ -3545,10 +3645,11 @@ function balanceJiraColorMarkup(value) {
   return output;
 }
 
-function sectionsForPublication(sectionIds = null, sourceDraft = draft, statuses = null) {
+function sectionsForPublication(sectionIds = null, sourceDraft = draft, statuses = null, tagFilter = undefined) {
   const selectedIds = sectionIds == null ? null : new Set(sectionIds);
   const selectedStatuses = statuses == null ? null : new Set(statuses);
-  const sections = sourceDraft.sections.filter((section) => !selectedIds || selectedIds.has(section.id));
+  let sections = sourceDraft.sections.filter((section) => !selectedIds || selectedIds.has(section.id));
+  if (typeof window !== "undefined" && window.QaReportTags) sections = window.QaReportTags.filter(sections, tagFilter ?? window.QaReportTags.editorScope);
   if (!selectedStatuses) return sections;
   return sections.map((section) => ({
     ...section,
@@ -3575,7 +3676,7 @@ function generateMarkup(options = {}) {
   const intro = htmlToWiki(source.intro, options);
   if (intro) blocks.push(intro);
 
-  sectionsForPublication(sectionIds, source, statuses).forEach((section) => {
+  sectionsForPublication(sectionIds, source, statuses, options.tagFilter).forEach((section) => {
     const rows = section.rows.filter(hasRowContent);
     if (!rows.length) return;
     const lines = [`h2. ${escapeWikiNotEquals(publicationText(ChecklistNumbering.sectionTitle(source, section)))}`];
@@ -3583,7 +3684,7 @@ function generateMarkup(options = {}) {
       `||${["Номер", ...section.columns.map((column) => escapeWikiNotEquals(publicationText(column.title || "Без названия"))), "Статус"].join("||")}||`,
     );
     rows.forEach((row) => {
-      const values = section.columns.map((column) => jiraCell(row.cells[column.id] || "", options));
+      const values = section.columns.map((column) => column.type === "tags" ? window.QaReportTags.read(row.cells[column.id]).map(value => `{color:#505f79}${window.QaReportTags.wiki(value)}{color}`).join("\\\\ ") : jiraCell(row.cells[column.id] || "", options));
       const status = `{color:${STATUS_META[row.status].jiraColor}}*${row.status}*{color}`;
       lines.push(`|${[jiraCell(escapeHtml(rowNumbers.get(row.id)), {forPublication}), ...values, status].join("|")}|`);
     });
@@ -3617,7 +3718,7 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null, options
     intro.innerHTML = previewEditorHtml(previewDraft.intro);
     wrapper.append(intro);
   }
-  sectionsForPublication(options.sectionIds, previewDraft, options.statuses).forEach((section) => {
+  sectionsForPublication(options.sectionIds, previewDraft, options.statuses, options.tagFilter).forEach((section) => {
     const oppositeSection = oppositeSections.get(section.id);
     const sectionOnlyHere = Boolean(oppositeDraft && !oppositeSection);
     const oppositeColumns = byId(oppositeSection?.columns || []);
@@ -3654,7 +3755,7 @@ function generateVisualPreview(sourceDraft = draft, compareDraft = null, options
             rowOnlyHere ||
             columnOnlyHere ||
             (oppositeDraft && cellText(row.cells?.[column.id] || "") !== cellText(oppositeRow?.cells?.[column.id] || ""));
-          return `<td class="${changed ? "version-diff-cell" : ""}">${previewEditorHtml(row.cells[column.id] || "")}</td>`;
+          return `<td class="${changed ? "version-diff-cell" : ""}">${column.type === "tags" ? window.QaReportTags.html(window.QaReportTags.read(row.cells[column.id]), true) : previewEditorHtml(row.cells[column.id] || "")}</td>`;
         })
         .join("")}<td class="${sectionOnlyHere || rowOnlyHere || (oppositeDraft && row.status !== oppositeRow?.status) ? "version-diff-cell" : ""}"><strong style="color:${STATUS_META[row.status]?.jiraColor || STATUS_META["НЕ ПРОВЕРЕНО"].jiraColor}">${row.status}</strong></td>`;
       tbody.append(tr);
@@ -4261,12 +4362,12 @@ function cancelPublishProgress() {
 }
 
 async function uploadPendingImages(settings, issue, options = {}) {
-  const { signal, onProgress = () => {}, sectionIds = null, statuses = null } = options;
+  const { signal, onProgress = () => {}, sectionIds = null, statuses = null, tagFilter } = options;
   const { includeImages, includeFiles } = window.QaReportJiraPublication.attachmentOptions(options);
   const summary = document.getElementById("publishAttachmentSummary"); summary.hidden = true;
   if (!includeImages && !includeFiles) return [];
   const reuse = window.QaReportJiraReuse;
-  const publication = { ...draft, sections: sectionsForPublication(sectionIds, draft, statuses) };
+  const publication = { ...draft, sections: sectionsForPublication(sectionIds, draft, statuses, tagFilter) };
   const assets = reuse.collect(publication).filter((asset) => asset.source.kind === "image" ? includeImages : includeFiles);
   if (!assets.length) return [];
   setPublishProgress({ step: "prepare", percent: 10, status: "Проверяем вложения в Jira…" });
@@ -4398,7 +4499,7 @@ function updatePublishScopeState() {
   const allStatuses = document.getElementById("publishStatusSelectAll");
   allStatuses.checked = selectedStatuses.length === statuses.length;
   allStatuses.indeterminate = selectedStatuses.length > 0 && !allStatuses.checked;
-  const sections = sectionsForPublication(checkboxes.filter((input) => input.checked).map((input) => input.value), draft, selectedStatuses);
+  const sections = sectionsForPublication(checkboxes.filter((input) => input.checked).map((input) => input.value), draft, selectedStatuses, tagScopes.publish);
   const rowCount = sections.reduce((sum, section) => sum + section.rows.length, 0);
   elements.publishScopeSummary.textContent = `К отправке: разделов — ${sections.length}, строк — ${rowCount}`;
   elements.acceptPublishScopeButton.disabled = rowCount === 0;
@@ -4440,6 +4541,7 @@ function askPublishScope(link = null) {
     label.append(checkbox, title);
     elements.publishScopeList.append(label);
   });
+  mountTagScope("publish", elements.publishScopeList, draft, link?.tagFilter, updatePublishScopeState);
   elements.publishScopeSelectAll.checked = true;
   elements.publishScopeSelectAll.indeterminate = false;
   updatePublishScopeState();
@@ -4466,6 +4568,7 @@ function resolvePublishScope(accepted) {
   resolve(accepted ? {
     sectionIds,
     statuses: new Set([...document.querySelectorAll('#publishStatusList input:checked')].map((input) => input.value)),
+    tagFilter: window.QaReportTags.scope(tagScopes.publish),
     includeImages: document.getElementById("publishIncludeImages").checked,
     includeFiles: document.getElementById("publishIncludeFiles").checked,
   } : null);
@@ -4558,7 +4661,7 @@ function trackerPublicationSnapshot(scope, body, source = draft) {
     return template.innerHTML;
   };
   const numbers = ChecklistNumbering.rowNumbers(source);
-  const sections = sectionsForPublication(scope.sectionIds, source, scope.statuses)
+  const sections = sectionsForPublication(scope.sectionIds, source, scope.statuses, scope.tagFilter)
     .map(section => ({ ...section, rows: section.rows.filter(hasRowContent) })).filter(section => section.rows.length);
   return publicationSnapshot({
     body,
@@ -4822,7 +4925,7 @@ async function publishToJira(mode = "auto") {
     const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
       contentSnapshot: trackerPublicationSnapshot(scope, comment.body),
       sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],
-      statuses: [...(statuses || Object.keys(STATUS_META))],
+      statuses: [...(statuses || Object.keys(STATUS_META))], tagFilter: scope.tagFilter,
       ...window.QaReportJiraPublication.attachmentOptions(scope), firstPublishedAt: linked?.firstPublishedAt || "" };
     const successfulParts = [];
     const results = linked ? await updateLinkedJiraComments(settings, issue, comment, linked, publishAbortController.signal, context)
@@ -4879,7 +4982,7 @@ function openPreview() {
     environment: draft.environment,
     overallStatus: draft.overallStatus,
     intro: draft.intro,
-    sections: draft.sections.map(section => ({
+    sections: window.QaReportTags.filter(draft.sections, window.QaReportTags.editorScope).map(section => ({
       title: ChecklistNumbering.sectionTitle(draft, section),
       columns: section.columns,
       rows: section.rows.filter(row => hasRowContent(row) || row.bugs?.length)
@@ -7527,6 +7630,7 @@ function htmlCopyScopeOptions() {
   return {
     sectionIds: [...document.querySelectorAll('#htmlCopySectionList input:checked')].map((input) => input.value),
     statuses: [...document.querySelectorAll('#htmlCopyStatusList input:checked')].map((input) => input.value),
+    tagFilter: tagScopes.html,
   };
 }
 
@@ -7538,8 +7642,8 @@ function updateHtmlCopyScopeState(resetFeedback = true) {
     all.checked = inputs.length > 0 && count === inputs.length;
     all.indeterminate = count > 0 && count < inputs.length;
   }
-  const { sectionIds, statuses } = htmlCopyScopeOptions();
-  const sections = sectionsForPublication(sectionIds, draft, statuses);
+  const { sectionIds, statuses, tagFilter } = htmlCopyScopeOptions();
+  const sections = sectionsForPublication(sectionIds, draft, statuses, tagFilter);
   const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
   document.getElementById("htmlCopyScopeSummary").textContent = `К копированию: разделов — ${sections.length}, пунктов — ${count}`;
   document.getElementById("acceptHtmlCopyScopeButton").disabled = !count || Boolean(htmlCopyScopeSession?.busy);
@@ -7579,6 +7683,7 @@ function openHtmlCopyScope(event) {
   populate("Status", Object.keys(STATUS_META).map((status) => [status, status]));
   populate("Section", draft.sections.map((section, index) => [section.id, section.title.trim() || `Раздел ${index + 1}`]));
   document.querySelectorAll('#htmlCopyScopeModal input').forEach((input) => { input.disabled = false; });
+  mountTagScope("html", document.getElementById("htmlCopySectionList"), draft, null, updateHtmlCopyScopeState);
   updateHtmlCopyScopeState();
   document.getElementById("htmlCopyScopeModal").hidden = false;
   syncBodyModalOverflow();
@@ -7604,7 +7709,7 @@ async function copyVisualReport() {
     return;
   }
   const options = htmlCopyScopeOptions();
-  if (!sectionsForPublication(options.sectionIds, draft, options.statuses).length) return;
+  if (!sectionsForPublication(options.sectionIds, draft, options.statuses, options.tagFilter).length) return;
   session.busy = true;
   updateHtmlCopyScopeState();
   document.getElementById("acceptHtmlCopyScopeButton").textContent = "Копирование…";
@@ -7788,7 +7893,7 @@ function buildXlsxWorksheet(options = {}) {
   }
 
   const rowNumbers = ChecklistNumbering.rowNumbers(draft);
-  sectionsForPublication(options.sectionIds, draft, options.statuses).forEach((section) => {
+  sectionsForPublication(options.sectionIds, draft, options.statuses, options.tagFilter).forEach((section) => {
     const contentRows = section.rows.filter(hasRowContent);
     if (!contentRows.length) return;
     rowIndex += 2;
@@ -8126,6 +8231,7 @@ function updateSharedExclusionCount() {
   const count = selectedSharedExclusions().length;
   shareReport.ExclusionSummary.textContent = count ? `Исключить пункты · ${count}` : "Исключить пункты";
   shareReport.ExclusionReset.hidden = count === 0;
+  updateSharedTagCount();
 }
 
 function filterSharedExclusions() {
@@ -8143,7 +8249,22 @@ function filterSharedExclusions() {
   shareReport.ExclusionEmpty.hidden = visible > 0;
 }
 
+function updateSharedTagCount() {
+  const host = document.getElementById("tagScope-share"); if (!host) return;
+  let summary = document.getElementById("sharedTagCount");
+  if (!summary) { summary = document.createElement("p"); summary.id = "sharedTagCount"; summary.className = "qa-tags-hint"; summary.setAttribute("role", "status"); host.append(summary); }
+  const scope = window.QaReportTags.scope(tagScopes.share), excluded = new Set(selectedSharedExclusions().map(row => JSON.stringify([row.sectionId, row.rowId])));
+  let total = 0, count = 0;
+  for (const section of draft.sections) for (const row of section.rows) {
+    if (!hasRowContent(row)) continue; total++;
+    const content = row.status !== "НЕ ПРОВЕРЕНО" || row.bugs?.length || section.columns.some(column => (scope.showTags || column.type !== "tags") && (htmlToSpreadsheetText(row.cells[column.id] || "") || /<img|cell-file|jira-image|jira-file/i.test(row.cells[column.id] || "")));
+    if (content && window.QaReportTags.matches(row, scope) && !excluded.has(JSON.stringify([section.id, row.id]))) count++;
+  }
+  summary.textContent = `К публикации: ${count} из ${total} пунктов`;
+}
+
 function renderSharedExclusions(excludedRows = []) {
+  mountTagScope("share", shareReport.Exclusions, draft, shareReportContext?.latest?.tagFilter, updateSharedTagCount);
   const excluded = new Set(excludedRows.map(row => JSON.stringify([row.sectionId, row.rowId])));
   const numbers = ChecklistNumbering.rowNumbers(draft);
   const sections = [];
@@ -8294,7 +8415,8 @@ function sharedReportUrl(id, token) {
 function sharedSnapshotOptions(source, scope) {
   const excluded = new Set(sharedExcludedRows(scope).map(row => JSON.stringify([row.sectionId, row.rowId])));
   return {
-    includeRow: (section, row) => !excluded.has(JSON.stringify([section.id, row.id])),
+    tagFilter: scope.tagFilter,
+    includeRow: (section, row) => !excluded.has(JSON.stringify([section.id, row.id])) && window.QaReportTags.matches(row, scope.tagFilter ?? window.QaReportTags.editorScope),
     title: window.QaReportTaskContext.label(window.QaReportTaskContext.forReport(source)) || issueKeyFromUrl(source.issueUrl) || "Отчёт о тестировании",
     toText: htmlToSpreadsheetText,
     toCode: node => extractCodeText(node, { preserveWhitespace: true }),
@@ -8326,7 +8448,7 @@ function sharePublicationState(publication, reportId = draft.reportId, { checkPe
   const unknown = { state: "unknown", label: "Не удалось сравнить версии", action: "Скопировать ссылку" };
   const before = window.QaReportJiraPublication.normalizeContent(publication.contentSnapshot);
   if (!before || reportId !== source.reportId) return unknown;
-  const scope = { ...window.QaReportJiraPublication.attachmentOptions(publication), excludedRows: sharedExcludedRows(publication) };
+  const scope = { ...window.QaReportJiraPublication.attachmentOptions(publication), tagFilter: publication.tagFilter, excludedRows: sharedExcludedRows(publication) };
   const key = JSON.stringify([localEditGeneration, scope]);
   if (sharedContentCheck?.source !== source || sharedContentCheck?.key !== key) {
     let snapshot;
@@ -8827,6 +8949,7 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
     includeImages: shareReport.Images.checked,
     includeFiles: shareReport.Files.checked,
     defaultStatuses: [...shareReport.Statuses.querySelectorAll("input:checked")].map(input => input.value),
+    tagFilter: window.QaReportTags.scope(tagScopes.share),
     excludedRows: selectedSharedExclusions(),
     ...(updateId && { updateId }),
   };
@@ -8935,6 +9058,7 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
       publication = { ...target, ...publication };
     }
     publication = { ...publication, ...window.QaReportJiraPublication.attachmentOptions(scope),
+      tagFilter: scope.tagFilter,
       defaultStatuses: scope.defaultStatuses ?? publication.defaultStatuses ?? [],
       excludedRows: sharedExcludedRows(scope), contentSnapshot: contentSnapshot || null };
     context.selectedPublicationId = publication.id;

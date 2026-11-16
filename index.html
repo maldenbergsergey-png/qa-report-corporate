@@ -11,6 +11,7 @@
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=162" />
+    <link rel="stylesheet" href="/checklist-tags.css?v=6" />
     <link rel="stylesheet" href="/report-view.css?v=9" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -57,6 +58,7 @@
       <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
       <symbol id="icon-jira" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc. --><path fill="#2684ff" d="M490 241.7C417.1 169 320.6 71.8 248.5 0 83 164.9 6 241.7 6 241.7c-7.9 7.9-7.9 20.7 0 28.7C138.8 402.7 67.8 331.9 248.5 512c379.4-378 15.7-16.7 241.5-241.7 8-7.9 8-20.7 0-28.6zm-241.5 90l-76-75.7 76-75.7 76 75.7-76 75.7z"/></symbol>
+      <symbol id="icon-tag" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><circle cx="7" cy="7" r="1"/></symbol>
       <symbol id="icon-ticket" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2Z" /><path d="M9 9h6M9 13h4" /></symbol>
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
       <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></symbol>
@@ -314,6 +316,7 @@
             <button type="button" id="selectionToggle" class="toolbar-icon-button" title="Выделение строк" aria-label="Выделение строк" aria-pressed="false" aria-controls="selectionToolbar">
               <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 12 3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
+            <div class="qa-tags-toolbar"><button id="tagFilterButton" type="button" aria-label="Отбор пунктов по меткам" aria-expanded="false" aria-controls="tagFilterPanel"><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg><span data-tag-filter-label>Метки</span></button><div id="tagFilterPanel"></div></div>
             <span class="toolbar-divider"></span>
             <select id="blockFormat" title="Стиль текста" aria-label="Стиль текста">
               <option value="p">Обычный текст</option>
@@ -421,6 +424,7 @@
                 </form>
               </div>
             </div>
+            <button id="selectionTagsButton" type="button" aria-haspopup="dialog" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg>Метки</button>
             <button id="selectionCopyButton" type="button" disabled>Копировать в новый чек-лист</button>
             <button id="selectionDelete" type="button" class="selection-delete" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-trash"></use></svg> Удалить</button>
             <button id="selectionExit" type="button" class="selection-exit" aria-label="Выйти из режима выделения" title="Выйти из режима выделения">×</button>
@@ -1307,25 +1311,26 @@
       </section>
     </template>
 
-    <script src="/jira-markup-import.js?v=14"></script>
-    <script src="/checklist-selection.js?v=6"></script>
+    <script src="/checklist-tags.js?v=5"></script>
+    <script src="/jira-markup-import.js?v=15"></script>
+    <script src="/checklist-selection.js?v=7"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=146"></script>
+    <script src="/release-notes.js?v=147"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
     <script src="/attachment-import.js?v=6"></script>
-    <script src="/import-options.js?v=7"></script>
-    <script src="/import-wizard.js?v=6"></script>
+    <script src="/import-options.js?v=8"></script>
+    <script src="/import-wizard.js?v=7"></script>
     <script src="/file-preview.js?v=4"></script>
     <script src="/tracker-links.js?v=6"></script>
     <script src="/task-context.js?v=1"></script>
-    <script src="/report-file.js?v=10"></script>
+    <script src="/report-file.js?v=11"></script>
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=2"></script>
-    <script src="/jira-publication.js?v=5"></script>
+    <script src="/jira-publication.js?v=6"></script>
     <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
       <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
@@ -1411,7 +1416,7 @@
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
-    <script src="/report-view.js?v=13"></script>
+    <script src="/report-view.js?v=14"></script>
     <dialog id="personalCloudDialog" class="cloud-dialog" aria-labelledby="personalCloudTitle" aria-describedby="personalCloudHint">
       <header class="cloud-heading"><div><h2 id="personalCloudTitle">Мои облачные отчёты</h2><p id="personalCloudAccount"></p></div><button id="personalCloudClose" class="button button-ghost" type="button" aria-label="Закрыть облачные отчёты">Закрыть</button></header>
       <p id="personalCloudHint">Откройте отчёт на другом устройстве через свой профиль. Работа идёт в браузере; новые правки выбранных отчётов сохраняются в облако раз в минуту.</p>
@@ -1439,7 +1444,7 @@
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
     <script src="/task-context-ui.js?v=3"></script>
-    <script src="/app.js?v=179"></script>
+    <script src="/app.js?v=181"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=14"></script>

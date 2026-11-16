@@ -75,7 +75,7 @@ const app = fs.readFileSync(require.resolve('../app.js'),'utf8');
 if (app.includes('function parseAdfDocument(')) test('ADF comment import retains status labels for mapping before filtering', () => {
   const jira=require('../jira-markup-import');
   const ctx=vm.createContext({crypto:require('node:crypto'),createPublicId:()=> 'test',
-    window:{QaReportJiraImport:jira},normalizeStatus:jira.normalizeStatus,stripSectionNumber:jira.stripSectionNumber,
+    window:{QaReportTags: require("../checklist-tags"), QaReportJiraImport:jira},normalizeStatus:jira.normalizeStatus,stripSectionNumber:jira.stripSectionNumber,
     escapeHtml:value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;')});
   for (const name of ['adfNodeText','adfNodeToHtml','parseAdfDocument']) {
     const start=app.indexOf(`function ${name}(`),end=app.indexOf('\n}',start)+2;

@@ -682,7 +682,8 @@
           tr.append(index);
           for (const column of columns) {
             const cell = element("td", "report-cell");
-            append(cell, row.cells[column.id]);
+            if (column.type === "tags") root.QaReportTags.view(cell, root.QaReportTags.read(row.cells[column.id]));
+            else append(cell, row.cells[column.id]);
             tr.append(cell);
           }
           const status = element("td", "qa-status");

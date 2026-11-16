@@ -1,10 +1,10 @@
 (function initJiraMarkupImport(root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("node:crypto").randomUUID);
+    module.exports = factory(require("node:crypto").randomUUID, require("./checklist-tags"));
   } else {
-    root.QaReportJiraImport = factory(() => root.crypto.randomUUID());
+    root.QaReportJiraImport = factory(() => root.crypto.randomUUID(), root.QaReportTags);
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function buildJiraMarkupImport(randomUUID) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function buildJiraMarkupImport(randomUUID, Tags) {
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -391,6 +391,7 @@
             id: `import-${tableNumber}-${index}-${randomUUID()}`,
             title: title || `Столбец ${index + 1}`,
             sourceIndex: index,
+            ...(Tags.isTitle(title) && { type: "tags" }),
           }));
         currentSection = {
           id: randomUUID(),
@@ -429,7 +430,7 @@
           cells: Object.fromEntries(
             currentSection.columns.map((column) => [
               column.id,
-              wikiInlineToHtml(values[column.sourceIndex] || "", attachments),
+              column.type === "tags" ? Tags.html(Tags.read(wikiInlineToHtml(values[column.sourceIndex] || "", attachments))) : wikiInlineToHtml(values[column.sourceIndex] || "", attachments),
             ]),
           ),
         });

@@ -166,6 +166,7 @@ function snapshotFrom(raw, usedFiles) {
     const columns = unique(array(section?.columns, 40).map((column) => ({
       id: identifier(column?.id),
       label: str(column?.label ?? "", 500),
+      ...(column?.type === "tags" && { type: "tags" }),
     })));
     return {
       id: identifier(section?.id),

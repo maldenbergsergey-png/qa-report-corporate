@@ -1,0 +1,69 @@
+/* One tag language in the editor, previews and shared reports. */
+.qa-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.qa-tag { --tag-ink: #285fba; --tag-tint: #eaf1fd; display: inline-flex; align-items: center; max-width: 100%; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--tag-ink) 12%, transparent); border-radius: 7px; background: var(--tag-tint); color: var(--tag-ink); font-family: inherit; font-size: 12px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; text-align: left; white-space: normal; }
+.qa-tag[data-tone="1"] { --tag-ink: #7846ac; --tag-tint: #f2ecfa; }
+.qa-tag[data-tone="2"] { --tag-ink: #15735f; --tag-tint: #e8f5ef; }
+.qa-tag[data-tone="3"] { --tag-ink: #a65b13; --tag-tint: #fdf1df; }
+.qa-tag[data-tone="4"] { --tag-ink: #ae466a; --tag-tint: #fbeaf0; }
+.qa-tag[data-tone="5"] { --tag-ink: #246b82; --tag-tint: #e8f3f7; }
+:root[data-theme="dark"] .qa-tag, :root[data-theme="graphite"] .qa-tag { --tag-ink: #adcaff; --tag-tint: #293b55; }
+:root[data-theme="dark"] .qa-tag[data-tone="1"], :root[data-theme="graphite"] .qa-tag[data-tone="1"] { --tag-ink: #d1b9f2; --tag-tint: #3b304b; }
+:root[data-theme="dark"] .qa-tag[data-tone="2"], :root[data-theme="graphite"] .qa-tag[data-tone="2"] { --tag-ink: #99d9c1; --tag-tint: #244239; }
+:root[data-theme="dark"] .qa-tag[data-tone="3"], :root[data-theme="graphite"] .qa-tag[data-tone="3"] { --tag-ink: #eac28c; --tag-tint: #493c29; }
+:root[data-theme="dark"] .qa-tag[data-tone="4"], :root[data-theme="graphite"] .qa-tag[data-tone="4"] { --tag-ink: #edb1c7; --tag-tint: #49323e; }
+:root[data-theme="dark"] .qa-tag[data-tone="5"], :root[data-theme="graphite"] .qa-tag[data-tone="5"] { --tag-ink: #9bd1e1; --tag-tint: #283f49; }
+.qa-tags-cell { display: block; width: 100%; min-height: 54px; padding: 12px; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.qa-tags-cell:hover, .qa-tags-cell:focus-visible { background: color-mix(in srgb, var(--primary, #579dff) 6%, transparent); }
+.qa-tags-placeholder { color: var(--muted, #6b778c); font-size: 12px; }
+.qa-tags-column { vertical-align: top; }
+.qa-tags-picker { position: fixed; inset: auto; box-sizing: border-box; width: min(320px, calc(100vw - 24px)); max-height: min(360px, calc(100dvh - 24px)); margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line, #75819544); border-radius: 10px; background: var(--surface, #fff); color: var(--ink, var(--text, #172b4d)); box-shadow: 0 16px 56px #091e4238; font: 14px/1.5 system-ui, sans-serif; }
+.qa-tags-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; color: var(--muted, #6b778c); font-size: 12px; }
+.qa-tags-close { width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted, #6b778c); font-size: 19px; cursor: pointer; }
+.qa-tags-search { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid var(--line, #75819566); border-radius: 8px; padding: 7px 9px; background: var(--canvas, #f7f8fa); color: inherit; font: inherit; }
+.qa-tags-search:focus { outline: 2px solid var(--primary, #579dff); outline-offset: 2px; }
+.qa-tags-chosen { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.qa-tag-remove { cursor: pointer; }
+.qa-tags-options { display: grid; max-height: 156px; overflow: auto; margin-top: 12px; gap: 2px; }
+.qa-tag-option { display: block; width: 100%; min-height: 32px; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.qa-tag-option:hover, .qa-tag-option:focus-visible { background: color-mix(in srgb, var(--primary, #579dff) 10%, transparent); }
+.qa-tag-create { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 4px; color: inherit; overflow-wrap: anywhere; }
+.qa-tag-create .qa-tags { flex: 1; min-width: 0; }
+.qa-tag-create-action { flex: 0 0 auto; color: var(--muted, #6b778c); font-size: 11px; }
+.qa-tag-create:hover, .qa-tag-create:focus-visible { background: var(--canvas, #f4f5f7); }
+.qa-tags-hint { margin: 10px 0; color: var(--muted, #6b778c); font-size: 12px; line-height: 1.5; }
+.qa-tags-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line, #75819544); }
+.qa-tags-filter { min-width: 0; border: 1px solid var(--line, #75819544); border-radius: 10px; background: var(--surface, #fff); color: var(--ink, var(--text, #172b4d)); font: 13px/1.45 system-ui, sans-serif; }
+.qa-tags-filter > summary { padding: 10px 12px; cursor: pointer; font-weight: 600; }
+.qa-tags-filter-active > summary { color: var(--primary, #579dff); }
+.qa-tags-filter-body { padding: 0 12px 12px; }
+.qa-tags-filter-list { display: grid; gap: 2px; max-height: 250px; overflow-y: auto; }
+.qa-tags-filter-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line, #75819522); }
+.qa-tags-modes { display: inline-flex; gap: 2px; padding: 3px; border-radius: 7px; background: var(--canvas, #f4f5f7); }
+.qa-tags-modes button { min-height: 28px; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted, #6b778c); font: 11px/1.3 system-ui, sans-serif; cursor: pointer; }
+.qa-tags-modes button[aria-pressed="true"] { background: var(--surface, #fff); color: var(--ink, var(--text, #172b4d)); box-shadow: 0 1px 3px #091e4220; }
+.qa-tags-modes button[data-mode="exclude"][aria-pressed="true"] { color: #d46666; }
+.qa-tags-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; cursor: pointer; }
+.qa-tags-check input { accent-color: var(--primary, #579dff); }
+.qa-tags-reset { padding: 0; margin-top: 12px; border: 0; background: transparent; color: var(--primary, #579dff); font: inherit; font-size: 12px; cursor: pointer; }
+.qa-tags-filter-host { margin: 12px 0; }
+.qa-tags-toolbar { position: relative; margin: 0 3px; order: 0; }
+.qa-tags-toolbar #tagFilterPanel > .qa-tags-filter { position: fixed; z-index: 30; width: min(420px, calc(100vw - 24px)); max-height: min(520px, calc(100dvh - 120px)); overflow-y: auto; box-shadow: 0 12px 32px #091e4230; }
+.qa-tags-toolbar #tagFilterPanel > .qa-tags-filter:not([open]) { display: none; }
+.qa-tags-toolbar > button { white-space: nowrap; }
+.qa-tags-add-column { margin: 8px 12px; padding: 6px 10px; border: 1px dashed var(--line, #75819566); border-radius: 7px; background: transparent; color: var(--muted, #6b778c); font: inherit; font-size: 12px; cursor: pointer; }
+.qa-tags-add-column:hover { border-color: var(--primary, #579dff); color: var(--primary, #579dff); }
+@media (max-width: 520px) { .qa-tags-filter-row { align-items: flex-start; } .qa-tags-actions { flex-wrap: wrap; } .qa-tags-toolbar { margin-left: 0; } }
+
+.qa-tags-picker [hidden] { display: none !important; }
+
+/* Nested filter controls keep their own sizes inside the formatting toolbar. */
+.editor-toolbar .qa-tags-toolbar { flex: 0 0 auto; }
+.editor-toolbar .qa-tags-toolbar > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 86px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.editor-toolbar .qa-tags-toolbar > button .ui-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+#selectionTagsButton { display: inline-flex; align-items: center; gap: 6px; }
+.editor-toolbar .qa-tags-toolbar > button.filter-active { color: var(--primary, #579dff); background: color-mix(in srgb, var(--primary, #579dff) 12%, transparent); }
+.editor-toolbar .qa-tags-modes button { width: auto; min-width: 0; height: auto; min-height: 28px; padding: 4px 7px; font-size: 11px; }
+.editor-toolbar .qa-tags-reset { width: auto; height: auto; min-width: 0; padding: 0; color: var(--primary, #579dff); font-size: 12px; }
+
+.qa-tag-selected { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 4px; cursor: default; }
+.qa-tag-selected .qa-tags { flex: 1; min-width: 0; }

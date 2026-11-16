@@ -3,6 +3,7 @@
   else root.QaReportImportOptions = factory(root.QaReportJiraImport, () => root.ChecklistNumbering);
 })(typeof globalThis !== "undefined" ? globalThis : this, function (jira, getNumbering) {
   "use strict";
+  const Tags = typeof module === "object" && module.exports ? require("./checklist-tags") : globalThis.QaReportTags;
   const statuses = ["НЕ ОК", "ЗАБЛОКИРОВАНО", "ТРЕБУЕТ УТОЧНЕНИЯ", "ПОЧТИ ОК", "ЧАСТИЧНО ПРОВЕРЕНО", "OK", "НЕ ПРОВЕРЕНО"];
   const itemWord = count => count % 100 >= 11 && count % 100 <= 14 ? "пунктов" : count % 10 === 1 ? "пункт" : count % 10 >= 2 && count % 10 <= 4 ? "пункта" : "пунктов";
   const key = (...parts) => JSON.stringify(parts);
@@ -17,7 +18,7 @@
         selectedRows.add(row.id);
       }
     }
-    return { mapping, selectedRows, columns, cells: new Map(), statuses: new Set(statuses), resetStatuses: false, keepIntro: true, preset: "source" };
+    return { mapping, selectedRows, columns, cells: new Map(), statuses: new Set(statuses), resetStatuses: false, keepIntro: true, preset: "source", tagFilter: Tags.scope() };
   }
   function preset(source, state, name) {
     state.preset = name;
@@ -29,7 +30,7 @@
     }
   }
   const mapped = (row, state) => state.mapping.get(sourceStatus(row)) || "";
-  const eligible = (row, state) => !mapped(row, state) || state.statuses.has(mapped(row, state));
+  const eligible = (row, state) => (!mapped(row, state) || state.statuses.has(mapped(row, state))) && Tags.matches(row, state.tagFilter);
   function build(source, state) {
     const result = JSON.parse(JSON.stringify(source));
     result.intro = state.keepIntro ? result.intro : "";
@@ -124,7 +125,7 @@
             if (used.has(destination.id)) throw new Error(`В разделе «${sourceSection.title || "Раздел"}» несколько столбцов направлены в «${destination.title}». Выберите разные столбцы.`);
           } else if (choice !== "new") {
             destination = sourceSection.headerless ? originalColumns[column.sourcePosition]
-              : target.columns.find(c => titleKey(c.title) === titleKey(column.title) && !used.has(c.id) && !reserved.has(c.id));
+              : target.columns.find(c => (Tags.isColumn(c) === Tags.isColumn(column)) && (Tags.isColumn(column) || titleKey(c.title) === titleKey(column.title)) && !used.has(c.id) && !reserved.has(c.id));
             if (destination && (used.has(destination.id) || reserved.has(destination.id))) destination = null;
           }
           if (!destination) {

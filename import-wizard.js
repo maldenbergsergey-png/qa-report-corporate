@@ -174,6 +174,10 @@
     }
     function renderRows(panel) {
       mappingPanel(panel);
+      const tagFilter = root.QaReportTags.createFilter(source, state.tagFilter, value => { opened.add("tag-filter"); state.tagFilter = value; changed(false); }, { display: false, title: "Отбор по меткам" });
+      tagFilter.open = opened.has("tag-filter");
+      tagFilter.addEventListener("toggle", () => { if (tagFilter.open) opened.add("tag-filter"); else opened.delete("tag-filter"); });
+      panel.append(tagFilter);
       const heading = el("div", "import-inline-heading"); heading.append(el("strong", "", "Статусы в исходном отчёте"), button("Все статусы", "all-statuses", () => { state.statuses = new Set(O.statuses); changed(false); }));
       if (source.sections.some(section => section.rows.some(row => O.mapped(row, state) === "НЕ ОК"))) {
         const shortcuts = el("div", "import-filter-shortcuts");
@@ -248,6 +252,14 @@
         panel.append(disclosure(`data-${section.id}`, section.title || "Раздел", body => {
           for (const column of section.columns) {
             const columnKey = O.key(section.id, column.id), action = state.columns.get(columnKey), block = el("div", "import-data-column");
+            block.append(field("Тип столбца", select(`type-${column.id}`, `Тип столбца «${column.title}»`, [["text", "Текст"], ["tags", "Метки"]], column.type === "tags" ? "tags" : "text", value => {
+              if (column.type === "tags" && value !== "tags") for (const row of section.rows) {
+                const plain = document.createElement("div"); plain.textContent = root.QaReportTags.read(row.cells[column.id]).join("\n"); row.cells[column.id] = plain.innerHTML.replace(/\n/g, "<br>");
+              }
+              column.type = value;
+              if (value === "tags") for (const row of section.rows) row.cells[column.id] = root.QaReportTags.html(root.QaReportTags.read(row.cells[column.id]));
+              changed();
+            })));
             block.append(field(column.title, select(`column-${column.id}`, `Действие для «${column.title}», ${section.title}`, options, action, value => {
               state.columns.set(columnKey, value);
               for (const row of section.rows) state.cells.delete(O.key(row.id, column.id));
@@ -327,7 +339,7 @@
         const body = el("tbody");
         for (const row of rows) {
           const line = el("tr"); line.append(el("td", "", labels.get(row.id)));
-          for (const column of section.columns) line.append(el("td", "", plain(row.cells[column.id]) || "—"));
+          for (const column of section.columns) { const cell = el("td"); if (column.type === "tags") root.QaReportTags.view(cell, root.QaReportTags.read(row.cells[column.id])); else cell.textContent = plain(row.cells[column.id]) || "—"; line.append(cell); }
           line.append(el("td", "", row.status || "Не сопоставлен")); body.append(line);
         }
         table.append(body); scroll.append(table); panel.append(scroll);

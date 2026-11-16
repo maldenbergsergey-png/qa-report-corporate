@@ -18,8 +18,8 @@
       if (!rows.length) continue;
       const used = new Set();
       const mapping = source.columns.map((column) => {
-        let destination = target.columns.find((item) => item.id === column.id && titleKey(item.title) === titleKey(column.title) && !used.has(item.id))
-          || target.columns.find((item) => titleKey(item.title) === titleKey(column.title) && !used.has(item.id));
+        let destination = target.columns.find((item) => item.id === column.id && (item.type === "tags") === (column.type === "tags") && (column.type === "tags" || titleKey(item.title) === titleKey(column.title)) && !used.has(item.id))
+          || target.columns.find((item) => (item.type === "tags") === (column.type === "tags") && (column.type === "tags" || titleKey(item.title) === titleKey(column.title)) && !used.has(item.id));
         if (!destination) {
           destination = { ...column, id: target.columns.some((item) => item.id === column.id) ? createId() : column.id };
           target.columns.push(destination);

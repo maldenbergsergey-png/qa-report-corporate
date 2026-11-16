@@ -1609,7 +1609,8 @@
     }
     for (const [position, column] of section.columns.entries()) {
       const td = element("td", "report-cell");
-      appendContent(td, row.cells[column.id]);
+      if (column.type === "tags") window.QaReportTags.view(td, (row.cells[column.id]?.text || "").split("\n"));
+      else appendContent(td, row.cells[column.id]);
       if (position === 0 && bugs.children.length) td.append(bugs);
       tr.append(td);
     }

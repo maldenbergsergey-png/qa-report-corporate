@@ -1,0 +1,93 @@
+Проверка после истечения тестового кода
+
+[http-error] [POST] https\\://api.example.test/api/v1/session/logout\\
+
+Status: 401\\
+
+Message: This exception was thrown because the response has a status code of 401 and RequestOptions.validateStatus was configured to throw for this status code.\\
+
+The status code of 401 has the following meaning: "Client error - the request contains bad syntax or cannot be fulfilled"\\
+
+Read more about status codes at https\\://developer.mozilla.org/en-US/docs/Web/HTTP/Status\\
+
+In order to resolve this exception you typically have either to verify and fix your request code or you have to fix the server code.\\
+
+\\
+
+Data: {\\
+
+&#x20; "code": "\\\*\\\*\\\*",\\
+
+&#x20; "message": "Invalid credentials."\\
+
+}\\
+
+Headers: {\\
+
+&#x20; "access-control-allow-headers": [\\
+
+&#x20;   "Authorization, Content-Type, Accept, Sentry-Trace, Baggage"\\
+
+&#x20; ],\\
+
+&#x20; "x-powered-by": [\\
+
+&#x20;   "PHP/8.0.0"\\
+
+&#x20; ],\\
+
+&#x20; "cache-control": [\\
+
+&#x20;   "no-cache, private"\\
+
+&#x20; ],\\
+
+&#x20; "transfer-encoding": [\\
+
+&#x20;   "chunked"\\
+
+&#x20; ],\\
+
+&#x20; "date": [\\
+
+&#x20;   "Sat, 03 Jan 2026 12:00:00 GMT"\\
+
+&#x20; ],\\
+
+&#x20; "vary": [\\
+
+&#x20;   "Origin"\\
+
+&#x20; ],\\
+
+&#x20; "access-control-allow-methods": [\\
+
+&#x20;   "GET, POST, PUT, PATCH, DELETE, OPTIONS"\\
+
+&#x20; ],\\
+
+&#x20; "x-robots-tag": [\\
+
+&#x20;   "noindex"\\
+
+&#x20; ],\\
+
+&#x20; "content-type": [\\
+
+&#x20;   "application/json"\\
+
+&#x20; ],\\
+
+&#x20; "www-authenticate": [\\
+
+&#x20;   "Bearer"\\
+
+&#x20; ],\\
+
+&#x20; "server": [\\
+
+&#x20;   "nginx/1.0.0"\\
+
+&#x20; ]\\
+
+}

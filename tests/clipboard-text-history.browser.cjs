@@ -1,4 +1,4 @@
-// Code editor regression with an isolated database, local fixtures and no remote services.
+// Clipboard history regression with an isolated database, local fixtures and no remote services.
 const { chromium } = require(process.env.QA_REPORT_PLAYWRIGHT || 'playwright');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -75,13 +75,22 @@ async function main() {
   const content = () => page.locator(selector).evaluate(editor => cleanEditorHtml(editor));
   const plainLog = '11-17 12:34:56 D/Logs: {"message":"Ответ получен","status":200}';
   const json = '{"message":"Ответ получен","status":200}';
-  for (const value of [plainLog, json, '```json\n' + json + '\n```', 'https://example.test/log']) {
+  // The saved fixture is anonymized; a local sample can be checked without committing it.
+  const androidLog = fs.readFileSync(process.env.QA_REPORT_LOG_SAMPLE || path.join(__dirname, 'fixtures/android-http-error.txt'), 'utf8').trimEnd();
+  const rawAndroidLog = androidLog.replaceAll('&#x20;', ' ').replace(/\\+([:*])/g, '$1').replace(/\\+$/gm, '').replace(/\n\n/g, '\n');
+  const httpOnlyLog = rawAndroidLog.slice(rawAndroidLog.indexOf('[http-error]'));
+  const samples = [
+    [plainLog, false], [json, true], ['```json\n' + json + '\n```', true], ['https://example.test/log', false],
+    [androidLog, false], [rawAndroidLog, false], [httpOnlyLog, true],
+  ];
+  for (const [value, codeExpected] of samples) {
     for (const delayed of [false, true]) {
       await fixture();
       const original = await content();
       await page.keyboard.type('Typed before pasting. ');
       const before = await content();
       await paste(value);
+      assert.equal(await page.locator(selector + ' .cell-code-block').count(), codeExpected ? 1 : 0);
       const after = await content();
       assert.notEqual(after, before);
       assert.equal(await page.locator('#undoButton').isEnabled(), true);
@@ -95,6 +104,20 @@ async function main() {
       await page.keyboard.press('Control+Shift+z');
       assert.equal(await content(), after);
     }
+  }
+  // Also exercise the browser clipboard and native paste shortcut with the supplied log.
+  for (const value of [androidLog, rawAndroidLog, httpOnlyLog]) {
+    await fixture();
+    const before = await content();
+    await page.evaluate(value => navigator.clipboard.writeText(value), value);
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
+    await page.waitForFunction(() => undoStack.length > 0);
+    const after = await content();
+    assert.notEqual(after, before);
+    await page.keyboard.press('Control+z');
+    assert.equal(await content(), before, 'Native clipboard paste must also undo the whole HTTP error log');
+    await page.keyboard.press('Control+y');
+    assert.equal(await content(), after);
   }
   // Replacing selected text must restore that text on undo.
   await fixture();
@@ -152,7 +175,7 @@ async function main() {
   await page.keyboard.press('Meta+z');
   assert.equal(await page.locator('#introEditor').textContent(), '');
   assert.deepEqual(externalRequests, []);
-  console.log('PASS: plain Android-style logs, JSON/code/URL paste, pending typing, immediate/delayed undo and redo, replacement, large logs, Russian layouts, browser history commands and intro text.');
+  console.log('PASS: escaped/raw HTTP error logs through the native clipboard, plain text/code/URL paste, pending typing, immediate/delayed undo and redo, replacement, large logs, Russian layouts, browser history commands and intro text.');
   assert.deepEqual(errors, []);
 }
 main().catch(error => { console.error(error); process.exitCode=1; }).finally(async () => {

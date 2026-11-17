@@ -1,9 +1,9 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v201';
+const CACHE_NAME = 'qa-report-corporate-assets-v202';
 const SHELL = [
   "/share-exclusions.js?v=1", "/share-exclusions.css?v=1",
-  "/checklist-tags.js?v=8", "/checklist-tags.css?v=11",
+  "/checklist-tags.js?v=9", "/checklist-tags.css?v=12",
   "/history-controls.js?v=2", "/history-controls.css?v=2",
   "/task-context.js?v=1", "/task-context-ui.js?v=3", "/task-context.css?v=3",
   "/personal-mcp-settings.js?v=3",

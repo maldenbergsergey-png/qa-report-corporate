@@ -88,11 +88,16 @@
   function button(text, cls, action) {
     const el = node("button", cls, text); el.type = "button"; el.addEventListener("click", action); return el;
   }
+  const icon = id => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("ui-icon"); svg.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use"); use.setAttribute("href", `#icon-${id}`); svg.append(use); return svg;
+  };
   function picker(anchor, { values = [], source, change, bulk = false, close = () => {} }) {
     document.querySelectorAll(".qa-tags-picker").forEach(el => el.hidePopover());
     let selected = unique(values);
     const panel = node("div", "qa-tags-picker"); panel.popover = "auto"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", bulk ? "Метки выбранных пунктов" : "Метки пункта");
-    const heading = node("div", "qa-tags-heading"); heading.append(node("strong", "", "Метки"), button("×", "qa-tags-close", () => panel.hidePopover()));
+    const heading = node("div", "qa-tags-heading"); heading.append(node("strong", "", "Метки"), button("", "qa-tags-close", () => panel.hidePopover()));
+    heading.lastChild.append(icon("x"));
     heading.lastChild.setAttribute("aria-label", "Закрыть метки");
     const search = node("input", "qa-tags-search"); search.placeholder = "Найти или создать метку"; search.maxLength = 160; search.setAttribute("aria-label", "Название метки или поиск");
     const chosen = node("div", "qa-tags-chosen"), list = node("div", "qa-tags-options");
@@ -215,10 +220,6 @@
     let current = scope(initial), mode = "include";
     const choices = unique([...allNames(source), ...current.include, ...current.exclude]);
     const root = node("section", "qa-tags-publication"); root.setAttribute("aria-label", "Отбор пунктов по меткам");
-    const icon = id => {
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("ui-icon"); svg.setAttribute("aria-hidden", "true");
-      const use = document.createElementNS("http://www.w3.org/2000/svg", "use"); use.setAttribute("href", `#icon-${id}`); svg.append(use); return svg;
-    };
     const heading = node("div", "qa-tags-publication-heading"), title = node("h3", "", editor ? "Метки" : "Метки пунктов");
     const reset = button("Сбросить", "qa-tags-reset", () => { current = scope({ showTags: current.showTags }); emit(); });
     heading.append(icon("tag"), title, reset); root.append(heading);

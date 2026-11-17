@@ -45,7 +45,10 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
       res.end(JSON.stringify({ values: req.url.includes("/issuetypes/1?") ? fields : [{ id: "1", name: "Ошибка", subtask: false }], isLast: true })); return;
     }
     if (req.url === "/jira7/rest/api/2/issue" && req.method === "POST") { res.statusCode = 201; res.end(JSON.stringify({ key: "QA-2" })); return; }
-    if (req.url === "/jira7/rest/api/2/issue/QA-1?fields=attachment") {
+    if (req.url === "/jira7/rest/api/2/issue/14536?fields=key") {
+      res.end(JSON.stringify({ key: "QA-1" })); return;
+    }
+    if (req.url === "/jira7/rest/api/2/issue/QA-1?fields=attachment" || req.url === "/jira7/rest/api/2/issue/14536?fields=attachment") {
       res.end(JSON.stringify({ fields: { attachment: [{ id: "42", filename: "screen.png", mimeType: "image/png", content: `http://${req.headers.host}/jira7/secure/attachment/42/screen.png` }] } })); return;
     }
     if (req.url === "/jira7/rest/api/2/attachment/meta") {
@@ -220,7 +223,18 @@ test("multi-Jira OAuth connects a user and signs Jira actions as that user", asy
     const svg = await uploadFixture([{ name: "diagram.svg", type: "image/svg+xml", dataBase64: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64") }]);
     assert.equal(svg.status, 200, await svg.clone().text());
 
-    const fileBody = JSON.stringify({ commentUrl: `${jiraOrigin}/jira7/browse/QA-1?focusedCommentId=10001`, attachmentId: "42" });
+    const editUrl = `${jiraOrigin}/jira7/secure/EditComment!default.jspa?id=14536&commentId=10001`;
+    const importOptions = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentUrl: editUrl }) };
+    const imported = await request(`${appOrigin}/api/jira/import-comment`, importOptions);
+    assert.equal(imported.status, 200, await imported.clone().text());
+    const importedComment = await imported.json();
+    assert.equal(importedComment.issueUrl, `${jiraOrigin}/jira7/browse/QA-1`);
+    assert.equal(importedComment.body, "Обновлено"); assert.equal(importedComment.attachments[0].id, "42");
+    assert.equal((await request(`${appOrigin}/api/jira/import-comment`, importOptions, "user-b@example.com")).status, 409);
+    assert.equal((await fetch(`${appOrigin}/api/jira/import-comment`, importOptions)).status, 401);
+    assert.equal((await request(`${appOrigin}/api/jira/import-comment`, { ...importOptions, headers: { ...importOptions.headers, Origin: "https://other.example" } })).status, 403);
+
+    const fileBody = JSON.stringify({ commentUrl: editUrl, attachmentId: "42" });
     const downloaded = await request(`${appOrigin}/api/jira/import-attachment`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: fileBody,
     });

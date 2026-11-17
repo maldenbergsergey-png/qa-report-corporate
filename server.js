@@ -12,6 +12,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { parseJiraMarkup } = require("./jira-markup-import");
 const { createLocalImportService } = require("./local-import-server");
 const { downloadJiraAttachment, listJiraAttachments } = require("./jira-attachment-transfer");
+const JiraCommentImport = require("./jira-comment-import");
 const { oauthHeader, parseForm, loadJiraOAuthConfig, encryptToken, decryptToken } = require("./jira-oauth");
 const {
   normalizeEmail,
@@ -873,19 +874,6 @@ function parseIssueReference(connection, rawUrl) {
   return { issueUrl, issueKey };
 }
 
-function parseCommentId(commentUrl) {
-  const candidates = [
-    commentUrl.searchParams.get("focusedCommentId"),
-    commentUrl.searchParams.get("commentId"),
-    commentUrl.searchParams.get("selectedItem")?.match(/comment-(\d+)/i)?.[1],
-    commentUrl.hash.match(/comment-(\d+)/i)?.[1],
-    commentUrl.hash.match(/comment-(\d+)/i)?.[1],
-  ];
-  const commentId = candidates.find((value) => /^\d+$/.test(String(value || "")));
-  if (!commentId) throw new Error("В ссылке не найден идентификатор комментария");
-  return String(commentId);
-}
-
 function sanitizeAttachmentName(name, mimeType, index) {
   const extensionByType = {
     "image/png": ".png",
@@ -1251,36 +1239,7 @@ async function handleJiraCommentUpdate(request, response) {
 async function handleJiraImportComment(request, response) {
   const body = await readJson(request);
   const connection = jiraConnection(request, body);
-  const { issueUrl, issueKey } = parseIssueReference(connection, body.commentUrl);
-  const commentId = parseCommentId(issueUrl);
-  const comment = await jiraFetch(
-    connection,
-    `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment/${encodeURIComponent(commentId)}`,
-  );
-  let attachments = [];
-  try {
-    const issue = await jiraFetch(
-      connection,
-      `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
-    );
-    attachments = (issue.fields?.attachment || []).map((item) => ({
-      id: String(item.id),
-      filename: item.filename,
-      content: item.content,
-      thumbnail: item.thumbnail,
-      mimeType: item.mimeType,
-    }));
-  } catch {
-    // Комментарий можно импортировать и без доступа к списку вложений.
-  }
-  sendJson(response, 200, {
-    ok: true,
-    format: "wiki",
-    body: comment.body,
-    issueUrl: `${connection.baseUrl}/browse/${encodeURIComponent(issueKey)}`,
-    commentId,
-    attachments,
-  });
+  sendJson(response, 200, await JiraCommentImport.load(connection, body.commentUrl, jiraFetch));
 }
 
 async function handleJiraAttachmentManifest(request, response) {
@@ -1307,7 +1266,7 @@ async function handleJiraAttachmentManifest(request, response) {
 async function handleJiraImportAttachment(request, response) {
   const body = await readJson(request);
   const connection = jiraConnection(request, body);
-  const { issueKey } = parseIssueReference(connection, body.commentUrl);
+  const { issueRef: issueKey } = JiraCommentImport.reference(connection, body.commentUrl);
   const file = await downloadJiraAttachment({
     connection, issueKey, attachmentId: body.attachmentId, jiraFetch, maxBytes: MAX_ATTACHMENT_FILE,
     fetchFile: target => fetch(target, { redirect: "manual", headers: authHeaders(connection, "GET", target), signal: AbortSignal.timeout(60_000) }),

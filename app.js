@@ -5770,6 +5770,22 @@ function insertHtmlAtCursor(html) {
   activeEditor.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+// Keep a paste separate from typing that has not reached the debounced history yet.
+function recordClipboardInsertion(insert) {
+  collectDocumentFields();
+  const before = serializeDraft();
+  insert();
+  collectDocumentFields();
+  clearTimeout(historyTimer);
+  const after = serializeDraft();
+  if (after === before) return;
+  if (historyCurrent !== before) undoStack.push(historyCurrent);
+  undoStack.push(before);
+  historyCurrent = after;
+  redoStack = [];
+  updateHistoryButtons();
+}
+
 function insertHtmlAtSelection(html, preferredRange = null) {
   const selection = window.getSelection();
   const preferredNode = preferredRange?.commonAncestorContainer;
@@ -6244,7 +6260,9 @@ function updateCodeEditorState() {
   elements.codeEditorLanguage.textContent = `${lineCount} ${pluralizeLines(lineCount)}`;
   const dirty = codeEditorIsDirty();
   elements.codeEditorState.textContent = dirty ? "Есть несохранённые изменения" : "Изменений нет";
-  elements.saveCodeButton.disabled = !dirty;
+  // Saving the readable representation is optional; displaying it is not an edit.
+  elements.saveCodeButton.disabled = !dirty &&
+    elements.codeEditorTextarea.value === codeEditorInitialValue.replace(/\r\n?/g, "\n");
 }
 
 function setCodeEditorBackgroundInert(inert) {
@@ -6266,7 +6284,8 @@ function codeEditorIsDirty() {
   return (
     !elements.codeEditorModal.hidden &&
     Boolean(editingCodeBlock) &&
-    (elements.codeEditorTextarea.value !== codeEditorInitialValue || codeEditorTextViews?.hasEdits())
+    (codeEditorTextViews?.hasEdits() || elements.codeEditorTextarea.value !==
+      (codeEditorTextViews?.value(elements.codeEditorReadable.checked) ?? codeEditorInitialValue).replace(/\r\n?/g, "\n"))
   );
 }
 
@@ -10128,7 +10147,7 @@ document.addEventListener("paste", async (event) => {
       selection?.rangeCount && editor.contains(selection.anchorNode)
         ? selection.getRangeAt(0).cloneRange()
         : null;
-    insertHtmlAtSelection(fileCardHtml, range);
+    recordClipboardInsertion(() => insertHtmlAtSelection(fileCardHtml, range));
     enhanceFileControls(editor);
     return;
   }
@@ -10144,17 +10163,17 @@ document.addEventListener("paste", async (event) => {
       : null;
   if (snippet) {
     event.preventDefault();
-    insertCodeSnippet(editor, snippet, range);
+    recordClipboardInsertion(() => insertCodeSnippet(editor, snippet, range));
     return;
   }
   if (isPlainUrl(plainText)) {
     event.preventDefault();
     activeEditor = editor;
     const url = normalizeLinkUrl(plainText);
-    insertHtmlAtSelection(
+    recordClipboardInsertion(() => insertHtmlAtSelection(
       `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`,
       range,
-    );
+    ));
     return;
   }
   const textToPaste = plainText || htmlToText(html);
@@ -10164,10 +10183,20 @@ document.addEventListener("paste", async (event) => {
     const cleanHtml = /(?:https?:\/\/|www\.)[^\s]+/i.test(textToPaste)
       ? linkifyPlainText(textToPaste)
       : textToEditorHtml(textToPaste);
-    insertHtmlAtSelection(cleanHtml, range);
+    recordClipboardInsertion(() => insertHtmlAtSelection(cleanHtml, range));
   }
 });
 document.addEventListener("beforeinput", (event) => {
+  if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+    const editor = event.target.closest?.(".cell-editor, .intro-editor");
+    if (!event.cancelable || !editor) return;
+    event.preventDefault();
+    // A browser command can refer to an old editor while a viewer has focus.
+    if (!editor.contains(document.activeElement)) return;
+    if (event.inputType === "historyUndo") undo();
+    else redo();
+    return;
+  }
   if (event.inputType !== "insertText" || !event.data || event.isComposing || !event.cancelable) return;
   const boundary = objectAtEditorCaret();
   if (!boundary) return;
@@ -10567,7 +10596,7 @@ elements.codeEditorTextarea.addEventListener("keydown", (event) => {
   event.stopPropagation();
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    if (codeEditorIsDirty()) saveCodeChanges();
+    if (!elements.saveCodeButton.disabled) saveCodeChanges();
     return;
   }
   if (event.key === "Escape") {
@@ -10910,13 +10939,16 @@ document.addEventListener("keydown", (event) => {
     if (!elements.historyModal.hidden) closeHistory();
     if (document.querySelector(".app-shell").classList.contains("focus-mode")) setFocusMode(false);
   }
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+  // Keep logical Latin shortcuts and use the physical key for other layouts.
+  const historyKey = /^[a-z]$/i.test(event.key) ? event.key.toLowerCase()
+    : event.code === "KeyZ" ? "z" : event.code === "KeyY" ? "y" : "";
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && historyKey === "z") {
     event.preventDefault();
     undo();
   }
   if (
     (event.metaKey || event.ctrlKey) &&
-    ((event.shiftKey && event.key.toLowerCase() === "z") || event.key.toLowerCase() === "y")
+    ((event.shiftKey && historyKey === "z") || historyKey === "y")
   ) {
     event.preventDefault();
     redo();

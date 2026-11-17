@@ -92,6 +92,23 @@ async function main() {
   assert.equal(await page.locator(selector).evaluate(node => node.querySelector('code').textContent), source, 'Opening must not write the converted preview to the report');
   await toggle.uncheck(); assert.equal(await text.inputValue(), source); assert.equal(await save.isDisabled(), true);
   await toggle.check();
+  assert.equal(await page.locator('#codeEditorState').textContent(), 'Изменений нет');
+  const beforeReading = await page.evaluate(() => serializeDraft());
+  await page.click('#closeCodeEditorButton');
+  assert.equal(await page.locator('#confirmModal').isHidden(), true, 'Readable formatting alone must not prompt to save');
+  assert.equal(await page.locator('#codeEditorModal').isHidden(), true);
+  assert.equal(await page.evaluate(() => serializeDraft()), beforeReading);
+  await open();
+  await text.press('Escape');
+  assert.equal(await page.locator('#confirmModal').isHidden(), true, 'Escape after viewing must close without a prompt');
+  assert.equal(await page.locator('#codeEditorModal').isHidden(), true);
+  await open();
+  // Reverting an actual edit restores the clean state in both views.
+  await text.fill(readable + ' '); await text.fill(readable);
+  await toggle.uncheck();
+  await text.fill(source + ' '); await text.fill(source);
+  await toggle.check();
+  assert.equal(await page.locator('#codeEditorState').textContent(), 'Изменений нет');
   const edited = readable.replace('Привет', 'Привет, Москва');
   await text.fill(edited);
   await toggle.uncheck(); assert.equal(await text.inputValue(), source);
@@ -154,9 +171,23 @@ Content-Type: application/json
     block.querySelector('code').textContent=`{"text":"${value}"}`; commitCodeChange(block);
   },mojibake);
   await waitSaved(); await open(); assert.match(await text.inputValue(),/Проверка кириллицы/);
-  await save.click(); await waitSaved();
+  assert.equal(await page.evaluate(() => codeEditorIsDirty()), false);
+  await text.press('Control+s'); await waitSaved();
   await page.reload(); await page.waitForSelector(selector);
   assert.match(await page.locator(selector).evaluate(node => node.querySelector('code').textContent),/Проверка кириллицы/);
+  // CRLF is normalized by textarea without any user edit.
+  await page.evaluate(() => {
+    const block = document.querySelector('tr[data-row-id="code-row"] .cell-code-block');
+    block.querySelector('code').textContent = 'const first = 1;\r\nconst second = 2;';
+    commitCodeChange(block);
+  });
+  await waitSaved(); await open();
+  assert.equal(await page.evaluate(() => codeEditorIsDirty()), false);
+  await toggle.uncheck();
+  assert.equal(await page.evaluate(() => codeEditorIsDirty()), false);
+  await text.press('Escape');
+  assert.equal(await page.locator('#confirmModal').isHidden(), true);
+  assert.equal(await page.locator('#codeEditorModal').isHidden(), true);
   assert.deepEqual(errors,[]); assert.deepEqual(externalRequests,[]);
   console.log('PASS: default readable/source views, safe Unicode and mojibake repair, exact JSON numbers/duplicate keys, editing, paste, Save/Ctrl+S, undo/redo/reload and responsive layouts.');
 }

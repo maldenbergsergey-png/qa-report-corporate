@@ -31,7 +31,7 @@ async function main() {
     child.once('exit', code => reject(Error(`Server exited: ${code}`)));
     setTimeout(() => reject(Error('Server startup timeout')), 10000).unref();
   });
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.QA_REPORT_CHROMIUM && { executablePath: process.env.QA_REPORT_CHROMIUM }) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
   if (fs.existsSync(path.join(root, 'auth.js'))) {
     const { createSessionToken } = require(path.join(root, 'auth'));
@@ -96,14 +96,15 @@ async function main() {
   assert.match(await exclude('ios', 'backend').getAttribute('aria-label'), /1\. iOS · пункт 1\./);
   assert.match(await exclude('android', 'android-first').getAttribute('aria-label'), /2\. Android · пункт 1\./);
   await page.fill('#shareReportExclusionSearch', 'серверная');
-  assert.equal(await page.locator('#shareReportExclusionList label:visible').count(), 1);
+  assert.equal(await page.locator('#shareReportExclusionList .exclusion-picker-row:visible').count(), 1);
   await exclude('ios', 'backend').check();
   await page.fill('#shareReportExclusionSearch', 'Служебный раздел');
   await exclude('service', 'service-first').check();
   await page.fill('#shareReportExclusionSearch', 'нет такого пункта');
-  assert.equal(await page.locator('#shareReportExclusionEmpty').isVisible(), true);
+  assert.equal(await page.locator('.exclusion-picker-empty').isVisible(), true);
   await page.fill('#shareReportExclusionSearch', '');
-  assert.equal(await page.locator('#shareReportExclusionSummary').textContent(), 'Исключить пункты · 2');
+  await page.click('#applyShareExclusions');
+  assert.equal(await page.locator('#shareReportExclusionBadge').textContent(), '2');
   await page.locator('#shareReportStatuses input[value="НЕ ОК"]').check();
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -153,12 +154,14 @@ async function main() {
   });
   await open();
   await page.click('#shareReportUpdate');
+  await page.click('#shareReportExclusionSummary');
   assert.equal(await exclude('ios', 'backend').isChecked(), true);
   assert.match(await exclude('ios', 'backend').getAttribute('aria-label'), /BE-7/);
   assert.equal(await exclude('service', 'service-first').isChecked(), true);
   assert.equal(await exclude('android', 'android-first').isChecked(), false);
   // Removing an exclusion brings back only that point; the same URL is updated.
   await exclude('service', 'service-first').uncheck();
+  await page.click('#applyShareExclusions');
   await submit();
   assert.equal(requests.length, 2);
   assert.equal(requests[1].update.id, publication.id);
@@ -167,12 +170,13 @@ async function main() {
   assert.ok(!JSON.stringify(requests[1].snapshot).includes('Серверная проверка'));
   await page.click('#shareReportUpdate');
   // Empty publication is rejected without sending a request or changing the draft.
-  for (const input of await page.locator('#shareReportExclusionList input').all()) await input.check();
-  await page.click('#shareReportPublish');
-  await page.locator('#shareReportError').filter({ hasText: 'В публикации должен остаться хотя бы один заполненный пункт.' }).waitFor();
+  await page.click('#shareReportExclusionSummary');
+  await page.getByRole('button', { name: 'Исключить найденные', exact: true }).click();
+  await page.click('#applyShareExclusions');
+  assert.equal(await page.locator('#shareReportPublish').isEnabled(), false);
   assert.equal(requests.length, 2);
   await page.click('#shareReportExclusionReset');
-  assert.equal(await page.locator('#shareReportExclusionList input:checked').count(), 0);
+  assert.equal(await page.evaluate(() => selectedSharedExclusions().length), 0);
   await submit();
   assert.equal(requests[2].snapshot.sections.flatMap(section => section.rows).length, 5);
   assert.equal(requests[2].files.length, 1);
@@ -181,15 +185,16 @@ async function main() {
   await page.click('#publicationMenuButton');
   await page.click('#shareReportNewLink');
   await page.waitForFunction(() => shareReportContext?.enabled);
-  assert.equal(await page.locator('#shareReportExclusionList input:checked').count(), 0);
+  assert.equal(await page.evaluate(() => selectedSharedExclusions().length), 0);
   await page.click('#shareReportExclusionSummary');
   await exclude('android', 'android-first').check();
+  await page.click('#applyShareExclusions');
   await submit();
   assert.equal(publications.size, 2);
   assert.deepEqual(await page.evaluate(() => sharedPublications(draft.reportId)[0].excludedRows), [{ sectionId: 'android', rowId: 'android-first' }]);
   await page.selectOption('#shareReportLinkSelect', publication.id);
   await page.click('#shareReportUpdate');
-  assert.equal(await page.locator('#shareReportExclusionList input:checked').count(), 0);
+  assert.equal(await page.evaluate(() => selectedSharedExclusions().length), 0);
   await page.click('#shareReportCancelUpdate');
   await page.click('#shareReportClose');
   // Compare changes only in published points, using exactly the same exclusion scope.

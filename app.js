@@ -8227,7 +8227,7 @@ async function exportReportFile() {
 }
 const shareReport = Object.fromEntries([
   "Modal", "Title", "Hint", "State", "Spinner", "Status", "Stage", "Detail", "Error", "Options", "Images", "Files", "Statuses",
-  "Exclusions", "ExclusionSummary", "ExclusionSearch", "ExclusionReset", "ExclusionList", "ExclusionEmpty",
+  "Exclusions", "ExclusionSummary", "ExclusionBadge", "ExclusionReset",
   "Links", "Latest", "DateLabel", "Date", "Author", "TargetAuthor", "Access", "Update", "Revoke", "Attempts", "AttemptList", "Open", "Copy", "ChooseLink", "LinkSelect",
   "Close", "Minimize", "Dock", "DockStatus", "DockSpinner", "DockProgress", "Restore",
   "Footer", "Background", "CancelUpdate", "ReplacePending", "Publish", "SignOut",
@@ -8238,6 +8238,7 @@ let shareReportContext = null;
 let pendingShareBody = null;
 let shareReportBusy = false;
 let shareReportOperation = null;
+let sharedExclusionPicker = null;
 
 function setSharedDefaultStatuses(statuses = []) {
   const selected = new Set(statuses);
@@ -8261,31 +8262,15 @@ function sharedExcludedRows(value) {
 }
 
 function selectedSharedExclusions() {
-  return [...shareReport.ExclusionList.querySelectorAll("input:checked")].map(input => ({
-    sectionId: input.dataset.sectionId, rowId: input.dataset.rowId,
-  }));
+  return sharedExclusionPicker?.selected() || [];
 }
 
 function updateSharedExclusionCount() {
   const count = selectedSharedExclusions().length;
-  shareReport.ExclusionSummary.textContent = count ? `Исключить пункты · ${count}` : "Исключить пункты";
+  shareReport.ExclusionBadge.textContent = count ? String(count) : "Выбрать";
+  shareReport.ExclusionSummary.dataset.active = String(count > 0);
   shareReport.ExclusionReset.hidden = count === 0;
   updateSharedTagCount();
-}
-
-function filterSharedExclusions() {
-  const query = shareReport.ExclusionSearch.value.trim().toLocaleLowerCase();
-  let visible = 0;
-  for (const section of shareReport.ExclusionList.children) {
-    let sectionVisible = 0;
-    for (const label of section.querySelectorAll("label")) {
-      label.hidden = Boolean(query && !label.dataset.search.includes(query));
-      if (!label.hidden) sectionVisible++;
-    }
-    section.hidden = sectionVisible === 0;
-    visible += sectionVisible;
-  }
-  shareReport.ExclusionEmpty.hidden = visible > 0;
 }
 
 function updateSharedTagCount() {
@@ -8305,41 +8290,37 @@ function updateSharedTagCount() {
 
 function renderSharedExclusions(excludedRows = []) {
   mountTagScope("share", shareReport.Exclusions, draft, shareReportContext?.latest?.tagFilter, updateSharedTagCount);
-  const excluded = new Set(excludedRows.map(row => JSON.stringify([row.sectionId, row.rowId])));
-  const numbers = ChecklistNumbering.rowNumbers(draft);
-  const sections = [];
-  for (const section of draft.sections) {
-    const group = document.createElement("div");
-    group.className = "share-report-exclusion-section";
-    const title = ChecklistNumbering.sectionTitle(draft, section);
-    const heading = document.createElement("h3");
-    heading.textContent = title;
-    group.append(heading);
-    section.rows.forEach((row, index) => {
-      const label = document.createElement("label");
-      label.className = "publish-scope-option";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.dataset.sectionId = section.id;
-      input.dataset.rowId = row.id;
-      input.checked = excluded.has(JSON.stringify([section.id, row.id]));
-      const number = numbers.get(row.id) || `Без номера (строка ${index + 1})`;
-      const content = section.columns.map(column => htmlToSpreadsheetText(row.cells[column.id] || "")).join(" ").replace(/\s+/g, " ").trim();
-      const snippet = content.length > 180 ? content.slice(0, 180) + "…" : content || "Без текста";
-      input.setAttribute("aria-label", `${title} · пункт ${number}: ${snippet}`);
-      const text = document.createElement("span");
-      text.textContent = `${number} ${snippet}`;
-      label.dataset.search = `${title} ${number} ${content}`.toLocaleLowerCase();
-      label.append(input, text);
-      group.append(label);
-    });
-    if (section.rows.length) sections.push(group);
-  }
-  shareReport.ExclusionList.replaceChildren(...sections);
-  shareReport.Exclusions.open = excluded.size > 0;
-  shareReport.ExclusionSearch.value = "";
+  sharedExclusionPicker?.destroy();
+  const reportId = draft.draftId;
+  const valid = new Set(draft.sections.flatMap(section => section.rows.map(row => JSON.stringify([section.id, row.id]))));
+  sharedExclusionPicker = window.QaReportExclusions.create({
+    selected: sharedExcludedRows({ excludedRows }).filter(row => valid.has(JSON.stringify([row.sectionId, row.rowId]))),
+    returnFocus: shareReport.ExclusionSummary, notify: showToast,
+    getSource: async cancelled => {
+      const source = draft, numbers = ChecklistNumbering.rowNumbers(source), sections = [];
+      let count = 0;
+      for (const section of source.sections) {
+        const rows = [];
+        for (const row of section.rows) {
+          if (cancelled()) return [];
+          const values = section.columns.map(column => ({ title: column.title, type: column.type, text: htmlToSpreadsheetText(row.cells[column.id] || "").replace(/\s+/g, " ").trim() }));
+          rows.push({ rowId: row.id, number: numbers.get(row.id) || "Без номера", status: row.status,
+            title: (values.find(value => value.type !== "tags" && value.text)?.text || "Без текста").slice(0, 300),
+            content: values.filter(value => value.text).map(value => `${value.title}: ${value.text}`).join(" · "),
+            tags: window.QaReportTags.rowNames(row) });
+          if (++count % 150 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (rows.length) sections.push({ id: section.id, title: ChecklistNumbering.sectionTitle(source, section), rows });
+      }
+      return sections;
+    },
+    onApply: () => {
+      if (draft.draftId !== reportId) { showToast("Открыт другой чек-лист. Закройте выбор пунктов и откройте его заново."); return false; }
+      // The picker commits its staged values immediately after this callback.
+      queueMicrotask(updateSharedExclusionCount);
+    },
+  });
   updateSharedExclusionCount();
-  filterSharedExclusions();
 }
 
 function sharedReportPrefix(reportId) {
@@ -9233,11 +9214,9 @@ function editSharedSnapshot(mode) {
   updateShareReportControls();
   if (context.enabled) shareReport.Images.focus();
 }
-shareReport.ExclusionList.addEventListener("change", updateSharedExclusionCount);
-shareReport.ExclusionSearch.addEventListener("input", filterSharedExclusions);
+shareReport.ExclusionSummary.addEventListener("click", () => sharedExclusionPicker?.open());
 shareReport.ExclusionReset.addEventListener("click", () => {
-  for (const input of shareReport.ExclusionList.querySelectorAll("input:checked")) input.checked = false;
-  updateSharedExclusionCount();
+  sharedExclusionPicker?.clear(); updateSharedExclusionCount();
 });
 shareReport.Update.addEventListener("click", () => editSharedSnapshot("update"));
 shareReport.ReplacePending.addEventListener("click", () => editSharedSnapshot("replacement"));

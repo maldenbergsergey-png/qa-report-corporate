@@ -11,6 +11,7 @@
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css?v=168" />
+    <link rel="stylesheet" href="/share-exclusions.css?v=1" />
     <link rel="stylesheet" href="/checklist-tags.css?v=10" />
     <link rel="stylesheet" href="/report-view.css?v=9" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
@@ -58,6 +59,7 @@
       <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
       <symbol id="icon-jira" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc. --><path fill="#2684ff" d="M490 241.7C417.1 169 320.6 71.8 248.5 0 83 164.9 6 241.7 6 241.7c-7.9 7.9-7.9 20.7 0 28.7C138.8 402.7 67.8 331.9 248.5 512c379.4-378 15.7-16.7 241.5-241.7 8-7.9 8-20.7 0-28.6zm-241.5 90l-76-75.7 76-75.7 76 75.7-76 75.7z"/></symbol>
+      <symbol id="icon-list-filter" viewBox="0 0 24 24"><path d="M3 6h18M7 12h10M10 18h4"/></symbol>
       <symbol id="icon-tag" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><circle cx="7" cy="7" r="1"/></symbol>
       <symbol id="icon-ticket" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2Z" /><path d="M9 9h6M9 13h4" /></symbol>
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 4v16" /></symbol>
@@ -532,14 +534,14 @@
               <label class="publish-scope-option"><input id="shareReportImages" type="checkbox" checked><span>Включить скриншоты и изображения</span></label>
               <label class="publish-scope-option"><input id="shareReportFiles" type="checkbox" checked><span>Включить остальные файлы</span></label>
             </fieldset>
-            <details class="share-report-exclusions" id="shareReportExclusions">
-              <summary id="shareReportExclusionSummary">Исключить пункты</summary>
-              <p class="share-report-hint" id="shareReportExclusionHint">Отметьте пункты, которые не должны попасть в отчёт по ссылке. В исходном чек-листе они останутся. Номера указаны как в редакторе, отдельно для каждого раздела.</p>
-              <input type="search" id="shareReportExclusionSearch" aria-label="Найти пункт или раздел" placeholder="Найти пункт или раздел" />
-              <button class="share-report-text-action" id="shareReportExclusionReset" type="button" hidden>Снять все исключения</button>
-              <div class="share-report-exclusion-list" id="shareReportExclusionList" role="group" aria-label="Пункты для исключения" aria-describedby="shareReportExclusionHint"></div>
-              <p class="share-report-hint" id="shareReportExclusionEmpty" hidden>Пункты не найдены.</p>
-            </details>
+            <section class="share-report-exclusion-control" id="shareReportExclusions" aria-label="Исключения из публикации">
+              <button class="share-report-exclusion-launch" id="shareReportExclusionSummary" type="button" aria-haspopup="dialog">
+                <svg class="ui-icon" aria-hidden="true"><use href="#icon-list-filter"></use></svg>
+                <span class="share-report-exclusion-copy"><strong>Исключить пункты</strong><small>Выбор по разделам и поиск по всему чек-листу</small></span>
+                <span class="share-report-exclusion-badge" id="shareReportExclusionBadge">Выбрать</span>
+              </button>
+              <button class="share-report-text-action" id="shareReportExclusionReset" type="button" hidden>Сбросить</button>
+            </section>
             <fieldset class="share-report-options" aria-describedby="shareReportStatusHint">
               <legend>На что обратить внимание разработчику</legend>
               <p class="share-report-hint" id="shareReportStatusHint">Выберите статусы проверок, требующих внимания разработчика. По ссылке отчёт откроется с фильтром по этим статусам. Без выбора будут показаны все пункты.</p>
@@ -1329,12 +1331,13 @@
       </section>
     </template>
 
+    <script src="/share-exclusions.js?v=1"></script>
     <script src="/checklist-tags.js?v=8"></script>
     <script src="/jira-markup-import.js?v=15"></script>
     <script src="/checklist-selection.js?v=7"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=151"></script>
+    <script src="/release-notes.js?v=152"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1462,7 +1465,7 @@
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
     <script src="/task-context-ui.js?v=3"></script>
-    <script src="/app.js?v=188"></script>
+    <script src="/app.js?v=189"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=14"></script>

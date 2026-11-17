@@ -4384,9 +4384,10 @@ body.selection-mode .editor-toolbar.is-stuck::after,
 }
 .selection-toolbar[hidden], .selection-menu[hidden], #selectionCreateForm[hidden] { display: none; }
 .selection-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.selection-group-label { flex: 0 0 108px; white-space: nowrap; color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.4; }
 .selection-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent); }
-.selection-toolbar button {
+.selection-toolbar button, .report-status-filter-bar .selection-menu button, .report-status-filter-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4401,7 +4402,7 @@ body.selection-mode .editor-toolbar.is-stuck::after,
   font-size: 13px;
   cursor: pointer;
 }
-.selection-toolbar button:hover:not(:disabled) { background: color-mix(in srgb, var(--surface) 88%, var(--selection-accent)); }
+.selection-toolbar button:hover:not(:disabled), .report-status-filter-bar .selection-menu button:hover:not(:disabled), .report-status-filter-trigger:hover { background: color-mix(in srgb, var(--surface) 88%, var(--selection-accent)); }
 .selection-toolbar button:disabled { opacity: .45; cursor: default; }
 .selection-toolbar button:focus-visible, .selection-toolbar input:focus-visible,
 .selection-checkbox:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
@@ -4411,6 +4412,7 @@ body.selection-mode .editor-toolbar.is-stuck::after,
 .selection-menu-wrap { position: relative; }
 .selection-menu {
   position: absolute;
+  z-index: 60;
   top: calc(100% + 8px);
   left: 0;
   width: 310px;
@@ -4432,8 +4434,8 @@ body.selection-mode .editor-toolbar.is-stuck::after,
 .selection-menu strong, .selection-menu-footer { flex-shrink: 0; }
 .selection-menu-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--line); }
 .selection-menu-footer span, .selection-menu small { color: var(--muted); }
-.selection-toolbar .button-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
-.selection-toolbar .button-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.selection-toolbar .button-primary, .report-status-filter-bar .button-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.selection-toolbar .button-primary:hover:not(:disabled), .report-status-filter-bar .button-primary:hover:not(:disabled) { background: var(--primary-hover); }
 .selection-toolbar .selection-delete { color: var(--red); }
 .selection-toolbar .selection-exit {
   position: absolute;
@@ -6013,27 +6015,33 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 .local-import-countdown[hidden], .local-import-other-reports[hidden] { display: none; }
 @media (max-width: 600px) { .local-import-report { align-items: flex-start; flex-direction: column; } }
 
-/* Status filtering is a view of the full checklist. */
-.selection-toolbar .filter-active { border-color: var(--selection-accent); color: var(--primary); }
-#selectionFilterMenu > .selection-all { padding: 10px 2px; border-bottom: 1px solid var(--line); margin-bottom: 4px; flex-shrink: 0; }
+/* List filters stay independent of bulk selection. */
+.report-status-filter-bar { --selection-accent: var(--purple); position: relative; display: grid; gap: 10px; min-width: 0; margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.report-status-filter-bar[hidden], .report-status-filter-body[hidden], #publishStatusFilterHint[hidden], #htmlCopyStatusFilterHint[hidden] { display: none; }
+.report-status-filter-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; min-width: 0; }
+.report-filter-title { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-weight: 600; }
+.report-filter-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.report-filter-controls .selection-menu-wrap { position: relative; }
+.report-status-filter-trigger.filter-active { border-color: var(--purple); color: var(--ink); }
+#selectionFilterMenu { z-index: 42; }
+#selectionFilterMenu > .selection-all { flex-shrink: 0; padding: 10px 2px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 #selectionFilterOptions .summary-color { flex-shrink: 0; }
-.report-status-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; min-width: 0; min-height: 54px; margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
-.report-status-filter-bar[hidden], #publishStatusFilterHint[hidden], #htmlCopyStatusFilterHint[hidden] { display: none; }
-#reportStatusFilterSummary { flex: 0 0 auto; padding-right: 16px; border-right: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+#reportStatusFilterSummary { flex: 0 0 auto; margin-left: auto; color: var(--muted); white-space: nowrap; }
 #reportStatusFilterSummary strong { margin: 0 2px; color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
+.report-status-filter-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
 .report-status-filter-chips { display: flex; flex: 1 1 240px; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--muted); }
-.report-status-filter-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 32px; padding: 3px 4px 3px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.report-status-filter-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 32px; padding: 3px 3px 3px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; line-height: 1.4; }
 .report-status-filter-chip > span { min-width: 0; overflow-wrap: anywhere; }
-.report-status-filter-bar .report-status-filter-remove { display: inline-grid; flex: 0 0 26px; place-items: center; width: 26px; height: 26px; padding: 5px; border: 0; border-radius: 5px; background: color-mix(in srgb, currentColor 8%, transparent); color: inherit; cursor: pointer; }
+.report-status-filter-bar .report-status-filter-remove { display: inline-grid; flex: 0 0 26px; place-items: center; width: 26px; height: 26px; padding: 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; opacity: .7; cursor: pointer; }
 .report-status-filter-remove .ui-icon { width: 14px; height: 14px; }
-.report-status-filter-bar .report-status-filter-remove:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
-.report-status-filter-bar .report-status-filter-reset { flex: 0 0 auto; min-height: 32px; margin-left: auto; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
-.report-status-filter-bar .report-status-filter-reset:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
-.report-status-filter-bar button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.report-status-filter-bar .report-status-filter-remove:hover, .report-status-filter-bar .report-status-filter-remove:focus-visible { background: transparent; opacity: 1; }
+.report-filter-clear { flex: 0 0 auto; min-height: 34px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.report-filter-clear:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.report-filter-clear:disabled { opacity: .45; cursor: default; }
+.report-status-filter-bar button:focus-visible, .report-status-filter-bar input:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 @media (max-width: 600px) {
-  .report-status-filter-bar { gap: 10px 12px; }
-  #reportStatusFilterSummary { margin-right: auto; padding-right: 0; border-right: 0; }
-  .report-status-filter-chips { order: 1; flex-basis: 100%; }
+  .selection-group-label { flex-basis: 100%; }
+  .report-filter-controls { order: 1; flex-basis: 100%; }
   .report-status-filter-bar .report-status-filter-remove { flex-basis: 30px; width: 30px; height: 30px; }
 }
 .report-filter-empty { padding: 28px 16px; text-align: center; color: var(--muted); }

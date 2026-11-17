@@ -47,7 +47,7 @@
 .qa-tags-reset { padding: 0; margin-top: 12px; border: 0; background: transparent; color: var(--primary, #579dff); font: inherit; font-size: 12px; cursor: pointer; }
 .qa-tags-filter-host { margin: 12px 0; }
 .qa-tags-toolbar { position: relative; margin: 0 3px; order: 0; }
-.qa-tags-toolbar #tagFilterPanel > .qa-tags-filter { position: fixed; z-index: 30; width: min(420px, calc(100vw - 24px)); max-height: min(520px, calc(100dvh - 120px)); overflow-y: auto; box-shadow: 0 12px 32px #091e4230; }
+.qa-tags-toolbar #tagFilterPanel > .qa-tags-filter { position: fixed; z-index: 52; width: min(420px, calc(100vw - 24px)); max-height: min(520px, calc(100dvh - 120px)); overflow-y: auto; box-shadow: 0 12px 32px #091e4230; }
 .qa-tags-toolbar #tagFilterPanel > .qa-tags-filter:not([open]) { display: none; }
 .qa-tags-toolbar > button { white-space: nowrap; }
 .qa-tags-add-column { margin: 8px 12px; padding: 6px 10px; border: 1px dashed var(--line, #75819566); border-radius: 7px; background: transparent; color: var(--muted, #6b778c); font: inherit; font-size: 12px; cursor: pointer; }
@@ -56,12 +56,12 @@
 
 .qa-tags-picker [hidden] { display: none !important; }
 
-/* Nested filter controls keep their own sizes inside the formatting toolbar. */
-.editor-toolbar .qa-tags-toolbar { flex: 0 0 auto; }
-.editor-toolbar .qa-tags-toolbar > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 86px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.editor-toolbar .qa-tags-toolbar > button .ui-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+/* List filter controls share consistent sizes beside the status filter. */
+.report-filter-controls .qa-tags-toolbar { flex: 0 0 auto; }
+.report-filter-controls .qa-tags-toolbar > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 86px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--surface); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.report-filter-controls .qa-tags-toolbar > button .ui-icon { width: 14px; height: 14px; flex: 0 0 14px; }
 #selectionTagsButton { display: inline-flex; align-items: center; gap: 6px; }
-.editor-toolbar .qa-tags-toolbar > button.filter-active { color: var(--primary, #579dff); background: color-mix(in srgb, var(--primary, #579dff) 12%, transparent); }
+.report-filter-controls .qa-tags-toolbar > button.filter-active { border-color: var(--purple); color: var(--ink); }
 .editor-toolbar .qa-tags-modes button { width: auto; min-width: 0; height: auto; min-height: 28px; padding: 4px 7px; font-size: 11px; }
 .editor-toolbar .qa-tags-reset { width: auto; height: auto; min-width: 0; padding: 0; color: var(--primary, #579dff); font-size: 12px; }
 
@@ -95,3 +95,25 @@
 #tagScope-share { margin-block: 0; }
 #sharedTagCount { margin: 10px 0 0; color: var(--ink, var(--text)); font-size: 12px; font-weight: 600; }
 @media (max-width: 520px) { .qa-tags-publication-options { flex-direction: column; } .qa-tags-publication-modes { width: 100%; } .qa-tags-publication-modes button { flex: 1; min-width: 0; } }
+
+/* The editor filter exposes modes and choices without a nested disclosure. */
+.qa-tags-toolbar #tagFilterPanel > .qa-tags-filter-editor { width: min(340px, calc(100vw - 24px)); }
+.qa-tags-filter-editor > summary { display: none; }
+.qa-tags-filter-editor > .qa-tags-publication { padding: 12px; gap: 12px; }
+.qa-tags-filter-editor .qa-tags-publication-heading h3 { font-size: 13px; }
+.qa-tags-filter-editor .qa-tags-reset:disabled { display: none; }
+.qa-tags-filter-editor .qa-tags-editor-close { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; margin-left: auto; padding: 4px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.qa-tags-filter-editor .qa-tags-editor-close > .ui-icon { width: 14px; height: 14px; }
+.qa-tags-filter-editor .qa-tags-editor-close:hover { color: var(--ink); }
+.qa-tags-filter-editor .qa-tags-editor-empty { display: grid; gap: 5px; margin: 2px 0 4px; }
+.qa-tags-editor-empty strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.qa-tags-filter-editor .qa-tags-publication-modes { width: 100%; }
+.qa-tags-filter-editor .qa-tags-publication-modes button { flex: 1; min-width: 0; }
+.qa-tags-filter-editor .qa-tags-publication-options { gap: 8px 14px; }
+.qa-tags-filter-editor button:focus-visible, .qa-tags-filter-editor input:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+
+.qa-tags-filter-editor .qa-tag-choice[data-selection="exclude"] { border-style: solid; }
+.qa-tags-editor-mode-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.qa-tags-editor-mode-row .qa-tags-publication-modes { flex: 1 1 auto; min-width: 0; width: auto; }
+.qa-tags-editor-mode-row > .qa-tags-reset { flex: 0 0 auto; margin: 0; padding: 6px 2px; color: var(--muted); font-size: 12px; }
+.qa-tags-editor-mode-row > .qa-tags-reset:hover { color: var(--ink); }

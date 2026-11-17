@@ -68,7 +68,6 @@ async function main() {
   });
   const rows = () => page.locator('#sections tr[data-row-id]').evaluateAll(nodes => nodes.map(n => n.dataset.rowId));
   const chooseFilter = async statuses => {
-    if (await page.locator('#selectionToolbar').isHidden()) await page.click('#selectionToggle');
     await page.click('#selectionFilterButton');
     await page.check('#selectionFilterAll');
     await page.uncheck('#selectionFilterAll');
@@ -94,6 +93,11 @@ async function main() {
   await page.check('[data-selection-section="first"]');
   assert.equal(await page.locator('#selectionCount').textContent(), 'Выбрано: 2');
   await page.click('#selectionStatusButton');
+  assert.ok(await page.locator('#selectionStatusMenu').evaluate(menu => {
+    const r = menu.getBoundingClientRect();
+    return [r.left + 12, r.left + r.width / 2, r.right - 12]
+      .every(x => menu.contains(document.elementFromPoint(x, r.top + 18)));
+  }), 'Selection menu header stays above the action buttons');
   await page.check('#selectionStatusOptions input[value="OK"]');
   await page.click('#selectionStatusApply');
   assert.equal(await page.locator('#selectionCount').textContent(), 'Выбрано: 0');
@@ -219,7 +223,8 @@ async function main() {
   assert.equal((await rows()).length, 0);
   await page.click('#resetReportStatusFilter');
   assert.equal((await rows()).length, 10);
-  assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBody').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBar').isVisible(), true);
   await page.click('#selectionFilterButton');
   await page.uncheck('#selectionFilterAll');
   await page.check('#selectionFilterOptions input[value="ТРЕБУЕТ УТОЧНЕНИЯ"]');
@@ -233,19 +238,20 @@ async function main() {
   assert.deepEqual(await page.locator('.report-status-filter-chip > span').allTextContents(), ['Не проверено', 'Частично проверено']);
   assert.equal(await page.locator('#editReportStatusFilter').count(), 0);
   await page.locator('[data-row-id="blank"] .cell-editor').fill('Pending edit before removing status');
-  await page.click('#selectionExit');
+  if (await page.locator('#selectionToolbar').isVisible()) await page.click('#selectionExit');
   const removeUnchecked = page.getByRole('button', { name: 'Убрать статус «Не проверено» из фильтра', exact: true });
   await removeUnchecked.press('Enter');
   assert.deepEqual(await rows(), ['row-5']);
   assert.equal(await page.locator('#selectionToolbar').isHidden(), true);
   assert.equal(await page.locator('#selectionFilterMenu').isHidden(), true);
-  assert.equal(await page.locator('#selectionFilterLabel').textContent(), 'Показывать: 1 из 7');
+  assert.equal(await page.locator('#selectionFilterLabel').textContent(), 'Статусы: 1 из 7');
   const removePartial = page.getByRole('button', { name: 'Убрать статус «Частично проверено» из фильтра', exact: true });
   assert.equal(await removePartial.evaluate(n => n === document.activeElement), true);
   await removePartial.press('Space');
   assert.equal((await rows()).length, 10);
-  assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);
-  assert.equal(await page.locator('#selectionToggle').evaluate(n => n === document.activeElement), true);
+  assert.equal(await page.locator('#reportStatusFilterBody').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBar').isVisible(), true);
+  assert.equal(await page.locator('#selectionFilterButton').evaluate(n => n === document.activeElement), true);
   assert.equal(await page.locator('[data-row-id="blank"] .cell-editor').textContent(), 'Pending edit before removing status');
   assert.equal(await page.evaluate(() => draft.sections.flatMap(s => s.rows).length), 10);
   // Removing the final chip resets to all; applying an explicitly empty menu remains empty.
@@ -253,6 +259,33 @@ async function main() {
   assert.deepEqual(await page.locator('.report-status-filter-chip > span').allTextContents(), ['OK']);
   await page.locator('.report-status-filter-remove').click();
   assert.equal((await rows()).length, 10);
+  // Filters are available with selection mode closed, with one control per filter.
+  if (await page.locator('#selectionToolbar').isVisible()) await page.click('#selectionExit');
+  await chooseFilter(['OK']);
+  assert.equal(await page.locator('#selectionToolbar').isHidden(), true);
+  assert.equal(await page.locator('#selectionToolbar #selectionFilterButton, .editor-toolbar #tagFilterButton').count(), 0);
+  assert.equal(await page.locator('#reportStatusFilterBar #selectionFilterButton, #reportStatusFilterBar #tagFilterButton').count(), 2);
+  await page.click('#selectionFilterButton');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#selectionFilterMenu').isHidden(), true);
+  assert.equal(await page.locator('#selectionFilterButton').evaluate(n => n === document.activeElement), true);
+  const chipClose = page.locator('.report-status-filter-remove');
+  assert.equal(await chipClose.evaluate(n => getComputedStyle(n).backgroundColor), 'rgba(0, 0, 0, 0)');
+  await chipClose.hover();
+  assert.equal(await chipClose.evaluate(n => getComputedStyle(n).backgroundColor), 'rgba(0, 0, 0, 0)');
+  // One visible reset clears both filters while preserving the column display preference.
+  await page.evaluate(() => {
+    QaReportTags.editorScope = QaReportTags.scope({ include: ['Frontend'], exclude: ['Skip'], untagged: false, showTags: false });
+    renderSections(); renderSummary();
+  });
+  assert.equal(await page.locator('#resetReportStatusFilter').isEnabled(), true);
+  await page.click('#resetReportStatusFilter');
+  assert.equal((await rows()).length, 10);
+  assert.equal(await page.evaluate(() => reportStatusFilter), null);
+  assert.deepEqual(await page.evaluate(() => QaReportTags.editorScope), { include: [], exclude: [], untagged: true, showTags: false });
+  assert.equal(await page.locator('#resetReportStatusFilter').isDisabled(), true);
+  assert.equal(await page.locator('#selectionToolbar').isHidden(), true);
+  await page.click('#selectionToggle');
   // Inspect menu and banner across themes and narrow/wide viewports.
   await page.waitForFunction(() => !document.getElementById('toast').classList.contains('visible'));
   await chooseFilter(['НЕ ОК', 'ЗАБЛОКИРОВАНО']);
@@ -287,13 +320,15 @@ async function main() {
   // Switching documents resets transient filters, as does reload.
   await chooseFilter(['OK']);
   await page.evaluate(() => applyDraftLocally({ ...draft, draftId: crypto.randomUUID(), reportId: crypto.randomUUID() }));
-  assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBody').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBar').isVisible(), true);
   assert.equal((await rows()).length, 7);
   await chooseFilter(['OK']);
   await page.evaluate(() => saveDraft());
   await page.reload();
   await page.waitForSelector('#sections tr[data-row-id]');
-  assert.equal(await page.locator('#reportStatusFilterBar').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBody').isHidden(), true);
+  assert.equal(await page.locator('#reportStatusFilterBar').isVisible(), true);
   assert.equal((await rows()).length, 7);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ version: path.basename(root), filter: true, selection: true, persistence: true, publicationScope: true, htmlClipboard: true, preview: true, excel: true, fullBackup: true, undo: true, responsive: true, screenshots: temp }));

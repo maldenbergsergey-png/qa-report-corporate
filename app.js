@@ -21,13 +21,28 @@ function openTagFilter() {
   const panel = api.createFilter(draft, api.editorScope, value => {
     flushDraftFromDom(); api.editorScope = value;
     renderSections(); renderSummary();
+  }, { compact: true });
+  panel.addEventListener("toggle", () => {
+    if (!panel.open && panel.isConnected) {
+      const trigger = document.getElementById("tagFilterButton");
+      trigger.setAttribute("aria-expanded", "false"); trigger.focus({ preventScroll: true });
+    }
   });
   panel.open = true; host.replaceChildren(panel);
-  const button = document.getElementById("tagFilterButton"), rect = button.getBoundingClientRect();
-  button.setAttribute("aria-expanded", "true");
-  panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - Math.min(420, innerWidth - 24) - 12))}px`;
-  panel.style.top = `${Math.min(rect.bottom + 8, Math.max(12, innerHeight - 180))}px`;
+  document.getElementById("tagFilterButton").setAttribute("aria-expanded", "true");
+  positionTagFilter();
 }
+function positionTagFilter() {
+  const panel = document.getElementById("tagFilterPanel").firstElementChild;
+  if (!panel?.open) return;
+  const rect = document.getElementById("tagFilterButton").getBoundingClientRect();
+  panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - panel.getBoundingClientRect().width - 12))}px`;
+  panel.style.maxHeight = `${Math.max(0, Math.min(520, innerHeight - 24))}px`;
+  const height = panel.getBoundingClientRect().height;
+  panel.style.top = `${Math.max(12, Math.min(rect.bottom + 8, innerHeight - height - 12))}px`;
+}
+window.addEventListener("resize", positionTagFilter);
+window.addEventListener("scroll", positionTagFilter, true);
 function tagSelectedRows() {
   flushDraftFromDom();
   const reportId = draft.draftId, ids = new Set(selectedRowIds);
@@ -1771,7 +1786,8 @@ function updateReportStatusFilterUi() {
   const rows = draft.sections.flatMap((section) => section.rows);
   const count = rows.filter(matchesReportStatusFilter).length;
   const active = reportStatusFilter !== null;
-  document.getElementById("reportStatusFilterBar").hidden = !active;
+  document.getElementById("resetReportStatusFilter").disabled = !active && !window.QaReportTags.active(window.QaReportTags.editorScope);
+  document.getElementById("reportStatusFilterBody").hidden = !active;
   const summary = document.getElementById("reportStatusFilterSummary");
   const total = document.createElement("strong");
   total.textContent = `${count} из ${rows.length}`;
@@ -1797,7 +1813,7 @@ function updateReportStatusFilterUi() {
   }
   if (active && !reportStatusFilter.size) chips.textContent = "Статусы не выбраны";
   document.getElementById("selectionFilterLabel").textContent = active
-    ? `Показывать: ${reportStatusFilter.size} из ${Object.keys(STATUS_META).length}` : "Показывать: все статусы";
+    ? `Статусы: ${reportStatusFilter.size} из ${Object.keys(STATUS_META).length}` : "Статусы: все";
   selectionUi.FilterButton.classList.toggle("filter-active", active);
 }
 
@@ -9509,8 +9525,12 @@ selectionUi.FilterApply.addEventListener("click", () => {
 });
 selectionUi.FilterReset.addEventListener("click", () => { setReportStatusFilter(null); selectionUi.FilterButton.focus(); });
 document.getElementById("resetReportStatusFilter").addEventListener("click", () => {
+  const tags = window.QaReportTags;
+  tags.editorScope = tags.scope({ showTags: tags.editorScope.showTags });
+  document.getElementById("tagFilterPanel").replaceChildren();
+  document.getElementById("tagFilterButton").setAttribute("aria-expanded", "false");
   setReportStatusFilter(null);
-  selectionUi.Toggle.focus();
+  selectionUi.FilterButton.focus();
 });
 document.getElementById("reportStatusFilterChips").addEventListener("click", (event) => {
   const remove = event.target.closest("button[data-filter-status]");
@@ -9521,7 +9541,7 @@ document.getElementById("reportStatusFilterChips").addEventListener("click", (ev
   statuses.delete(remove.dataset.filterStatus);
   setReportStatusFilter(statuses.size ? statuses : null);
   const remaining = [...document.querySelectorAll(".report-status-filter-remove")];
-  (remaining[index] || remaining.at(-1) || selectionUi.Toggle).focus();
+  (remaining[index] || remaining.at(-1) || selectionUi.FilterButton).focus();
 });
 selectionUi.StatusButton.addEventListener("click", () => openSelectionMenu("Status"));
 selectionUi.MoveButton.addEventListener("click", () => openSelectionMenu("Move"));
@@ -9569,6 +9589,14 @@ selectionUi.Delete.addEventListener("click", deleteSelectedRows);
 // a text-selection gesture starts inside an input and ends outside the popover.
 document.addEventListener("pointerdown", (event) => {
   if (!event.target.closest(".selection-menu-wrap")) closeSelectionMenus();
+});
+document.getElementById("reportStatusFilterBar").addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const tagPanel = document.getElementById("tagFilterPanel").firstElementChild;
+  if (tagPanel?.open) { event.stopPropagation(); tagPanel.open = false; return; }
+  if (!selectionUi.FilterMenu.hidden) {
+    event.stopPropagation(); closeSelectionMenus(); selectionUi.FilterButton.focus();
+  }
 });
 selectionUi.Toolbar.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

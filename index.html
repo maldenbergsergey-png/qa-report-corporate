@@ -10,8 +10,8 @@
     <script src="/pwa.js?v=6" defer></script>
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=164" />
-    <link rel="stylesheet" href="/checklist-tags.css?v=7" />
+    <link rel="stylesheet" href="/styles.css?v=168" />
+    <link rel="stylesheet" href="/checklist-tags.css?v=10" />
     <link rel="stylesheet" href="/report-view.css?v=9" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
     <link rel="stylesheet" href="/bug-wizard.css?v=25" />
@@ -316,7 +316,6 @@
             <button type="button" id="selectionToggle" class="toolbar-icon-button" title="Выделение строк" aria-label="Выделение строк" aria-pressed="false" aria-controls="selectionToolbar">
               <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 12 3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
-            <div class="qa-tags-toolbar"><button id="tagFilterButton" type="button" aria-label="Отбор пунктов по меткам" aria-expanded="false" aria-controls="tagFilterPanel"><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg><span data-tag-filter-label>Метки</span></button><div id="tagFilterPanel"></div></div>
             <span class="toolbar-divider"></span>
             <select id="blockFormat" title="Стиль текста" aria-label="Стиль текста">
               <option value="p">Обычный текст</option>
@@ -384,9 +383,10 @@
           </div>
           <p id="attachmentLimitsHint" class="attachment-limits-hint" role="status" hidden></p>
           <div id="selectionToolbar" class="selection-toolbar" role="region" aria-label="Выделение строк" hidden>
-            <div class="selection-controls" role="group" aria-label="Выбор и отображение пунктов">
+            <div class="selection-controls" role="group" aria-label="Выделение пунктов">
+              <span class="selection-group-label">Выделение</span>
               <div class="selection-summary">
-                <label class="selection-all"><input id="selectionAll" type="checkbox" /> Выбрать всё</label>
+                <label class="selection-all"><input id="selectionAll" type="checkbox" /> Все показанные</label>
                 <span id="selectionCount" class="selection-count" role="status" aria-live="polite">Выбрано: 0</span>
               </div>
               <div class="selection-menu-wrap">
@@ -397,17 +397,9 @@
                   <div class="selection-menu-footer"><span id="selectionStatusCount"></span><button id="selectionStatusApply" type="button" class="button button-primary">Выбрать</button></div>
                 </div>
               </div>
-              <div class="selection-menu-wrap">
-                <button id="selectionFilterButton" type="button" aria-expanded="false" aria-controls="selectionFilterMenu"><span id="selectionFilterLabel">Показывать: все статусы</span> <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
-                <div id="selectionFilterMenu" class="selection-menu" role="group" aria-labelledby="selectionFilterTitle" hidden>
-                  <strong id="selectionFilterTitle">Показывать пункты со статусами</strong>
-                  <label class="selection-all"><input id="selectionFilterAll" class="selection-checkbox" type="checkbox" /> Все статусы</label>
-                  <div id="selectionFilterOptions"></div>
-                  <div class="selection-menu-footer"><button id="selectionFilterReset" type="button">Сбросить</button><button id="selectionFilterApply" type="button" class="button button-primary">Применить</button></div>
-                </div>
-              </div>
             </div>
             <div class="selection-actions" role="group" aria-label="Действия с выбранными пунктами">
+              <span class="selection-group-label">С выбранными</span>
               <div class="selection-menu-wrap">
                 <button id="selectionMoveButton" type="button" aria-expanded="false" aria-controls="selectionMoveMenu" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-section-split"></use></svg> Копировать или перенести <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
                 <div id="selectionMoveMenu" class="selection-menu selection-move-menu" hidden>
@@ -430,7 +422,7 @@
                   <button id="selectionCopyButton" type="button" class="selection-copy-checklist" disabled>Копировать в новый чек-лист</button>
                 </div>
               </div>
-              <button id="selectionTagsButton" type="button" aria-haspopup="dialog" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg>Метки</button>
+              <button id="selectionTagsButton" type="button" aria-haspopup="dialog" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg>Назначить метки</button>
               <button id="selectionDelete" type="button" class="selection-delete" disabled><svg class="ui-icon" aria-hidden="true"><use href="#icon-trash"></use></svg> Удалить</button>
             </div>
             <button id="selectionExit" type="button" class="selection-exit" aria-label="Выйти из режима выделения" title="Выйти из режима выделения">×</button>
@@ -470,10 +462,27 @@
             data-placeholder="Добавьте вводный текст: что проверялось, сборка, важные условия…"
           ></div>
 
-          <div id="reportStatusFilterBar" class="report-status-filter-bar" role="region" aria-label="Фильтр по статусам" hidden>
-            <span id="reportStatusFilterSummary" role="status" aria-live="polite" aria-atomic="true"></span>
-            <div id="reportStatusFilterChips" class="report-status-filter-chips" role="group" aria-label="Выбранные статусы"></div>
-            <button id="resetReportStatusFilter" type="button" class="report-status-filter-reset">Сбросить</button>
+          <div id="reportStatusFilterBar" class="report-status-filter-bar" role="region" aria-labelledby="reportFilterTitle">
+            <div class="report-status-filter-header">
+              <span id="reportFilterTitle" class="report-filter-title">Фильтры списка</span>
+              <div class="report-filter-controls">
+                <div class="selection-menu-wrap report-status-filter-picker">
+                  <button id="selectionFilterButton" class="report-status-filter-trigger" type="button" aria-expanded="false" aria-controls="selectionFilterMenu"><span id="selectionFilterLabel">Статусы: все</span> <svg class="ui-icon" aria-hidden="true"><use href="#icon-chevron-down"></use></svg></button>
+                  <div id="selectionFilterMenu" class="selection-menu" role="group" aria-labelledby="selectionFilterTitle" hidden>
+                    <strong id="selectionFilterTitle">Показывать пункты со статусами</strong>
+                    <label class="selection-all"><input id="selectionFilterAll" class="selection-checkbox" type="checkbox" /> Все статусы</label>
+                    <div id="selectionFilterOptions"></div>
+                    <div class="selection-menu-footer"><button id="selectionFilterReset" type="button">Сбросить</button><button id="selectionFilterApply" type="button" class="button button-primary">Применить</button></div>
+                  </div>
+                </div>
+                <div class="qa-tags-toolbar"><button id="tagFilterButton" type="button" aria-label="Отбор пунктов по меткам" aria-expanded="false" aria-controls="tagFilterPanel"><svg class="ui-icon" aria-hidden="true"><use href="#icon-tag"></use></svg><span data-tag-filter-label>Метки</span></button><div id="tagFilterPanel"></div></div>
+                <button id="resetReportStatusFilter" type="button" class="report-filter-clear" title="Сбросить фильтры статусов и меток" disabled>Сбросить всё</button>
+              </div>
+              <span id="reportStatusFilterSummary" role="status" aria-live="polite" aria-atomic="true"></span>
+            </div>
+            <div id="reportStatusFilterBody" class="report-status-filter-body" hidden>
+              <div id="reportStatusFilterChips" class="report-status-filter-chips" role="group" aria-label="Выбранные статусы"></div>
+            </div>
           </div>
           <div class="sections" id="sections"></div>
 
@@ -1320,12 +1329,12 @@
       </section>
     </template>
 
-    <script src="/checklist-tags.js?v=6"></script>
+    <script src="/checklist-tags.js?v=8"></script>
     <script src="/jira-markup-import.js?v=15"></script>
     <script src="/checklist-selection.js?v=7"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=148"></script>
+    <script src="/release-notes.js?v=151"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1453,7 +1462,7 @@
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
     <script src="/task-context-ui.js?v=3"></script>
-    <script src="/app.js?v=184"></script>
+    <script src="/app.js?v=188"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=14"></script>

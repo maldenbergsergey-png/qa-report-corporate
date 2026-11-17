@@ -165,7 +165,13 @@
     }
     paint(); return control;
   }
-  function createFilter(source, initial, changed, { display = true, title = "Метки" } = {}) {
+  function createFilter(source, initial, changed, { display = true, title = "Метки", compact = false } = {}) {
+    if (compact) {
+      const details = node("details", "qa-tags-filter qa-tags-filter-editor");
+      const summary = node("summary", "", title);
+      details.append(summary, createPublicationFilter(source, initial, changed, { editor: true }));
+      return details;
+    }
     let current = scope(initial);
     const details = node("details", "qa-tags-filter"), summary = node("summary", ""), body = node("div", "qa-tags-filter-body");
     const choices = unique([...allNames(source), ...current.include, ...current.exclude]);
@@ -205,7 +211,7 @@
     refreshSummary(); return details;
   }
   // Publication controls expose both sets without making users cycle through states.
-  function createPublicationFilter(source, initial, changed) {
+  function createPublicationFilter(source, initial, changed, { editor = false } = {}) {
     let current = scope(initial), mode = "include";
     const choices = unique([...allNames(source), ...current.include, ...current.exclude]);
     const root = node("section", "qa-tags-publication"); root.setAttribute("aria-label", "Отбор пунктов по меткам");
@@ -213,18 +219,24 @@
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("ui-icon"); svg.setAttribute("aria-hidden", "true");
       const use = document.createElementNS("http://www.w3.org/2000/svg", "use"); use.setAttribute("href", `#icon-${id}`); svg.append(use); return svg;
     };
-    const heading = node("div", "qa-tags-publication-heading"), title = node("h3", "", "Метки пунктов");
+    const heading = node("div", "qa-tags-publication-heading"), title = node("h3", "", editor ? "Метки" : "Метки пунктов");
     const reset = button("Сбросить", "qa-tags-reset", () => { current = scope({ showTags: current.showTags }); emit(); });
     heading.append(icon("tag"), title, reset); root.append(heading);
+    if (editor) {
+      const close = button("", "qa-tags-editor-close", () => { root.closest("details").open = false; });
+      close.setAttribute("aria-label", "Закрыть фильтр меток"); close.append(icon("x")); heading.append(close);
+    }
     const modes = node("div", "qa-tags-publication-modes"); modes.setAttribute("role", "group"); modes.setAttribute("aria-label", "Действие с выбранными метками");
     const modeButtons = new Map();
     for (const [value, caption] of [["include", "Включить"], ["exclude", "Исключить"]]) {
-      const control = button("", "", () => { mode = value; paint(); }); control.setAttribute("aria-label", `${caption} метки`);
-      const count = node("span", "qa-tags-mode-count"); control.append(node("span", "", caption), count); modes.append(control); modeButtons.set(value, { control, count });
+      const control = button("", "", () => { mode = value; paint(); }); control.setAttribute("aria-label", `${editor ? value === "include" ? "Показать" : "Скрыть" : caption} метки`);
+      const count = node("span", "qa-tags-mode-count"); control.append(node("span", "", editor ? value === "include" ? "Показать" : "Скрыть" : caption), count); modes.append(control); modeButtons.set(value, { control, count });
     }
-    root.append(modes);
+    const modeRow = editor ? node("div", "qa-tags-editor-mode-row") : root;
+    if (editor) { modeRow.append(modes, reset); root.append(modeRow); }
+    else root.append(modes);
     const hint = node("p", "qa-tags-hint"); root.append(hint);
-    const search = node("input", "qa-tags-search qa-tags-publication-search"); search.placeholder = "Найти метку"; search.setAttribute("aria-label", "Найти метку для публикации");
+    const search = node("input", "qa-tags-search qa-tags-publication-search"); search.placeholder = "Найти метку"; search.setAttribute("aria-label", editor ? "Найти метку" : "Найти метку для публикации");
     search.hidden = choices.length <= 8; search.addEventListener("input", paint); root.append(search);
     const list = node("div", "qa-tags-publication-choices"); list.setAttribute("role", "group"); root.append(list);
     const controls = new Map();
@@ -247,7 +259,7 @@
       const label = node("label", "qa-tags-check"), input = node("input"); input.type = "checkbox";
       input.addEventListener("change", () => { current[field] = input.checked; emit(); }); label.append(input, node("span", "", caption)); options.append(label); return input;
     }
-    const untagged = check("Включать пункты без меток", "untagged"), showTags = check("Показывать метки получателю", "showTags");
+    const untagged = check(editor ? "Без меток" : "Включать пункты без меток", "untagged"), showTags = check(editor ? "Столбец меток" : "Показывать метки получателю", "showTags");
     function paint() {
       for (const [value, { control, count }] of modeButtons) {
         control.setAttribute("aria-pressed", String(mode === value)); count.textContent = current[value].length || ""; count.hidden = !current[value].length;
@@ -258,16 +270,24 @@
       for (const [value, { control, marker }] of controls) {
         const selection = current.exclude.some(item => key(item) === key(value)) ? "exclude" : current.include.some(item => key(item) === key(value)) ? "include" : "none";
         control.dataset.selection = selection; control.setAttribute("aria-pressed", String(selection === mode));
-        control.setAttribute("aria-label", `${mode === "include" ? "Включить" : "Исключить"}: ${value}`);
-        control.title = selection === "exclude" ? "Исключена из публикации" : selection === "include" ? "Включена в публикацию" : "Без ограничения";
+        control.setAttribute("aria-label", `${editor ? mode === "include" ? "Показать" : "Скрыть" : mode === "include" ? "Включить" : "Исключить"}: ${value}`);
+        control.title = editor ? selection === "exclude" ? "Пункты с этой меткой скрыты" : selection === "include" ? "Показаны пункты с этой меткой" : "Без ограничения" : selection === "exclude" ? "Исключена из публикации" : selection === "include" ? "Включена в публикацию" : "Без ограничения";
         marker.toggleAttribute("hidden", selection === "none"); marker.querySelector("use").setAttribute("href", `#icon-${selection === "exclude" ? "x" : "check"}`);
         control.hidden = !key(value).includes(key(search.value)); if (!control.hidden) visible++;
       }
       empty.hidden = visible > 0; empty.textContent = choices.length ? "Метки не найдены" : "В чек-листе пока нет меток.";
       untagged.checked = current.untagged; showTags.checked = current.showTags; reset.disabled = !active(current);
+      if (editor) {
+        modes.hidden = !choices.length; hint.hidden = true; options.hidden = !choices.length;
+        modeRow.hidden = !choices.length && !active(current); list.hidden = !choices.length;
+        if (!choices.length) {
+          empty.classList.add("qa-tags-editor-empty");
+          empty.replaceChildren(node("strong", "", "Меток пока нет"), node("span", "", "Добавьте их через меню пункта."));
+        }
+      }
     }
     function emit() { paint(); changed(scope(current)); }
-    const priority = node("p", "qa-tags-hint qa-tags-priority", "Исключение имеет приоритет, если у пункта несколько меток."); root.append(priority);
+    const priority = node("p", "qa-tags-hint qa-tags-priority", "Исключение имеет приоритет, если у пункта несколько меток."); root.append(priority); priority.hidden = editor;
     paint(); return root;
   }
   return { name, key, unique, tone, read, wiki, html, isColumn, isTitle, rowNames, allNames, scope, active, matches, filter, normalizeSections, view, cell, picker, createFilter, createPublicationFilter, editorScope: scope() };

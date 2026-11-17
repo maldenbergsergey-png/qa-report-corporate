@@ -34,9 +34,20 @@ async function main() {
     const selection = document.getElementById('selectionToggle').getBoundingClientRect();
     const format = document.getElementById('blockFormat').getBoundingClientRect();
     const mic = document.getElementById('dictationButton').getBoundingClientRect();
-    return tag.width >= 86 && selection.right <= tag.left && tag.right <= format.left && mic.left > format.right;
+    const filters = document.getElementById('reportStatusFilterBar');
+    return tag.width >= 86 && filters.contains(document.getElementById('tagFilterButton'))
+      && !document.querySelector('.editor-toolbar').contains(document.getElementById('tagFilterButton'))
+      && tag.top > format.bottom && selection.right <= format.left && mic.left > format.right;
   }));
   assert.equal(await page.locator('#tagFilterButton use').getAttribute('href'), '#icon-tag');
+  await page.locator('#tagFilterButton').click();
+  assert.equal(await page.getByText('Меток пока нет', { exact: true }).isVisible(), true);
+  assert.equal(await page.locator('#tagFilterPanel input:visible').count(), 0);
+  assert.equal(await page.locator('#tagFilterPanel .qa-tags-reset').isVisible(), false);
+  assert.ok(await page.locator('#tagFilterPanel > details').evaluate(n => n.getBoundingClientRect().height < 180));
+  await page.screenshot({ path: path.join(artifacts, 'empty-editor-filter.png'), fullPage: false });
+  await page.getByRole('button', { name: 'Закрыть фильтр меток', exact: true }).click();
+
   await page.getByRole('button', { name: '+ Столбец меток', exact: true }).click();
   await page.locator('[data-row-id="api"] .qa-tags-cell').click();
   const input = page.getByRole('textbox', { name: 'Название метки или поиск' });
@@ -97,17 +108,26 @@ async function main() {
   assert.equal(exports.hidden.sections[0].columns.length, 1);
   if (exports.adf) { assert.match(JSON.stringify(exports.adf), /"type":"status"/); assert.equal(await page.evaluate(() => JSON.stringify(generateAdfDocument()) === JSON.stringify(generateAdfDocument())), true); }
   await page.getByRole('button', { name: 'Отбор пунктов по меткам', exact: true }).click();
-  await page.getByRole('button', { name: 'Включить: Frontend', exact: true }).click();
-  await page.getByRole('button', { name: 'Исключить: Backend', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: 'Включить: Frontend', exact: true }).getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.getByRole('button', { name: 'Исключить: Backend', exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.getByRole('button', { name: 'Показать: Frontend', exact: true }).click();
+  await page.getByRole('button', { name: 'Скрыть метки', exact: true }).click();
+  await page.getByRole('button', { name: 'Скрыть: Backend', exact: true }).click();
+  assert.equal(await page.locator('#tagFilterPanel [data-selection="include"]').textContent(), 'Frontend');
+  assert.equal(await page.locator('#tagFilterPanel [data-selection="exclude"]').textContent(), 'Backend');
+  assert.equal(await page.locator('#tagFilterPanel [data-selection="exclude"]').evaluate(n => getComputedStyle(n).borderTopStyle), 'solid');
+  assert.equal(await page.locator('#tagFilterPanel .qa-tags-editor-mode-row .qa-tags-reset').isVisible(), true);
   assert.equal(await page.locator('#sections tr[data-row-id]').count(), 1);
+  assert.ok(await page.locator('#tagFilterPanel > details').evaluate(node => {
+    const r = node.getBoundingClientRect();
+    return r.top >= 12 && r.bottom <= innerHeight - 11 && node.contains(document.elementFromPoint(r.left + 12, r.top + 12));
+  }));
   await page.screenshot({ path: path.join(artifacts, 'graphite-filter.png'), fullPage: true });
   await page.getByRole('button', { name: 'Просмотр', exact: true }).click();
   assert.equal(await page.locator('#previewModal .qa-tag').count(), 1);
   await page.screenshot({ path: path.join(artifacts, 'graphite-preview.png'), fullPage: true });
   await page.keyboard.press('Escape');
-  await page.evaluate(() => { QaReportTags.editorScope = QaReportTags.scope(); renderSections(); renderSummary(); });
+  await page.click('#resetReportStatusFilter');
+  assert.equal(await page.locator('#sections tr[data-row-id]').count(), 4);
+  assert.equal(await page.locator('#resetReportStatusFilter').isDisabled(), true);
   // Adding/removing a tag in bulk preserves every other tag.
   await page.locator('#selectionToggle').click();
   await page.locator('[data-selection-row="api"]').check();
@@ -189,6 +209,11 @@ async function main() {
   assert.ok(await page.locator('.qa-tags-picker').evaluate(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
   await page.screenshot({ path: path.join(artifacts, 'mobile-picker.png'), fullPage: true });
   await input.press('Escape');
+  await page.locator('#tagFilterButton').click();
+  assert.ok(await page.locator('#tagFilterPanel > details').evaluate(node => {
+    const r = node.getBoundingClientRect(); return r.left >= 12 && r.right <= innerWidth - 11 && r.top >= 12 && r.bottom <= innerHeight - 11;
+  }));
+  await page.screenshot({ path: path.join(artifacts, 'mobile-filter.png'), fullPage: false });
   // The real shared reader consumes a safe, structured snapshot, with no HTML injection.
   const id = 'a'.repeat(32);
   await page.route(fixture.origin + '/shared-report/' + id, route => route.fulfill({ contentType: 'text/html', body: fs.readFileSync(path.join(root, 'shared-report.html'), 'utf8') }));

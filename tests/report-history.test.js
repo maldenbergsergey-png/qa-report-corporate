@@ -397,7 +397,7 @@ test("metadata worker detects legacy content off the UI thread without returning
       } },
     });
     vm.runInContext(fs.readFileSync(require.resolve("../draft-storage-worker.js"), "utf8"), ctx);
-    handler({ data: { requestId: 1, reportId: "legacy", databaseName: "test", databaseVersion: 1, storeName: "reports" } });
+    handler({ data: { requestId: 1, reportId: "legacy", databaseName: "test", storeName: "reports" } });
   });
   assert.equal(metadata.updatedAt, record.updatedAt);
   assert.equal(metadata.historyContentFingerprint, QaReportHistory.contentFingerprint(document));

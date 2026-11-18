@@ -82,7 +82,6 @@ const DEFAULT_NUMBERING_KEY = "qa-report-default-numbering-v1";
 const CLIENT_ID_KEY = "qa-report-client-id-v1";
 const WORKSPACE_KEY_STORAGE_KEY = "qa-report-workspace-key-v1";
 const DB_NAME = "qa-report-editor";
-const DB_VERSION = 1;
 const REPORT_STORE = "reports";
 const HISTORY_LIMIT = 50;
 const REQUIRED_API_REVISION = 9;
@@ -848,10 +847,9 @@ async function reportApi(path, options = {}) {
   return payload;
 }
 
-function openDatabase() {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+function requestReportDatabase(version) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, version);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(REPORT_STORE)) {
@@ -861,8 +859,37 @@ function openDatabase() {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    request.onblocked = () => showToast("Закройте другие вкладки и окна QA Report, чтобы восстановить историю.", 9000);
   });
-  return dbPromise;
+}
+
+function openDatabase() {
+  if (dbPromise) return dbPromise;
+  const invalidateConnection = () => {
+    if (dbPromise !== opening) return;
+    dbPromise = undefined;
+    historyReportsCache = null;
+    historyStoreRevision++;
+  };
+  const opening = requestReportDatabase().then(async (db) => {
+    if (!db.objectStoreNames.contains(REPORT_STORE)) {
+      // Repair an existing database in place without upgrading healthy profiles.
+      const version = db.version + 1;
+      db.close();
+      db = await requestReportDatabase(version);
+    }
+    db.onclose = invalidateConnection;
+    db.onversionchange = () => {
+      db.close();
+      invalidateConnection();
+    };
+    return db;
+  }).catch((error) => {
+    invalidateConnection();
+    throw error;
+  });
+  dbPromise = opening;
+  return opening;
 }
 
 async function dbTransaction(mode, action) {
@@ -1063,10 +1090,10 @@ function saveProjectSettings() {
 
 async function getReportMetadata(id) {
   if (typeof Worker !== "function" || reportMetadataWorkerDisabled) return getReportRecord(id);
-  await openDatabase(); // The existing main-thread code owns schema initialization.
+  await openDatabase();
   try {
     if (!reportMetadataWorker) {
-      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=3");
+      reportMetadataWorker = new Worker("/draft-storage-worker.js?v=4");
       reportMetadataWorker.addEventListener("message", ({ data }) => {
         const pending = reportMetadataRequests.get(data.requestId);
         if (!pending) return;
@@ -1093,8 +1120,7 @@ async function getReportMetadata(id) {
         reject(new Error("Metadata read timed out"));
       }, 10000);
       reportMetadataRequests.set(requestId, { resolve, reject, timer });
-      reportMetadataWorker.postMessage({ requestId, databaseName: DB_NAME,
-        databaseVersion: DB_VERSION, storeName: REPORT_STORE, reportId: id });
+      reportMetadataWorker.postMessage({ requestId, databaseName: DB_NAME, storeName: REPORT_STORE, reportId: id });
     });
   } catch {
     // Older browsers, blocked workers, and storage errors retain the old path.
@@ -1268,7 +1294,7 @@ function historyDatesMarkup(report) {
 
 
 async function getAllHistoryReports() {
-  return (await getAllReports().catch(() => [])).map(report => ({ ...report, source: "local" }));
+  return (await getAllReports()).map(report => ({ ...report, source: "local" }));
 }
 
 async function getFreshestStoredDraft() {

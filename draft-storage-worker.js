@@ -3,11 +3,13 @@ importScripts("/history-content.js?v=2");
 // Read metadata from the existing database off the UI thread. Its records and
 // attachments stay in the original format; this worker never writes or migrates.
 self.addEventListener("message", async ({ data }) => {
-  const { requestId, databaseName, databaseVersion, storeName, reportId } = data;
+  const { requestId, databaseName, storeName, reportId } = data;
   let db;
   try {
     db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(databaseName, databaseVersion);
+      const request = indexedDB.open(databaseName);
+      // Only the editor may initialize the database, even if it was cleared mid-read.
+      request.onupgradeneeded = () => request.transaction.abort();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

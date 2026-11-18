@@ -177,6 +177,67 @@ async function main() {
     assert.equal(sanitation.html.includes('onclick'), false);
     assert.equal(sanitation.html.includes('javascript:'), false);
   }
+  // Clearing browser storage can force-close a live connection. A metadata read
+  // in the race before the editor reopens it must leave database creation to the editor.
+  const activeReportId = await page.evaluate(async () => {
+    await draftWriteQueue;
+    const db = await openDatabase();
+    db.addEventListener('close', () => { window.storageConnectionClosed = true; });
+    return draft.reportId;
+  });
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'indexeddb' });
+  await page.waitForFunction(() => window.storageConnectionClosed);
+  const workerRead = await page.evaluate(reportId => new Promise(resolve => {
+    const worker = reportMetadataWorker;
+    const requestId = -1;
+    const onMessage = ({ data }) => {
+      if (data.requestId !== requestId) return;
+      worker.removeEventListener('message', onMessage);
+      resolve(data);
+    };
+    worker.addEventListener('message', onMessage);
+    worker.postMessage({ requestId, databaseName: DB_NAME, storeName: REPORT_STORE, reportId });
+  }), activeReportId);
+  assert.ok(workerRead.error, 'worker reports an unavailable database');
+  assert.equal(await page.evaluate(async () => (await indexedDB.databases()).some(({ name }) => name === DB_NAME)), false);
+  await page.locator('#clearButton').click();
+  await page.getByText('Создан новый отчёт', { exact: true }).waitFor({ state: 'visible' });
+  assert.notEqual(await page.evaluate(() => draft.reportId), activeReportId);
+  assert.equal(await page.evaluate(async id => (await getReportRecord(id)).document.intro, activeReportId), '<p>Older tab message</p>');
+
+  // Two tabs can migrate an already broken database without replacing other stores.
+  const repairContext = await browser.newContext({ serviceWorkers: 'block' });
+  await repairContext.addCookies(await context.cookies(origin));
+  await repairContext.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  const [repairPage, secondRepairPage] = await Promise.all([repairContext.newPage(), repairContext.newPage()]);
+  await repairPage.goto(origin + '/api/health');
+  await repairPage.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('qa-report-editor', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('fixture').put('keep me', 'record');
+    request.onsuccess = () => { request.result.close(); resolve(); };
+    request.onerror = () => reject(request.error);
+  }));
+  await Promise.all([repairPage.goto(origin), secondRepairPage.goto(origin)]);
+  for (const tab of [repairPage, secondRepairPage]) {
+    const repaired = await tab.evaluate(async () => {
+      const db = await openDatabase();
+      const transaction = db.transaction(['fixture', 'reports'], 'readonly');
+      const indexNames = Array.from(transaction.objectStore('reports').indexNames);
+      const preserved = await new Promise((resolve, reject) => {
+        const request = transaction.objectStore('fixture').get('record');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return { version: db.version, indexNames, preserved };
+    });
+    assert.deepEqual(repaired, { version: 2, indexNames: ['updatedAt'], preserved: 'keep me' });
+  }
+  await repairPage.locator('#clearButton').click();
+  await repairPage.getByText('Создан новый отчёт', { exact: true }).waitFor({ state: 'visible' });
+  await repairContext.close();
+  console.log('PASS: live browser storage clearing and concurrent repair of a missing report store');
+
   // Exercise the actual PWA cache as well as a running editor without network.
   const pwaContext = await browser.newContext({ serviceWorkers: 'allow' });
   await pwaContext.addCookies(await context.cookies(origin));
@@ -184,11 +245,12 @@ async function main() {
   await pwaPage.goto(origin);
   await pwaPage.waitForSelector('#settingsButton');
   await pwaPage.evaluate(async () => { await navigator.serviceWorker.ready; });
-  await pwaPage.waitForFunction(async () => {
+  const workerUrl = fs.readFileSync(path.join(root, 'app.js'), 'utf8').match(/\/draft-storage-worker\.js\?v=\d+/)[0];
+  await pwaPage.waitForFunction(async url => {
     const keys = await caches.keys();
-    for (const key of keys) if (await (await caches.open(key)).match('/draft-storage-worker.js?v=1')) return true;
+    for (const key of keys) if (await (await caches.open(key)).match(url)) return true;
     return false;
-  });
+  }, workerUrl);
   await pwaPage.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   await pwaPage.evaluate(async value => { cloudHistoryEnabled = false; applyDraftLocally(value); await saveDraft(); }, legacy);
   await pwaContext.setOffline(true);

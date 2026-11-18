@@ -100,14 +100,15 @@
     return { section, body };
   }
 
-  function createColumnPins(view, changed) {
-    const state = { qa: true, point: false };
+  function createColumnPins(view, changed, additional = {}) {
+    const state = { qa: true, point: false, ...Object.fromEntries(Object.keys(additional).map(key => [key, true])) };
+    const definitions = { point: [".point-index", "№"], qa: [".qa-status", "Статус"], ...additional };
     function render(scope = view) {
       view.dataset.pinQa = String(state.qa);
       view.dataset.pinPoint = String(state.point);
       for (const button of scope.querySelectorAll("[data-pin-column]")) {
         const pinned = state[button.dataset.pinColumn];
-        const name = button.dataset.pinColumn === "qa" ? "Статус" : "№";
+        const name = definitions[button.dataset.pinColumn][1];
         button.setAttribute("aria-pressed", String(pinned));
         button.title = `${pinned ? "Открепить" : "Закрепить"} столбец «${name}»`;
         button.setAttribute("aria-label", button.title);
@@ -123,8 +124,9 @@
       button.focus({ preventScroll: true });
     });
     function attach(table) {
-      for (const [key, selector] of [["point", ".point-index"], ["qa", ".qa-status"]]) {
+      for (const [key, [selector]] of Object.entries(definitions)) {
         const header = table.tHead.querySelector(selector);
+        if (!header) continue;
         const heading = element("span", "report-column-heading");
         const button = element("button", "column-pin");
         button.type = "button";

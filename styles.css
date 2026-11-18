@@ -6239,3 +6239,18 @@ tr.import-added > td { animation: import-row-highlight 3.5s ease-out; }
 @keyframes cloud-progress { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cloud-dialog[aria-busy="true"] #personalCloudStatus[data-state="busy"]::before { animation: none; } }
 @media (max-width: 600px) { .cloud-access { margin: 24px 16px; padding: 20px; } .cloud-report > div:first-child { flex-basis: auto; } }
+
+.retest-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.retest-entry:empty { display: none; }
+#editorRetestEntry { align-self: center; margin-inline-start: auto; }
+.report-heading:has(#editorRetestEntry:not(:empty)) > .report-publication { margin-inline-start: 0; }
+.retest-stage {
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; background: var(--surface);
+  color: var(--ink); font-size: .76rem; font-weight: 650; white-space: nowrap;
+}
+.retest-stage[data-stage="ready"], .retest-entry .retest-entry-action {
+  border: 1px solid color-mix(in srgb, var(--primary) 52%, var(--line));
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface)); color: var(--ink);
+}
+.retest-entry .retest-entry-action { min-height: 34px; padding-inline: 9px; font-size: .82rem; }
+.retest-entry .retest-entry-action:hover { background: color-mix(in srgb, var(--primary) 17%, var(--surface)); }

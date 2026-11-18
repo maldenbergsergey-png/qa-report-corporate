@@ -4405,7 +4405,8 @@ async function uploadPendingImages(settings, issue, options = {}) {
   const summary = document.getElementById("publishAttachmentSummary"); summary.hidden = true;
   if (!includeImages && !includeFiles) return [];
   const reuse = window.QaReportJiraReuse;
-  const publication = { ...draft, sections: sectionsForPublication(sectionIds, draft, statuses, tagFilter) };
+  const source = options.includeRetestColumns ? draft : window.QaReportRetest.withoutServiceColumns(draft);
+  const publication = { ...source, sections: sectionsForPublication(sectionIds, source, statuses, tagFilter) };
   const assets = reuse.collect(publication).filter((asset) => asset.source.kind === "image" ? includeImages : includeFiles);
   if (!assets.length) return [];
   setPublishProgress({ step: "prepare", percent: 10, status: "Проверяем вложения в Jira…" });
@@ -4545,6 +4546,9 @@ function updatePublishScopeState() {
 
 function askPublishScope(link = null) {
   if (publishScopeResolver) return Promise.resolve(null);
+  const hasRetestColumns = draft.sections.some(section => section.columns.some(window.QaReportRetest.serviceColumn));
+  document.getElementById("publishRetestColumns").hidden = !hasRetestColumns;
+  document.getElementById("publishIncludeRetest").checked = hasRetestColumns && link?.includeRetestColumns === true;
   const attachments = window.QaReportJiraPublication.attachmentOptions(link);
   document.getElementById("publishIncludeImages").checked = attachments.includeImages;
   document.getElementById("publishIncludeFiles").checked = attachments.includeFiles;
@@ -4610,6 +4614,7 @@ function resolvePublishScope(accepted) {
     tagFilter: window.QaReportTags.scope(tagScopes.publish),
     includeImages: document.getElementById("publishIncludeImages").checked,
     includeFiles: document.getElementById("publishIncludeFiles").checked,
+    includeRetestColumns: document.getElementById("publishIncludeRetest").checked,
   } : null);
 }
 
@@ -4670,6 +4675,7 @@ function historyPublication(report) {
 }
 
 function trackerPublicationBody(format, scope, source = draft) {
+  if (!scope.includeRetestColumns) source = window.QaReportRetest.withoutServiceColumns(source);
   const options = { ...scope, source, forPublication: true };
 
   return generateMarkup(options);
@@ -4681,6 +4687,7 @@ function publicationSnapshot(parts) {
 }
 
 function trackerPublicationSnapshot(scope, body, source = draft) {
+  if (!scope.includeRetestColumns) source = window.QaReportRetest.withoutServiceColumns(source);
   const attachments = [];
   const content = html => {
     if (!/<(?:a\b|figure\b|img\b|video\b|audio\b|[^>]+class=["'][^"']*(?:cell-file|jira-))/i.test(html)) return html;
@@ -4795,6 +4802,7 @@ function publicationTrackerTarget() {
 }
 
 function renderPublicationState() {
+  renderRetestEntry(document.getElementById("editorRetestEntry"), draft.reportId);
   clearTimeout(publicationStateTimer);
   const link = currentJiraPublication();
   const target = publicationTrackerTarget();
@@ -4964,7 +4972,7 @@ async function publishToJira(mode = "auto") {
     const context = { reportId: publicationReportId, issueUrl: issue.issueUrl, format: comment.format,
       contentSnapshot: trackerPublicationSnapshot(scope, comment.body),
       sectionIds: [...(sectionIds || draft.sections.map(section => section.id))],
-      statuses: [...(statuses || Object.keys(STATUS_META))], tagFilter: scope.tagFilter,
+      statuses: [...(statuses || Object.keys(STATUS_META))], tagFilter: scope.tagFilter, includeRetestColumns: scope.includeRetestColumns,
       ...window.QaReportJiraPublication.attachmentOptions(scope), firstPublishedAt: linked?.firstPublishedAt || "" };
     const successfulParts = [];
     const results = linked ? await updateLinkedJiraComments(settings, issue, comment, linked, publishAbortController.signal, context)
@@ -5696,6 +5704,12 @@ async function renderHistoryList({ showLoading = false, saveSnapshot = false, re
     const publications = createHistoryPublications(report);
     if (publications.children.length) item.append(publications);
     elements.historyList.append(item);
+    const retestEntry = document.createElement("div");
+    retestEntry.className = "retest-entry";
+    retestEntry.dataset.retestReport = report.id;
+    retestEntry.setAttribute("aria-live", "polite");
+    info.querySelector(".history-item-heading").append(retestEntry);
+    renderRetestEntry(retestEntry, report.id, true);
   });
   window.QaReportTaskUI.renderInventory(elements.historyList);
   updateHistoryStorage();
@@ -8434,6 +8448,7 @@ function sharedPublications(reportId, { includeRevoked = false } = {}) {
 function rememberSharedPublication(reportId, publication) {
   if (!validSharedPublication(publication)) throw new Error("Сервер не вернул ссылку. Повторите попытку.");
   const key = sharedReportPrefix(reportId) + publication.id;
+  retestEntries.delete(publication.id);
   try {
     const existing = JSON.parse(localStorage.getItem(key));
     if (!publication.revokedAt && (existing?.revokedAt ||
@@ -8452,6 +8467,86 @@ function sharedReportUrl(id, token) {
   return new URL(`/shared-report/${id}#${token}`, location.origin).href;
 }
 
+const retestEntries = new Map();
+const retestStageLabels = {
+  corrections: "На доработке", ready: "Готов к ретесту", retest: "На ретесте", finished: "Ретест пройден",
+};
+
+function renderRetestEntry(holder, reportId, refresh = false) {
+  if (!holder) return;
+  const publication = sharedPublications(reportId)[0];
+  const bound = holder.dataset.retestPublication;
+  if ((publication?.id || "") !== (bound || "")) {
+    holder.dataset.retestPublication = publication?.id || "";
+    holder.replaceChildren();
+  }
+  if (!publication) {
+    if (!holder.firstChild) {
+      const stage = document.createElement("span");
+      stage.className = "retest-stage";
+      stage.textContent = "Тестирование";
+      holder.append(stage);
+    }
+    return;
+  }
+  const draw = state => {
+    if (!holder.isConnected || holder.dataset.retestPublication !== publication.id) return;
+    if (!state?.phase) { holder.replaceChildren(); return; }
+    const label = state.outcome === "qualified" ? "Принято с замечаниями" : retestStageLabels[state.phase];
+    const chip = document.createElement("span");
+    chip.className = "retest-stage";
+    chip.dataset.stage = state.phase;
+    chip.textContent = label;
+    chip.title = (state.phase === "corrections" ? "Доработка № " : "Ретест № ") + state.round;
+    const labelForAction = { ready: "Начать ретест", retest: "Продолжить ретест", finished: "Открыть результаты" }[state.phase];
+    holder.replaceChildren(chip);
+    if (!state.author || !labelForAction) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-secondary retest-entry-action";
+    button.textContent = labelForAction;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        if (state.phase === "ready") await requestSharedReport(`/${publication.id}/start-retest`, {
+          token: publication.ownerToken, forRetest: true, round: state.round, body: "{}",
+        });
+        location.assign(sharedReportUrl(publication.id, publication.replyToken));
+      } catch (error) {
+        showToast(error.message);
+        renderRetestEntry(holder, reportId, true);
+      } finally { button.disabled = false; }
+    });
+    holder.append(button);
+  };
+  let cached = retestEntries.get(publication.id);
+  if (!cached || refresh && !cached.pending) {
+    const pending = requestSharedReport(`/${publication.id}/author?workflow=1&phaseOnly=1`, {
+      method: "GET", token: publication.ownerToken, forRetest: true, timeout: 8000,
+    }).catch(() => null).then(state => {
+      if (retestEntries.get(publication.id)?.pending === pending) retestEntries.set(publication.id, { state });
+      return state;
+    });
+    cached = { state: cached?.state, pending };
+    retestEntries.set(publication.id, cached);
+  }
+  if (cached.state !== undefined) draw(cached.state);
+  cached.pending?.then(state => {
+    if (retestEntries.get(publication.id)?.state === state) draw(state);
+  });
+}
+
+function refreshRetestEntries() {
+  if (document.hidden) return;
+  renderRetestEntry(document.getElementById("editorRetestEntry"), draft.reportId, true);
+  for (const entry of document.querySelectorAll("#historyList [data-retest-report]")) {
+    renderRetestEntry(entry, entry.dataset.retestReport, true);
+  }
+}
+window.addEventListener("focus", refreshRetestEntries);
+window.addEventListener("pageshow", refreshRetestEntries);
+document.addEventListener("visibilitychange", refreshRetestEntries);
+
 function sharedSnapshotOptions(source, scope) {
   const excluded = new Set(sharedExcludedRows(scope).map(row => JSON.stringify([row.sectionId, row.rowId])));
   return {
@@ -8464,6 +8559,49 @@ function sharedSnapshotOptions(source, scope) {
     sectionTitle: section => ChecklistNumbering.sectionTitle(source, section),
     ...window.QaReportJiraPublication.attachmentOptions(scope),
   };
+}
+
+function retestFingerprint(row, columns) {
+  return QaReportHistory.contentFingerprint({ cells: columns.map(column => [column.id, htmlToSpreadsheetText(row.cells[column.id] || "")]) });
+}
+
+// Keep the link credential out of editor URLs, history entries and exported documents.
+const incomingRetestId = new URL(location.href).searchParams.get("retest");
+async function importCompletedRetest() {
+  if (!/^[a-f0-9]{32}$/.test(incomingRetestId)) return;
+  try {
+    const transfer = JSON.parse(sessionStorage.getItem("qa-retest-transfer") || "null");
+    if (transfer?.id !== incomingRetestId) return;
+    const cloud = window.QaReportCloud.routeId();
+    if (cloud && document.documentElement.dataset.cloudAccess !== "granted") return;
+    sessionStorage.removeItem("qa-retest-transfer");
+    const { report } = await requestSharedReport("/" + transfer.id, { method: "GET", token: transfer.token, forRetest: true });
+    const sourceMatches = () => report.workflow?.author && report.workflow.phase === "finished" && report.workflow.round === transfer.round &&
+      (cloud ? report.workflow.editorPath === "/cloud-report/" + window.QaReportCloud.routeId() &&
+          document.documentElement.dataset.cloudAccess === "granted" : report.workflow.publicId === draft.publicId);
+    if (!sourceMatches()) throw new Error("Откройте исходный чек-лист в аккаунте автора. Для локального отчёта нужен браузер, где он сохранён.");
+    await checkStoredDraftFreshness();
+    flushDraftFromDom();
+    const plan = () => window.QaReportRetest.planMerge(draft, report, retestFingerprint);
+    const preview = plan();
+    const skipped = preview.skipped.length ? " Пропущено: " + preview.skipped.length + " (" + preview.skipped.slice(0, 5).join(", ") + ")." : "";
+    if (!preview.changes.length) {
+      showToast((preview.applied ? "Результаты уже внесены." : "Нет пунктов для переноса.") + skipped);
+      return;
+    }
+    const affected = [...new Set(preview.changes.map(change => change.section.title))];
+    const id = draft.reportId, revision = draft.revision;
+    if (!await askConfirmation(`Обновить пункты (${preview.changes.length}) в разделах: ${affected.slice(0, 5).join(", ")}? Будут сохранены новые статусы, ответы разработки и комментарии ретеста.${skipped}`,
+      { title: "Перенести результаты ретеста?", confirmText: "Обновить чек-лист" })) return;
+    await checkStoredDraftFreshness();
+    if (!sourceMatches() || draft.reportId !== id || draft.revision !== revision) throw new Error("Чек-лист изменился. Откройте перенос ещё раз из отчёта по ссылке.");
+    flushDraftFromDom();
+    const current = plan();
+    if (current.changes.length !== preview.changes.length) throw new Error("Состав пунктов изменился. Повторите перенос из отчёта.");
+    commitSelectionMutation(() => window.QaReportRetest.applyMerge(current, report, textToEditorHtml, sharedPublicationDate));
+    await draftWriteQueue;
+    showToast("Чек-лист обновлён. Можно переходить к публикации.");
+  } catch (error) { showToast(error.message || "Не удалось перенести результаты ретеста."); }
 }
 
 function sharedContentSnapshot(source, options) {
@@ -8492,7 +8630,10 @@ function sharePublicationState(publication, reportId = draft.reportId, { checkPe
   const key = JSON.stringify([localEditGeneration, scope]);
   if (sharedContentCheck?.source !== source || sharedContentCheck?.key !== key) {
     let snapshot;
-    try { snapshot = sharedContentSnapshot(source, sharedSnapshotOptions(source, scope)); } catch {}
+    try {
+      const checklist = window.QaReportRetest.withoutServiceColumns(source);
+      snapshot = sharedContentSnapshot(checklist, sharedSnapshotOptions(checklist, scope));
+    } catch {}
     sharedContentCheck = { source, key, snapshot };
   }
   if (!sharedContentCheck.snapshot) return unknown;
@@ -8536,12 +8677,23 @@ function renderSharedAuthor(context, publication) {
   const accounts = context.publicationAccounts;
   if (!accounts.has(id)) {
     accounts.set(id, "Определяем аккаунт публикации…");
-    requestSharedReport(`/${id}/author`, { method: "GET", token: ownerToken, timeout: 8000 })
-      .then(({ email }) => email ? `Аккаунт публикации: ${email}` : "Аккаунт публикации не указан.")
+    requestSharedReport(`/${id}/author?workflow=1`, { method: "GET", token: ownerToken, timeout: 8000 })
+      .then(({ email, phase, round }) => {
+        if (round) context.publicationRounds.set(id, round);
+        if (phase) context.publicationPhases.set(id, phase);
+        if (shareReportContext === context && context.latest?.id === id && ["ready", "retest"].includes(phase) && context.editingSnapshot === "update" && !shareReportBusy) {
+          context.editingSnapshot = "";
+          setShareReportStatus();
+        }
+        return email ? `Аккаунт публикации: ${email}` : "Аккаунт публикации не указан.";
+      })
       .catch(() => "Не удалось определить аккаунт публикации.")
       .then(text => {
         accounts.set(id, text);
-        if (shareReportContext === context && context.latest?.id === id) show(text);
+        if (shareReportContext === context && context.latest?.id === id) {
+          renderSharedLinks();
+          updateShareReportControls();
+        }
       });
   }
   show(accounts.get(id));
@@ -8569,6 +8721,10 @@ function renderSharedLinks() {
   shareReport.Access.textContent = latest?.attachmentsPending
     ? "Отчёт уже доступен. Вложения появятся по этой ссылке по мере загрузки."
     : "По ссылке можно посмотреть отчёт и ответить после корпоративного входа.";
+  const phase = context.publicationPhases.get(latest?.id);
+  if (phase === "corrections") shareReport.Access.textContent = "Доработка. По ссылке можно ответить на замечания и передать их на ретест.";
+  if (["ready", "retest"].includes(phase)) shareReport.Access.textContent = retestStageLabels[phase] + ". Откройте ссылку в аккаунте автора.";
+  if (phase === "finished") shareReport.Access.textContent = "Ретест завершён. По ссылке доступны результаты и перенос в основной чек-лист.";
   if (latest) shareReport.Open.href = sharedReportUrl(latest.id, latest.replyToken);
   else shareReport.Open.removeAttribute("href");
   shareReport.AttemptList.replaceChildren();
@@ -8638,6 +8794,7 @@ function updateShareReportControls() {
   const editing = Boolean(context?.editingSnapshot);
   const hasLatest = Boolean(context?.latest);
   const creatingNew = context?.editingSnapshot === "new";
+  const nextRound = context?.editingSnapshot === "update" && context.publicationPhases.get(context.latest?.id) === "finished";
   const recovering = pending && !creatingNew && context.editingSnapshot !== "replacement";
   const publishing = !recovering && (editing || !hasLatest);
   const hasAction = Boolean(recovering || publishing);
@@ -8645,9 +8802,9 @@ function updateShareReportControls() {
     (context?.editingSnapshot === "replacement" && hasLatest && !context.latest.attachmentsPending);
   const showLatest = hasLatest && !editing && (!shareReportBusy || (shareReportOperation && context.uploadPublicationId === context.latest.id));
   shareReport.Title.textContent = context?.publicationAccountMismatch ? "Нужен аккаунт автора" :
-    creatingNew ? "Создать новую ссылку" : updating ? "Обновить отчёт по ссылке"
+    creatingNew ? "Создать новую ссылку" : nextRound ? "Следующий раунд доработки" : updating ? "Обновить отчёт по ссылке"
     : hasLatest ? context.latest.updatedAt ? "Отчёт обновлён" : "Отчёт опубликован" : "Поделиться по ссылке";
-  shareReport.Hint.textContent = creatingNew ? "Прежняя ссылка останется доступной." : updating
+  shareReport.Hint.textContent = creatingNew ? "Прежняя ссылка останется доступной." : nextRound ? "Получатели откроют новую доработку по прежней ссылке. Предыдущий раунд сохранится в истории." : updating
     ? "Изменения и вложения появятся по той же ссылке после загрузки."
     : "Открыть ссылку и ответить по пунктам можно после корпоративного входа.";
   shareReport.Hint.hidden = waiting || showLatest;
@@ -8658,10 +8815,10 @@ function updateShareReportControls() {
   shareReport.Options.hidden = waiting || context?.paused || !publishing || !context?.enabled;
   shareReport.Spinner.hidden = !waiting;
   shareReport.LinkSelect.disabled = waiting;
-  shareReport.Update.hidden = waiting || !showLatest || Boolean(pending) || !context?.enabled || context.publicationPaused || context.publicationDenied || context.latest.attachmentsPending;
+  shareReport.Update.hidden = waiting || !showLatest || Boolean(pending) || !context?.enabled || context.publicationPaused || context.publicationDenied || context.latest.attachmentsPending || ["ready", "retest"].includes(context.publicationPhases.get(context.latest.id));
   if (!shareReport.Update.hidden) {
     const state = sharePublicationState(context.latest, context.reportId, { checkPending: false });
-    shareReport.Update.textContent = state.state === "current" ? "Изменить состав публикации" : "Обновить отчёт по ссылке";
+    shareReport.Update.textContent = context.publicationPhases.get(context.latest.id) === "finished" ? "Отправить на новую доработку" : state.state === "current" ? "Изменить состав публикации" : "Обновить отчёт по ссылке";
   }
   shareReport.Revoke.hidden = waiting || !showLatest;
   shareReport.CancelUpdate.hidden = !editing && !context?.archivedPending;
@@ -8673,7 +8830,7 @@ function updateShareReportControls() {
   shareReport.Publish.hidden = !hasAction || shareReportBusy;
   shareReport.Publish.textContent = context?.paused ? "Продолжить загрузку" : recovering
     ? sharedAttemptScope(context.reportId, pending) && !context.archivedPending ? "Продолжить загрузку" : "Восстановить ссылку"
-    : creatingNew ? "Создать ссылку" : updating ? "Обновить отчёт" : "Опубликовать отчёт";
+    : creatingNew ? "Создать ссылку" : nextRound ? "Начать новый раунд" : updating ? "Обновить отчёт" : "Опубликовать отчёт";
   shareReport.Publish.disabled = shareReportBusy || context?.accountBusy || !context?.enabled || (publishing && context?.tagRowCount === 0) || context.publicationDenied || (context.publicationPaused && !recovering);
   shareReport.SignOut.hidden = shareReportBusy || !context?.accountSignedIn;
   shareReport.SignOut.disabled = Boolean(context?.accountBusy);
@@ -8700,7 +8857,7 @@ async function openShareReport(event, mode = "") {
   const returnFocus = trigger.id === "shareReportExportButton"
     ? elements.copyMenuButton : document.getElementById("publicationMenuButton");
   const context = { reportId: draft.reportId, returnFocus, enabled: false,
-    allowNew: false, editingSnapshot: "", archivedPending: "", publicationAccounts: new Map() };
+    allowNew: false, editingSnapshot: "", archivedPending: "", publicationAccounts: new Map(), publicationPhases: new Map(), publicationRounds: new Map() };
   shareReportContext = context;
   closeHeaderDropdowns();
   shareReport.Modal.hidden = false;
@@ -8807,13 +8964,13 @@ function setSharedReportBusy(busy) {
   updateShareReportControls();
 }
 
-async function requestSharedReport(path, { method = "POST", body, token, timeout = 150_000, signal } = {}) {
+async function requestSharedReport(path, { method = "POST", body, token, timeout = 150_000, signal, round } = {}) {
   const csrfToken = method === "GET" ? "" : await authCsrfToken();
   const deadline = AbortSignal.timeout(timeout);
   const response = await fetch(`/api/shared-reports${path}`, {
     method, credentials: "same-origin", cache: "no-store", redirect: "error",
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-    headers: { ...(body ? { "Content-Type": "application/json" } : {}),
+    headers: { ...(round && { "X-QA-Report-Round": String(round) }), ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { "X-QA-Report-Token": token, Authorization: `Bearer ${token}` } : {}),
       ...(csrfToken ? { "X-QA-CSRF-Token": csrfToken } : {}) }, body,
   });
@@ -8991,7 +9148,8 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
     defaultStatuses: [...shareReport.Statuses.querySelectorAll("input:checked")].map(input => input.value),
     tagFilter: window.QaReportTags.scope(tagScopes.share),
     excludedRows: selectedSharedExclusions(),
-    ...(updateId && { updateId }),
+    ...(updateId && { updateId, round: context.publicationRounds.get(updateId) || 1 }),
+    ...(updateId && context.publicationPhases.get(updateId) === "finished" && { nextRound: context.publicationRounds.get(updateId) + 1 }),
   };
   let contentSnapshot = attemptedScope?.contentSnapshot;
   const retry = Boolean(publishKey);
@@ -9036,7 +9194,8 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
           ? saved.updatedAt : capturedAt;
         context.preparation = { source, scope, updatedAt };
       }
-      const { source, updatedAt } = context.preparation;
+      const { updatedAt } = context.preparation;
+      const source = window.QaReportRetest.withoutServiceColumns(context.preparation.source);
       const snapshotOptions = sharedSnapshotOptions(source, scope);
       const payload = await window.QaReportFile.prepareSharedSnapshot(source, {
         ...snapshotOptions,
@@ -9045,6 +9204,11 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
         onAttachment: name => setShareReportStatus("Готовим отчёт", `Обрабатываем «${name}»`),
       });
       signal.throwIfAborted();
+      const sourceSections = new Map(source.sections.map(section => [section.id, section]));
+      for (const section of payload.snapshot.sections) {
+        const originals = new Map(sourceSections.get(section.id).rows.map(row => [row.id, row]));
+        for (const row of section.rows) row.sourceHash = retestFingerprint(originals.get(row.id), section.columns);
+      }
       const nextKey = publishKey || newSharedPublicationKey();
       const target = updateId && sharedPublications(context.reportId).find(publication => publication.id === updateId);
       if (updateId && !target) throw new Error("Ссылка для обновления недоступна в этом браузере.");
@@ -9053,10 +9217,10 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
         .slice(0, 32)
         .map(({ id, ownerToken }) => ({ id, ownerToken })) : [];
       const body = JSON.stringify({
-        publishKey: nextKey, reportId: source.publicId, earlyLink: true, batchUploads: true,
+        publishKey: nextKey, reportId: source.publicId, sourceCloudId: window.QaReportCloud.routeId(), earlyLink: true, batchUploads: true,
         snapshot: { ...payload.snapshot, updatedAt, ...(scope.defaultStatuses?.length && { defaultStatuses: scope.defaultStatuses }) },
         files: payload.files.map(({ bytes, ...file }) => file), reuseFrom,
-        ...(target && { update: { id: target.id, ownerToken: target.ownerToken } }),
+        ...(target && { update: { id: target.id, ownerToken: target.ownerToken, round: scope.round, ...(scope.nextRound && { nextRound: scope.nextRound }) } }),
       });
       if (!publishKey) {
         contentSnapshot = sharedContentSnapshot(source, snapshotOptions);
@@ -9102,6 +9266,10 @@ async function publishSharedReport({ startNew = false, recoverKey = "" } = {}) {
       defaultStatuses: scope.defaultStatuses ?? publication.defaultStatuses ?? [],
       excludedRows: sharedExcludedRows(scope), contentSnapshot: contentSnapshot || null };
     context.selectedPublicationId = publication.id;
+    if (scope.nextRound) {
+      context.publicationRounds.set(publication.id, scope.nextRound);
+      context.publicationPhases.set(publication.id, "corrections");
+    }
     if (rememberSharedPublication(context.reportId, publication)) {
       try { forgetSharedAttempt(context.reportId, publishKey); }
       catch { setShareReportError("Не удалось очистить данные завершённой загрузки в браузере."); }
@@ -9237,7 +9405,9 @@ shareReport.ExclusionSummary.addEventListener("click", () => sharedExclusionPick
 shareReport.ExclusionReset.addEventListener("click", () => {
   sharedExclusionPicker?.clear(); updateSharedExclusionCount();
 });
-shareReport.Update.addEventListener("click", () => editSharedSnapshot("update"));
+shareReport.Update.addEventListener("click", () => {
+  editSharedSnapshot("update");
+});
 shareReport.ReplacePending.addEventListener("click", () => editSharedSnapshot("replacement"));
 shareReport.CancelUpdate.addEventListener("click", () => {
   if (!shareReportContext || shareReportBusy) return;
@@ -10977,7 +11147,10 @@ updateHistoryButtons();
 if (!window.QaReportCloud.routeId() && new URL(window.location.href).searchParams.has("importToken")) {
   handleInboundChecklistImport();
 } else {
-  openReportFromRoute().catch(() => {}).finally(() => checkStoredDraftFreshness());
+  openReportFromRoute().catch(() => {}).finally(async () => {
+    await checkStoredDraftFreshness();
+    if (!window.QaReportCloud.routeId()) await importCompletedRetest();
+  });
 }
 
 
@@ -11255,6 +11428,14 @@ document.getElementById("openStandaloneBugReport").addEventListener("click", () 
   closeHeaderDropdowns(); window.QaReportBugUI.openStandalone(elements.reportMenuButton);
 });
 
+if (incomingRetestId && window.QaReportCloud.routeId()) {
+  const ready = new MutationObserver(() => {
+    if (document.documentElement.dataset.cloudAccess !== "granted") return;
+    ready.disconnect();
+    void importCompletedRetest();
+  });
+  ready.observe(document.documentElement, { attributes: true, attributeFilter: ["data-cloud-access"] });
+}
 const personalCloud = window.QaReportCloud.create({
   onStatus: () => {
     if (!elements.historyModal.hidden && !historyLoading) updateHistoryStorage();

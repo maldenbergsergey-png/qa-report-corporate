@@ -150,6 +150,8 @@ function contentFragments(value, attachments) {
   });
 }
 
+const Retest = require("./retest");
+
 function snapshotFrom(raw, usedFiles) {
   function content(value) {
     const attachments = array(value?.attachments ?? [], 250).map(identifier);
@@ -175,6 +177,7 @@ function snapshotFrom(raw, usedFiles) {
       rows: unique(array(section?.rows, 2000).map((row) => ({
         id: identifier(row?.id),
         number: str(row?.number ?? "", 80),
+        ...(/^1:[a-f0-9]{1,8}:[a-f0-9]{1,8}:\d{1,10}$/.test(row?.sourceHash) && { sourceHash: row.sourceHash }),
         status: str(row?.status ?? "", 120),
         cells: Object.fromEntries(columns.map(({ id }) => [id, content(Object.hasOwn(row?.cells ?? {}, id) ? row.cells[id] : undefined)])),
         bugs: array(row?.bugs ?? [], 100).map((bug) => ({ key: str(bug?.key ?? "", 160), issueUrl: link(bug?.issueUrl) })),
@@ -248,7 +251,8 @@ function publicationPayload(body, direct = false) {
     fail(400, "Отчёт содержит отсутствующее или лишнее вложение");
   }
   const reportId = typeof body.reportId === "string" && /^[a-f0-9]{7,8}$/.test(body.reportId) ? body.reportId : null;
-  return { document, snapshotJson, files, reportId, issueKey: storageIssueKey(body.snapshot.issueUrl) };
+  const sourceCloudId = typeof body.sourceCloudId === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(body.sourceCloudId) ? body.sourceCloudId : null;
+  return { document, snapshotJson, files, reportId, sourceCloudId, issueKey: storageIssueKey(body.snapshot.issueUrl) };
 }
 
 function secretsFor(publishKey) {
@@ -288,6 +292,22 @@ function answerFileFromRow(row) {
 }
 
 function initializeSharing(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS shared_retest_rounds (
+    publication_id TEXT NOT NULL REFERENCES shared_publications(id), round INTEGER NOT NULL,
+    report_json TEXT NOT NULL, PRIMARY KEY(publication_id, round)
+  );
+  CREATE TABLE IF NOT EXISTS shared_retest_round_files (
+    publication_id TEXT NOT NULL, round INTEGER NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL,
+    name TEXT NOT NULL, size INTEGER NOT NULL, bucket_id TEXT NOT NULL, object_key TEXT NOT NULL,
+    PRIMARY KEY(publication_id,round,kind,id),
+    FOREIGN KEY(publication_id,round) REFERENCES shared_retest_rounds(publication_id,round)
+  );
+  CREATE INDEX IF NOT EXISTS shared_retest_objects ON shared_retest_round_files(bucket_id,object_key);
+  CREATE TABLE IF NOT EXISTS shared_retest_results (
+    publication_id TEXT NOT NULL REFERENCES shared_publications(id), section_id TEXT NOT NULL, row_id TEXT NOT NULL,
+    status TEXT NOT NULL, comment TEXT NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(publication_id,section_id,row_id)
+  )`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS shared_publications (
       id TEXT PRIMARY KEY,
@@ -345,7 +365,10 @@ function initializeSharing(db) {
     ["shared_publications", "published_at"], ["shared_publications", "reuse_until", "INTEGER"],
     ["shared_publications", "author_id"], ["shared_publications", "published_update_at"],
     ["shared_publications", "update_of"], ["shared_publications", "update_base"],
-    ["shared_publications", "storage_prefix"],
+    ["shared_publications", "storage_prefix"], ["shared_publications", "source_cloud_id"],
+    ["shared_publications", "corrections_closed_at"], ["shared_publications", "retest_finished_at"], ["shared_publications", "retest_started_at"], ["shared_publications", "retest_outcome"],
+    ["shared_publications", "retest_required"], ["shared_publications", "retest_handoff"], ["shared_publications", "round_no", "INTEGER NOT NULL DEFAULT 1"],
+    ["shared_publications", "next_round", "INTEGER"],
   ]) {
     const exists = () => db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column);
     if (!exists()) {
@@ -450,9 +473,11 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
   let activeAnswerUploads = 0;
   let initializedDb;
   const referencedPublicationObjects = `
-    SELECT json_extract(file.value, '$.bucketId'), json_extract(file.value, '$.key')
+    SELECT * FROM (SELECT json_extract(file.value, '$.bucketId'), json_extract(file.value, '$.key')
     FROM shared_publications AS report, json_each(report.manifest_json) AS file
-    WHERE report.revoked_at IS NULL AND (report.update_of IS NULL OR report.ready_at IS NULL)`;
+    WHERE report.revoked_at IS NULL AND (report.update_of IS NULL OR report.ready_at IS NULL)
+    UNION SELECT f.bucket_id, f.object_key FROM shared_retest_round_files f JOIN shared_publications p
+      ON p.id=f.publication_id WHERE p.revoked_at IS NULL)`;
 
   function db() {
     const connection = getDb();
@@ -569,12 +594,13 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
           FROM shared_publications AS report, json_each(report.manifest_json) AS file
           WHERE report.id = ? OR (report.update_of = ? AND report.ready_at IS NULL)
         UNION SELECT bucket_id, object_key, 0 FROM shared_report_answer_files WHERE publication_id = ?
+        UNION SELECT bucket_id, object_key, 0 FROM shared_retest_round_files WHERE publication_id = ?
       ), unreferenced AS (
         SELECT bucket_id, object_key FROM candidates EXCEPT ${referencedPublicationObjects}
       )
       INSERT OR IGNORE INTO shared_report_storage_cleanup (bucket_id, object_key, retry_after)
         SELECT bucket_id, object_key, max(retry_after) FROM candidates
-        JOIN unreferenced USING (bucket_id, object_key) GROUP BY bucket_id, object_key`).run(until, now + 120_000, id, id, id);
+        JOIN unreferenced USING (bucket_id, object_key) GROUP BY bucket_id, object_key`).run(until, now + 120_000, id, id, id, id);
     });
   }
 
@@ -720,7 +746,7 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
     return reusable;
   }
 
-  function reservePublication(access, { document, snapshotJson, files, reportId, issueKey }, bucket, authorId, reuseFrom, batchUploads = false, update) {
+  function reservePublication(access, { document, snapshotJson, files, reportId, sourceCloudId, issueKey }, bucket, authorId, reuseFrom, batchUploads = false, update) {
     requirePublishingAllowed(authorId);
     const metadata = files.map(({ bytes, ...file }) => file);
     const uploadState = publicationSettings.get();
@@ -738,13 +764,23 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
           fail(404, "Публикация не найдена");
         }
         checkPublicationAuthor(target, authorId, update.ownerToken);
+        if (update.nextRound != null) {
+          if (!authorId || authorId !== target.author_id) fail(403, "Начать раунд может только автор публикации.");
+          const existing = publication(access.id);
+          if (!(existing?.ready_at && existing.next_round === update.nextRound) &&
+              (!target.retest_finished_at || update.nextRound !== target.round_no + 1))
+            fail(409, "Раунд изменился. Откройте публикацию заново.");
+        } else {
+          requireOpenCorrections(target);
+          if ((update.round ?? 1) !== target.round_no) fail(409, "Откройте актуальный раунд перед обновлением публикации.");
+        }
         if (target.revoked_at) fail(410, "Публикация отозвана");
       }
       const previous = publication(access.id);
       if (previous) {
         checkPublicationAuthor(previous, authorId, access.ownerToken);
         if (previous.revoked_at) fail(410, "Публикация отозвана");
-        if (previous.payload_digest !== payloadDigest || previous.update_of !== (target?.id ?? null)) {
+        if (previous.payload_digest !== payloadDigest || previous.next_round !== (update?.nextRound ?? null) || previous.update_of !== (target?.id ?? null)) {
           fail(409, target ? "Черновик изменился. Начните обновление заново."
             : "Содержимое изменилось. Опубликуйте текущую версию по новой ссылке.", "SHARE_SNAPSHOT_CHANGED");
         }
@@ -764,11 +800,11 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       const cancelCleanup = connection.prepare("DELETE FROM shared_report_storage_cleanup WHERE bucket_id = ? AND object_key = ?");
       for (const file of manifest) if (file.reused) cancelCleanup.run(file.bucketId, file.key);
       connection.prepare(`INSERT INTO shared_publications
-        (id,payload_digest,snapshot_json,manifest_json,read_hash,reply_hash,owner_hash,created_at,author_id,update_of,update_base,storage_prefix)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        (id,payload_digest,snapshot_json,manifest_json,read_hash,reply_hash,owner_hash,created_at,author_id,update_of,update_base,storage_prefix,source_cloud_id,next_round)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(access.id, payloadDigest, snapshotJson, JSON.stringify(manifest), digest(access.readToken),
           digest(access.replyToken), digest(access.ownerToken), new Date().toISOString(), authorId,
-          target?.id ?? null, target?.published_update_at ?? null, prefix);
+          target?.id ?? null, target?.published_update_at ?? null, prefix, sourceCloudId, update?.nextRound ?? null);
       return publication(access.id);
     });
   }
@@ -798,8 +834,12 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       const target = publication(stage.update_of);
       if (stage.revoked_at || target.revoked_at) fail(410, "Публикация отозвана");
       if (stage.ready_at) return stage;
+      if (stage.next_round != null) {
+        if (!target.retest_finished_at || target.round_no + 1 !== stage.next_round || stage.author_id !== target.author_id) return null;
+      } else requireOpenCorrections(target);
       if (target.published_update_at !== stage.update_base) return null;
       const updatedAt = new Date(Math.max(Date.now(), (Date.parse(target.published_update_at) || 0) + 1)).toISOString();
+      if (stage.next_round) archiveRound(connection, target, updatedAt);
       connection.prepare(`UPDATE shared_publications SET snapshot_json = ?, manifest_json = ?, published_update_at = ?, storage_prefix = ?
         WHERE id = ?`).run(stage.snapshot_json, stage.manifest_json, updatedAt, stage.storage_prefix, target.id);
       connection.prepare("UPDATE shared_publications SET ready_at = ?, snapshot_json = '{}' WHERE id = ?").run(updatedAt, stage.id);
@@ -1041,15 +1081,196 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
     return { publication: row.update_of ? finishUpdate(access) : finishPublication(access) };
   }
 
+  function publicationAnswers(id) {
+    const answers = db().prepare("SELECT * FROM shared_report_answers WHERE publication_id = ?").all(id).map(answerFromRow);
+    const answerFiles = db().prepare("SELECT * FROM shared_report_answer_files WHERE publication_id = ? AND deleted_at IS NULL ORDER BY rowid").all(id).map(answerFileFromRow);
+    return { answers, answerFiles };
+  }
+
+  function checkRound(request, row) {
+    const round = Number(request.headers["x-qa-report-round"] || 1);
+    if (round !== row.round_no) fail(409, "Начался другой раунд. Обновите страницу перед сохранением.", "ROUND_CHANGED");
+  }
+
+  function pointFingerprints(row) {
+    return new Map(JSON.parse(row.snapshot_json).sections.flatMap(section => section.rows.map(point =>
+      [Retest.key(section.id, point.id), digest(JSON.stringify([section.columns, point.cells, point.status, point.bugs]))])));
+  }
+
+  function currentHandoff(row) {
+    if (!row.retest_handoff) return undefined;
+    const handoff = JSON.parse(row.retest_handoff), fingerprints = pointFingerprints(row);
+    handoff.points = handoff.points.filter(item => fingerprints.get(Retest.key(item.sectionId, item.rowId)) === item.fingerprint);
+    handoff.pending = handoff.pending.filter(ids => fingerprints.has(Retest.key(...ids)));
+    if (handoff.corrections) handoff.corrections = handoff.corrections.filter(ids => fingerprints.has(Retest.key(...ids)));
+    return handoff;
+  }
+
+  function archiveRound(connection, row, now, returning = false) {
+    const { answers, answerFiles } = publicationAnswers(row.id);
+    const manifest = JSON.parse(row.manifest_json);
+    const snapshot = JSON.parse(row.snapshot_json);
+    const report = { ...snapshot, id: row.id, createdAt: row.published_at || row.ready_at,
+      files: manifest.map(({ id, name, type, size }) => ({ id, name, type, size })),
+      answers, answerFiles, canReply: false, workflow: { ...workflowState(row, null, false), archived: true } };
+    let handoff = null;
+    if (returning) {
+      const state = report.workflow, review = Retest.review(state);
+      const fingerprints = pointFingerprints(row);
+      handoff = JSON.stringify({
+        points: Retest.effectiveResults(state, answers).map(result => ({ ...result, fingerprint: fingerprints.get(Retest.key(result.sectionId, result.rowId)) })),
+        pending: review.pending, corrections: review.issues,
+      });
+      state.returnedAt = now;
+    }
+    connection.prepare("INSERT INTO shared_retest_rounds VALUES(?,?,?)").run(row.id, row.round_no, JSON.stringify(report));
+    const file = connection.prepare("INSERT INTO shared_retest_round_files VALUES(?,?,?,?,?,?,?,?)");
+    for (const item of manifest) file.run(row.id,row.round_no,"files",item.id,item.name,item.size,item.bucketId,item.key);
+    const visible = new Set(answerFiles.map(item => item.id));
+    for (const item of connection.prepare("SELECT * FROM shared_report_answer_files WHERE publication_id=? AND deleted_at IS NULL").all(row.id)) {
+      if (visible.has(item.id)) file.run(row.id,row.round_no,"answer-files",item.id,item.name,item.size,item.bucket_id,item.object_key);
+    }
+    // Clearing by revision keeps old editors from overwriting a fresh round and preserves the point history.
+    connection.prepare(`UPDATE shared_report_answers SET revision=revision+1,status='unreviewed',comment='',comment_document=NULL,
+      updated_at=? WHERE publication_id=?`).run(now, row.id);
+    connection.prepare("UPDATE shared_report_answer_files SET deleted_at=? WHERE publication_id=? AND deleted_at IS NULL").run(now, row.id);
+    connection.prepare("DELETE FROM shared_retest_results WHERE publication_id=?").run(row.id);
+    connection.prepare(`UPDATE shared_publications SET round_no=round_no+1,corrections_closed_at=NULL,retest_finished_at=NULL,
+      retest_required=NULL,retest_started_at=NULL,retest_outcome=NULL,retest_handoff=? WHERE id=?`).run(handoff, row.id);
+  }
+
+  function readArchivedRound(id, round, fileKind, fileId, response, currentRound) {
+    if (!Number.isSafeInteger(round) || round <= 0 || round >= currentRound) fail(404, "Раунд недоступен.");
+    if (fileId) {
+      const file = db().prepare(`SELECT name,size,bucket_id AS bucketId,object_key AS key FROM shared_retest_round_files
+        WHERE publication_id=? AND round=? AND kind=? AND id=?`).get(id, round, fileKind, fileId);
+      return fileResponse(response, file);
+    }
+    const item = db().prepare("SELECT report_json FROM shared_retest_rounds WHERE publication_id=? AND round=?").get(id, round);
+    if (!item) fail(404, "Раунд недоступен.");
+    const report = JSON.parse(item.report_json);
+    report.workflow.rounds = roundNumbers(currentRound);
+    report.workflow.currentRound = currentRound;
+    sendJson(response, 200, { ok: true, report });
+  }
+
+  function roundNumbers(current) {
+    return Array.from({ length: current }, (_, index) => index + 1);
+  }
+
+  function requireOpenCorrections(row) {
+    if (row.corrections_closed_at) fail(409, "Доработка завершена. Обновите страницу для просмотра текущего этапа.", "CORRECTIONS_CLOSED");
+  }
+
+  async function workflowAccount(request, row) {
+    if (!row.author_id || projectAccess?.(request, row)) return null;
+    if (publisherIdentity) return (await publisherIdentity(request))?.id;
+    return (await reportAccount?.session(request))?.id;
+  }
+
+  function workflowPhase(row) {
+    if (row.retest_finished_at) return "finished";
+    if (row.retest_started_at) return "retest";
+    return row.corrections_closed_at ? "ready" : "corrections";
+  }
+
+  function workflowState(row, account, canReply, includePrevious = false) {
+    if (!row.author_id) return null;
+    const author = row.author_id === account;
+    const results = row.corrections_closed_at ? db().prepare(`SELECT section_id AS sectionId,row_id AS rowId,status,comment,
+      revision,updated_at AS updatedAt FROM shared_retest_results WHERE publication_id=? ORDER BY section_id,row_id`).all(row.id) : [];
+    const publicId = row.storage_prefix?.split("/").at(-2);
+    const previous = includePrevious && row.round_no > 1 && db().prepare(
+      "SELECT report_json FROM shared_retest_rounds WHERE publication_id=? AND round=?").get(row.id, row.round_no - 1);
+    const prior = previous && JSON.parse(previous.report_json);
+    return { handoff: currentHandoff(row), round: row.round_no, rounds: roundNumbers(row.round_no), phase: workflowPhase(row),
+      outcome: row.retest_outcome, ...(prior && { previous: Retest.effectiveResults(prior.workflow, prior.answers),
+        previousRows: prior.sections.flatMap(section => section.rows.map(point => [section.id, point.id])) }),
+      closedAt: row.corrections_closed_at, finishedAt: row.retest_finished_at, author,
+      canClose: !row.corrections_closed_at && Boolean(row.ready_at) && (author || canReply),
+      required: JSON.parse(row.retest_required || "[]"), results,
+      ...(author && /^[a-f0-9]{7,8}$/.test(publicId) && { publicId,
+        editorPath: row.source_cloud_id ? "/cloud-report/" + row.source_cloud_id : "/report/" + publicId }) };
+  }
+
+  async function changeWorkflow(request, id, action) {
+    requireJson(request);
+    const initial = authorize(request, id);
+    if (initial.row.revoked_at) fail(404, "Публикация недоступна");
+    const account = await workflowAccount(request, initial.row);
+    const body = await readJson(request, 96 * 1024);
+    return withWriteTransaction(connection => {
+      const { row, canReply } = authorize(request, id);
+      if (row.revoked_at) fail(404, "Публикация недоступна");
+      checkRound(request, row);
+      const author = Boolean(account && row.author_id === account);
+      if (!row.author_id || !(author || action === "close-corrections" && canReply)) fail(403, "Это действие доступно автору публикации.");
+      const now = new Date().toISOString();
+      if (action === "close-corrections") {
+        if (!row.ready_at) fail(409, "Дождитесь загрузки всех вложений.");
+        if (!row.corrections_closed_at) {
+          const { answers, answerFiles } = publicationAnswers(id);
+          const required = Retest.requiredPoints(JSON.parse(row.snapshot_json).sections, answers, answerFiles, currentHandoff(row));
+          connection.prepare("UPDATE shared_publications SET corrections_closed_at=?,retest_required=? WHERE id=?")
+            .run(now, JSON.stringify(required), id);
+        }
+      } else if (!row.corrections_closed_at) fail(409, "Сначала завершите доработку.");
+      else if (action === "start-retest") {
+        if (row.retest_finished_at) fail(409, "Ретест уже завершён.");
+        connection.prepare("UPDATE shared_publications SET retest_started_at=COALESCE(retest_started_at,?) WHERE id=?").run(now, id);
+      } else if (!row.retest_started_at) fail(409, "Сначала начните ретест.");
+      else if (action === "return-to-corrections") {
+        if (row.retest_finished_at) fail(409, "Ретест уже завершён. Следующий раунд доступен в окне публикации.");
+        const state = workflowState(row, account, canReply);
+        if (body.revision !== state.results.reduce((sum, result) => sum + result.revision, 0))
+          fail(409, "Результаты изменились. Обновите страницу перед возвратом.");
+        if (!Retest.review(state).issues.length) fail(409, "Укажите замечание перед возвратом на доработку.");
+        archiveRound(connection, row, now, true);
+        const updatedAt = new Date(Math.max(Date.now(), (Date.parse(row.published_update_at) || 0) + 1)).toISOString();
+        connection.prepare("UPDATE shared_publications SET published_update_at=? WHERE id=?").run(updatedAt, id);
+      } else if (action === "retest-result") {
+        if (row.retest_finished_at) fail(409, "Ретест уже завершён.");
+        const sectionId = identifier(body?.sectionId), rowId = identifier(body?.rowId);
+        requirePoint(row, sectionId, rowId);
+        if (!Retest.outcomes.includes(body.status) || !Number.isSafeInteger(body.revision) || body.revision < 0)
+          fail(400, "Выберите результат ретеста и укажите версию.");
+        const comment = str(body.comment, maxCommentLength);
+        const existing = connection.prepare("SELECT revision FROM shared_retest_results WHERE publication_id=? AND section_id=? AND row_id=?")
+          .get(id, sectionId, rowId);
+        if ((existing?.revision || 0) !== body.revision) fail(409, "Результат в другой вкладке изменился. Обновите страницу и сверьте комментарий.");
+        const result = { sectionId, rowId, status: body.status, comment, revision: body.revision + 1, updatedAt: now };
+        connection.prepare(`INSERT INTO shared_retest_results VALUES(?,?,?,?,?,?,?)
+          ON CONFLICT(publication_id,section_id,row_id) DO UPDATE SET status=excluded.status,comment=excluded.comment,
+          revision=excluded.revision,updated_at=excluded.updated_at`).run(id,sectionId,rowId,result.status,comment,result.revision,now);
+        return { result };
+      } else if (!row.retest_finished_at) {
+        const state = workflowState(row, account, canReply);
+        const review = Retest.review(state);
+        if (!review.canFinish || (body.outcome || "passed") !== (review.qualified ? "qualified" : "passed"))
+          fail(409, "Проверьте итог ретеста и открытые замечания.");
+        if (body.revision !== state.results.reduce((total, result) => total + result.revision, 0))
+          fail(409, "Результаты изменились в другой вкладке. Обновите страницу перед завершением.");
+        connection.prepare("UPDATE shared_publications SET retest_finished_at=?,retest_outcome=? WHERE id=?").run(now, review.qualified ? "qualified" : "passed", id);
+      }
+      return { ok: true };
+    });
+  }
+
   function authorizeAnswer(request, id) {
     requireJson(request);
     const { row, canReply } = authorize(request, id);
     if (row.revoked_at) fail(404, "Публикация недоступна");
     if (!canReply) fail(403, "Эта ссылка даёт доступ только на просмотр");
+    checkRound(request, row);
+    requireOpenCorrections(row);
     return row;
   }
 
   function requirePoint(row, sectionId, rowId) {
+    const selected = !row.corrections_closed_at && row.retest_handoff && JSON.parse(row.retest_handoff).corrections;
+    if (selected && !selected.some(ids => ids[0] === sectionId && ids[1] === rowId))
+      fail(409, "Этот пункт не отправлен на текущую доработку.");
+
     const section = JSON.parse(row.snapshot_json).sections.find((item) => item.id === sectionId);
     if (!section?.rows.some((item) => item.id === rowId)) fail(404, "Пункт не найден");
   }
@@ -1074,14 +1295,14 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
     const changed = revision === 0
       ? db().prepare(`INSERT INTO shared_report_answers
           (publication_id,section_id,row_id,status,comment,comment_document,revision,updated_at)
-          SELECT ?,?,?,?,?,?,1,? WHERE EXISTS (SELECT 1 FROM shared_publications WHERE id=? AND revoked_at IS NULL)
-          ON CONFLICT DO NOTHING RETURNING *`).get(id, sectionId, rowId, status, comment, commentDocument, now, id)
+          SELECT ?,?,?,?,?,?,1,? WHERE EXISTS (SELECT 1 FROM shared_publications WHERE id=? AND revoked_at IS NULL AND corrections_closed_at IS NULL AND round_no=?)
+          ON CONFLICT DO NOTHING RETURNING *`).get(id, sectionId, rowId, status, comment, commentDocument, now, id, row.round_no)
       : db().prepare(`UPDATE shared_report_answers SET status=?,comment=?,
           comment_document=CASE WHEN ? AND comment=? THEN comment_document ELSE ? END,
           revision=revision+1,updated_at=?
           WHERE publication_id=? AND section_id=? AND row_id=? AND revision=?
-          AND EXISTS (SELECT 1 FROM shared_publications WHERE id=? AND revoked_at IS NULL) RETURNING *`)
-        .get(status, comment, preserveDocument, comment, commentDocument, now, id, sectionId, rowId, revision, id);
+          AND EXISTS (SELECT 1 FROM shared_publications WHERE id=? AND revoked_at IS NULL AND corrections_closed_at IS NULL AND round_no=?) RETURNING *`)
+        .get(status, comment, preserveDocument, comment, commentDocument, now, id, sectionId, rowId, revision, id, row.round_no);
     if (!changed) fail(409, "Ответ уже изменился. Загрузите актуальную версию пункта.");
     return answerFromRow(changed);
   }
@@ -1138,12 +1359,12 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
         saved = db().prepare(`INSERT INTO shared_report_answer_files
           (publication_id,id,section_id,row_id,name,type,size,sha256,bucket_id,object_key)
           SELECT ?,?,?,?,?,?,?,?,?,?
-          WHERE EXISTS (SELECT 1 FROM shared_publications WHERE id = ? AND COALESCE(published_at, ready_at) IS NOT NULL AND revoked_at IS NULL)
+          WHERE EXISTS (SELECT 1 FROM shared_publications WHERE id = ? AND COALESCE(published_at, ready_at) IS NOT NULL AND revoked_at IS NULL AND corrections_closed_at IS NULL AND round_no = ?)
             AND (SELECT COUNT(*) FROM shared_report_answer_files WHERE publication_id = ? AND section_id = ? AND row_id = ? AND deleted_at IS NULL) < ?
             AND (SELECT COUNT(*) < ? AND COALESCE(SUM(size), 0) + ? <= ?
               FROM shared_report_answer_files WHERE publication_id = ? AND deleted_at IS NULL)
           ON CONFLICT DO NOTHING RETURNING *`).get(id, file.id, sectionId, rowId, file.name, file.type, file.size,
-          file.sha256, reference.bucketId, reference.key, id, id, sectionId, rowId, maxAnswerFilesPerPoint,
+          file.sha256, reference.bucketId, reference.key, id, row.round_no, id, sectionId, rowId, maxAnswerFilesPerPoint,
           maxAnswerFiles, file.size, maxAnswerFileTotal, id);
         if (saved) return answerFileFromRow(saved);
 
@@ -1163,16 +1384,22 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
     }
   }
 
-  async function deleteAnswerFile(id, fileId) {
+  async function deleteAnswerFile(request, id, fileId) {
     const file = answerFile(id, fileId);
     if (!file) fail(404, "Вложение не найдено");
     const bucket = storage();
-    withWriteTransaction(connection => {
+    const retained = withWriteTransaction(connection => {
+      const current = publication(id);
+      requireOpenCorrections(current);
+      checkRound(request, current);
+      if (connection.prepare("SELECT 1 FROM shared_retest_round_files WHERE bucket_id=? AND object_key=? LIMIT 1")
+        .get(file.bucket_id, file.object_key)) return true;
       connection.prepare(`UPDATE shared_report_answer_files SET deleted_at = COALESCE(deleted_at, ?)
         WHERE publication_id = ? AND id = ?`).run(new Date().toISOString(), id, fileId);
       connection.prepare(`INSERT OR IGNORE INTO shared_report_storage_cleanup (bucket_id, object_key)
         VALUES (?, ?)`).run(file.bucket_id, file.object_key);
     });
+    if (retained) return;
     if (!await removeQueuedObject(bucket, { bucketId: file.bucket_id, key: file.object_key })) {
       fail(502, "Не удалось удалить файл из хранилища. Повторите удаление.");
     }
@@ -1263,9 +1490,13 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       return true;
     }
 
-    const match = /^\/api\/shared-reports\/([a-f0-9]{32})(?:\/(answers|answer-files|attachment-status|author)|\/(files|answer-files)\/([a-zA-Z0-9_-]{1,80}))?$/.exec(pathname);
+    const match = /^\/api\/shared-reports\/([a-f0-9]{32})(?:\/(close-corrections|start-retest|return-to-corrections|retest-result|finish-retest|answers|answer-files|attachment-status|author)|\/(files|answer-files)\/([a-zA-Z0-9_-]{1,80}))?$/.exec(pathname);
     if (!match) fail(404, "Публикация недоступна");
     const [, id, action, fileKind, fileId] = match;
+    if (method === "POST" && ["close-corrections", "start-retest", "return-to-corrections", "retest-result", "finish-retest"].includes(action)) {
+      sendJson(response, 200, { ok: true, ...await changeWorkflow(request, id, action) });
+      return true;
+    }
     if (action === "answers" && method === "POST") {
       sendJson(response, 200, { ok: true, answer: await answer(request, id) });
       return true;
@@ -1284,17 +1515,25 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       return true;
     }
     if (row.revoked_at) fail(404, "Публикация недоступна");
+    const pinnedRound = new URL(request.url, requestOrigin(request)).searchParams.get("round");
+    if (method === "GET" && !action && pinnedRound !== null && Number(pinnedRound) !== row.round_no) {
+      await readArchivedRound(id, Number(pinnedRound), fileKind, fileId, response, row.round_no);
+      return true;
+    }
     if (method === "GET" && action === "author") {
       if (!owner) fail(404, "Публикация недоступна");
+      const showPhase = new URL(request.url, requestOrigin(request)).searchParams.has("workflow") && row.author_id;
+      const account = showPhase && await workflowAccount(request, row);
       let email = "";
-      if (authorEmail && row.author_id) {
-        try {
-          email = await authorEmail(row.author_id);
-        } catch {
-          fail(503, "Не удалось определить аккаунт публикации.");
-        }
+      if (authorEmail && row.author_id && !new URL(request.url, requestOrigin(request)).searchParams.has("phaseOnly")) {
+        try { email = await authorEmail(row.author_id); }
+        catch { if (!showPhase) fail(503, "Не удалось определить аккаунт публикации."); }
       }
-      sendJson(response, 200, { ok: true, email });
+      const latest = showPhase && publication(id);
+      if (latest?.revoked_at) fail(404, "Публикация недоступна");
+      sendJson(response, 200, { ok: true, email, ...(latest && {
+        round: latest.round_no, phase: workflowPhase(latest), outcome: latest.retest_outcome, author: Boolean(account && account === latest.author_id),
+      }) });
       return true;
     }
     if (method === "GET" && action === "attachment-status") {
@@ -1305,7 +1544,9 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       return true;
     }
     if (method === "DELETE" && fileKind === "answer-files" && fileId && canReply) {
-      await deleteAnswerFile(id, fileId);
+      checkRound(request, row);
+      requireOpenCorrections(row);
+      await deleteAnswerFile(request, id, fileId);
       sendJson(response, 200, { ok: true });
       return true;
     }
@@ -1319,14 +1560,20 @@ function createReportSharing({ getDb, readJson, sendJson, requestOrigin, allowLo
       return true;
     }
     if (method === "GET" && !action) {
+      const account = await workflowAccount(request, row);
+      const fresh = publication(id);
+      if (fresh.revoked_at) fail(404, "Публикация недоступна");
+      if (fresh.round_no !== row.round_no || fresh.published_update_at !== row.published_update_at ||
+          fresh.corrections_closed_at !== row.corrections_closed_at || fresh.retest_finished_at !== row.retest_finished_at || fresh.retest_started_at !== row.retest_started_at)
+        fail(409, "Этап отчёта изменился. Обновите страницу.");
       const manifest = JSON.parse(row.manifest_json);
       const verified = row.ready_at ? null : verifiedFiles(id, manifest);
       const files = manifest.map(({ id, name, type, size }) => ({ id, name, type, size, ...(verified && !verified.has(id) && { pending: true }) }));
-      const answers = db().prepare("SELECT * FROM shared_report_answers WHERE publication_id = ?").all(id).map(answerFromRow);
-      const answerFiles = db().prepare("SELECT * FROM shared_report_answer_files WHERE publication_id = ? AND deleted_at IS NULL ORDER BY rowid").all(id).map(answerFileFromRow);
+      const { answers, answerFiles } = publicationAnswers(id);
+      const workflow = workflowState(row, account, canReply, true);
       const { configured, enabled } = publicationSettings.get();
       sendJson(response, 200, { ok: true, report: { ...JSON.parse(row.snapshot_json), id, createdAt: row.published_at || row.ready_at,
-        files, canReply, answers, answerFiles, ...(configured && !enabled && { uploadsPaused: true }) } });
+        files, canReply: canReply && !row.corrections_closed_at, answers, answerFiles, ...(workflow && { workflow }), ...(configured && !enabled && { uploadsPaused: true }) } });
       return true;
     }
     fail(403, "Ссылка не разрешает это действие");

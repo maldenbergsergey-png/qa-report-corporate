@@ -1,6 +1,6 @@
 // Corporate navigation ALWAYS reaches the server's existing session gate.
 // No editor HTML, user data, login responses or API results are cached.
-const CACHE_NAME = 'qa-report-corporate-assets-v204';
+const CACHE_NAME = 'qa-report-corporate-assets-v206';
 const SHELL = [
   "/share-exclusions.js?v=1", "/share-exclusions.css?v=1",
   "/checklist-tags.js?v=9", "/checklist-tags.css?v=12",
@@ -11,14 +11,14 @@ const SHELL = [
   "/corporate-profile.js?v=1",
   "/dialog-controls.css?v=1", "/mcp-settings.css?v=6", "/mcp-settings.js?v=6", "/shared-mcp-setup.js?v=8",
   "/personal-cloud-client.js?v=3",
-  "/shared-table-layout.js?v=2",
+  "/shared-table-layout.js?v=2", "/retest.js?v=2",
   "/status-palette.css?v=1",
   "/jira-upload-client.js?v=1",
   "/usage.js?v=2",
   "/bug-report.js?v=7", "/bug-rich-editor.js?v=9", "/bug-report-ui.js?v=40", "/tracker-links.js?v=6", "/bug-attachment-analysis.js?v=2",
   "/vendor/jszip/jszip.min.js", "/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs",
   "/bug-wizard.css?v=25",
-  "/jira-publication.js?v=6",
+  "/jira-publication.js?v=7",
   "/dictation-input.js?v=2",
   "/bug-voice-input.js?v=5",
   "/draft-storage-worker.js?v=3",
@@ -32,9 +32,9 @@ const SHELL = [
   "/checklist-table.js?v=4",
   "/icons/icon-192.png?v=2", "/icons/icon-512.png?v=2",
   "/icons/brand-light.png?v=2", "/icons/brand-dark.png",
-  '/report-view.css?v=9', '/report-view.js?v=14', '/styles.css?v=168', '/app.js?v=190', '/pwa.js?v=6',
+  '/report-view.css?v=9', '/report-view.js?v=15', '/styles.css?v=169', '/app.js?v=192', '/pwa.js?v=6',
   '/jira-markup-import.js?v=15', '/checklist-selection.js?v=7',
-  '/checklist-numbering.js?v=4', '/release-notes.js?v=154',
+  '/checklist-numbering.js?v=4', '/release-notes.js?v=155',
   '/favicon.svg?v=2', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 self.addEventListener('install', event => {

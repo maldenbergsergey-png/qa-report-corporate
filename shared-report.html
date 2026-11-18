@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/checklist-tags.css?v=7" />
     <link rel="stylesheet" href="/report-view.css?v=9" />
     <link rel="stylesheet" href="/status-palette.css?v=1" />
-    <link rel="stylesheet" href="/shared-report.css?v=34" />
+    <link rel="stylesheet" href="/shared-report.css?v=36" />
     <link rel="stylesheet" href="/dialog-controls.css?v=1" />
     <link rel="stylesheet" href="/mcp-settings.css?v=6" />
     <script src="/file-preview.js?v=4" defer></script>
@@ -19,10 +19,11 @@
     <script src="/tracker-links.js?v=6" defer></script>
     <script src="/task-context.js?v=1" defer></script>
     <script src="/checklist-tags.js?v=8" defer></script>
-    <script src="/report-view.js?v=14" defer></script>
+    <script src="/report-view.js?v=15" defer></script>
     <script src="/shared-table-layout.js?v=2" defer></script>
     <script src="/shared-mcp-setup.js?v=8" defer></script>
-    <script src="/shared-report.js?v=41" defer></script>
+    <script src="/retest.js?v=2" defer></script>
+    <script src="/shared-report.js?v=43" defer></script>
   </head>
   <body>
     <main>
@@ -83,6 +84,7 @@
             </div>
             <div class="answer-view-control" role="group" aria-label="Расположение ответов">
               <span id="answer-view-label">Ответы:</span>
+
               <div class="answer-view-options">
                 <button type="button" data-answer-view="table" aria-pressed="false">В таблице</button>
                 <button type="button" data-answer-view="side" aria-pressed="true">Справа</button>
@@ -101,6 +103,19 @@
                   <button type="button" data-report-theme="graphite" aria-pressed="false">Графитовая</button>
                 </div>
               </div>
+            </div>
+            <div class="workflow-actions" id="workflow-controls" role="group" aria-label="Действия со всем отчётом" hidden>
+              <button type="button" id="workflow-action" class="workflow-primary" hidden></button>
+              <details id="workflow" class="workflow-menu" hidden>
+                <summary title="Этап и история отчёта"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2 7m-2-7v-5m0 5h5M12 6v6l4 2"/></svg><span id="workflow-stage"></span></summary>
+                <div class="workflow-popover">
+                  <strong id="workflow-menu-title"></strong>
+                  <p id="workflow-info"></p>
+                  <label id="workflow-round-label" hidden>История доработок и ретестов <select id="workflow-round"></select></label>
+                  <button type="button" id="workflow-next" hidden>К непроверенному пункту</button>
+                  <button type="button" id="workflow-login" hidden>Войти как автор</button>
+                </div>
+              </details>
             </div>
           </div>
           <div id="reply-comment-toolbar" class="reply-comment-toolbar" role="toolbar" aria-label="Форматирование комментария" hidden></div>
@@ -150,7 +165,25 @@
           </aside>
         </div>
       </div>
+      <p id="workflow-notice" role="status"></p>
     </main>
+    <dialog id="decision" aria-labelledby="decision-title">
+      <form method="dialog">
+        <header class="decision-head"><div><small></small><h2 id="decision-title">Итог ретеста</h2></div><button class="decision-close" aria-label="Закрыть" value="cancel">×</button></header>
+        <div class="decision-body"><div class="decision-stats" aria-label="Результаты по всему отчёту"></div>
+          <div class="decision-options" role="radiogroup" aria-label="Следующий этап">
+            <label><input type="radio" name="outcome" value="success" aria-describedby="success-help"><span><strong>Завершить успешно</strong><small id="success-help"></small></span></label>
+            <label><input type="radio" name="outcome" value="rework" aria-describedby="return-help"><span><strong>Вернуть на доработку</strong><small id="return-help"></small></span></label>
+          </div>
+        </div>
+        <footer class="decision-footer"><button value="cancel" class="quiet" autofocus>Продолжить ретест</button><button value="accept" class="decision-primary"></button></footer>
+      </form>
+    </dialog>
+    <dialog id="workflow-dialog" aria-labelledby="workflow-dialog-title">
+      <form method="dialog"><h2 id="workflow-dialog-title"></h2><p></p>
+        <button value="cancel" autofocus>Отмена</button> <button value="accept" class="decision-primary"></button>
+      </form>
+    </dialog>
     <svg xmlns="http://www.w3.org/2000/svg" class="shared-icon-sprite" aria-hidden="true">
       <symbol id="shared-icon-back" viewBox="0 0 24 24"><path d="m11 5-7 7 7 7M4 12h16" /></symbol>
       <symbol id="shared-icon-unlink" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1M3 3l18 18" /></symbol>

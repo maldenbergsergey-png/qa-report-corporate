@@ -61,7 +61,7 @@ function harness(records = new Map(), preferences = new Map()) {
     },
     requestAnimationFrame: callback => setImmediate(callback), syncBodyModalOverflow() {}, setSaveStatus() {},
     personalCloud: { historyStatus: () => ({ state: "unknown", label: "Проверить облачную копию" }), refreshHistory: async () => {} },
-    updateHistoryStorage() {}, createHistoryPublications: () => element(),
+    updateHistoryStorage() {}, renderRetestEntry() {}, createHistoryPublications: () => element(),
     publicationInfoMarkup: () => "", clone: structuredClone, cleanEditorHtml: () => "", suppressNextServerSave: false,
     getReportRecord: async id => structuredClone(records.get(id)),
     dbTransaction: async (mode, action) => action({ put: record => records.set(record.id, structuredClone(record)) }),

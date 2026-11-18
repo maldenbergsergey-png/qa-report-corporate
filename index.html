@@ -10,7 +10,7 @@
     <script src="/pwa.js?v=6" defer></script>
     <script src="/usage.js?v=2" defer></script>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=168" />
+    <link rel="stylesheet" href="/styles.css?v=169" />
     <link rel="stylesheet" href="/share-exclusions.css?v=1" />
     <link rel="stylesheet" href="/checklist-tags.css?v=12" />
     <link rel="stylesheet" href="/report-view.css?v=9" />
@@ -244,6 +244,7 @@
         <section class="report-card">
           <div class="report-heading">
             <div><div class="eyebrow">Отчёт о тестировании</div><h1>Чек-лист</h1></div>
+            <div class="retest-entry" id="editorRetestEntry" aria-live="polite"></div>
             <div class="report-publication header-dropdown">
               <button class="button header-dropdown-trigger publication-menu-trigger" id="publicationMenuButton" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="publicationMenu">
                 <svg class="ui-icon" aria-hidden="true"><use href="#icon-ticket"></use></svg>
@@ -768,6 +769,14 @@
             <span>Все разделы</span>
           </label>
           <div class="publish-scope-list" id="publishScopeList"></div>
+          <div id="publishRetestColumns" hidden>
+            <h3 class="publish-scope-heading">Столбцы чек-листа</h3>
+            <label class="publish-scope-option">
+              <input id="publishIncludeRetest" type="checkbox" aria-describedby="publishRetestHint" />
+              <span>Включить служебные столбцы</span>
+            </label>
+            <p id="publishRetestHint" class="publish-scope-hint">Статус ответа, комментарий к ответу и результат ретеста с датой.</p>
+          </div>
           <h3 class="publish-scope-heading">Экспорт вложений</h3>
           <label class="publish-scope-option">
             <input id="publishIncludeImages" type="checkbox" checked aria-describedby="publishAttachmentsHint" />
@@ -1337,7 +1346,7 @@
     <script src="/checklist-selection.js?v=7"></script>
     <script src="/checklist-table.js?v=4"></script>
     <script src="/checklist-numbering.js?v=4"></script>
-    <script src="/release-notes.js?v=154"></script>
+    <script src="/release-notes.js?v=155"></script>
     <script src="/jira-upload-client.js?v=1"></script>
     <script src="/jira-attachment-reuse.js?v=5"></script>
     <script src="/attachment-limits.js?v=1"></script>
@@ -1351,7 +1360,7 @@
     <script src="/bug-voice-input.js?v=5"></script>
     <script src="/dictation-input.js?v=2"></script>
     <script src="/history-content.js?v=2"></script>
-    <script src="/jira-publication.js?v=6"></script>
+    <script src="/jira-publication.js?v=7"></script>
     <div class="bug-dock-stack" id="bugDockStack" aria-label="Баг-репорты" hidden>
     <section class="bug-report-dock" id="bugReportDock" aria-label="Свёрнутый баг-репорт" hidden>
       <button class="bug-dock-restore" id="restoreBugReport" type="button" aria-label="Развернуть баг-репорт" title="Развернуть баг-репорт">
@@ -1437,7 +1446,7 @@
     <script src="/bug-rich-editor.js?v=9"></script>
     <script src="/bug-report-ui.js?v=40"></script>
     <script src="/shared-table-layout.js?v=2"></script>
-    <script src="/report-view.js?v=14"></script>
+    <script src="/report-view.js?v=15"></script>
     <dialog id="personalCloudDialog" class="cloud-dialog" aria-labelledby="personalCloudTitle" aria-describedby="personalCloudHint">
       <header class="cloud-heading"><div><h2 id="personalCloudTitle">Мои облачные отчёты</h2><p id="personalCloudAccount"></p></div><button id="personalCloudClose" class="button button-ghost" type="button" aria-label="Закрыть облачные отчёты">Закрыть</button></header>
       <p id="personalCloudHint">Откройте отчёт на другом устройстве через свой профиль. Работа идёт в браузере; новые правки выбранных отчётов сохраняются в облако раз в минуту.</p>
@@ -1465,7 +1474,8 @@
     </dialog>
     <script src="/personal-cloud-client.js?v=3"></script>
     <script src="/task-context-ui.js?v=3"></script>
-    <script src="/app.js?v=190"></script>
+    <script src="/retest.js?v=2"></script>
+    <script src="/app.js?v=192"></script>
     <script src="/corporate-profile.js?v=1"></script>
     <script src="/shared-mcp-setup.js?v=8"></script>
     <script src="/local-import-client.js?v=14"></script>

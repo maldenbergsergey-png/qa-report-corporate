@@ -76,7 +76,7 @@
       sectionIds: Array.isArray(value.sectionIds) ? value.sectionIds.filter(id => typeof id === "string") : [],
       statuses: Array.isArray(value.statuses) ? value.statuses.filter(status => typeof status === "string") : [],
       ...(value.tagFilter && { tagFilter: { include: (Array.isArray(value.tagFilter.include) ? value.tagFilter.include : []).filter(x => typeof x === "string").slice(0, 100), exclude: (Array.isArray(value.tagFilter.exclude) ? value.tagFilter.exclude : []).filter(x => typeof x === "string").slice(0, 100), untagged: value.tagFilter.untagged !== false, showTags: value.tagFilter.showTags !== false } }),
-      ...attachmentOptions(value),
+      ...attachmentOptions(value), ...(value.includeRetestColumns === true && { includeRetestColumns: true }),
       firstPublishedAt: date(value.firstPublishedAt), lastPublishedAt: date(value.lastPublishedAt) };
   }
 

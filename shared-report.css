@@ -690,3 +690,148 @@ body:has(.shared-viewer[open]) { overflow: hidden; }
 }
 
 #shared-mcp-open { white-space: nowrap; font-size: .8rem; }
+
+.workflow-actions { flex: none; display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 7px; }
+.workflow-actions[hidden], .workflow-actions [hidden] { display: none; }
+.workflow-menu { position: relative; font-size: .82rem; }
+.workflow-menu summary { list-style: none; cursor: pointer; padding: 7px 9px; font-weight: 650; }
+.workflow-actions:has(#workflow-action:not([hidden])) #workflow-stage { display: none; }
+.workflow-actions:has(#workflow-action:not([hidden])) summary { display: grid; height: 100%; place-content: center; list-style: none; padding-inline: 8px; }
+.workflow-actions summary::-webkit-details-marker { display: none; }
+.workflow-actions summary::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 1px 3px 4px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.workflow-popover { position: absolute; z-index: 25; inset: calc(100% + 8px) 0 auto auto; width: min(290px, 80vw);
+  padding: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px #0003; }
+.workflow-popover p { margin: 6px 0; color: var(--muted); }
+.workflow-popover :is(button,label) { display: block; margin-top: 8px; }
+.workflow-popover select { display: block; width: 100%; padding: 6px; }
+.workflow-date { display: block; margin-top: 4px; color: var(--muted); }
+.qa-report-view:has(.workflow-menu:not([hidden])) .toolbar-select { width: clamp(125px, 13vw, 210px); }
+.workflow-primary { padding: 6px 12px; border: 0; border-radius: 6px; background: var(--text); color: var(--surface); font-weight: 650; cursor: pointer; }
+.workflow-actions .workflow-primary { border-radius: 6px 0 0 6px; font-size: .82rem; }
+#workflow-action:disabled { opacity: .55; cursor: default; }
+#workflow-notice:empty, .retest-comment + p:empty { display: none; }
+#workflow-notice { position: fixed; z-index: 12; top: 56px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 92vw; margin: 0; padding: 8px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font-size: .85rem; }
+.retest-comment { width: 100%; min-height: 8rem; resize: vertical; padding: 10px; }
+.qa-report-view[data-answer-view="table"] .retest-comment { min-height: 3.75rem; }
+#workflow-dialog { width: min(440px, 92vw); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+#workflow-dialog h2 { margin-top: 0; font-size: 1.15rem; }
+#workflow-dialog::backdrop { background: #0008; }
+@media (max-width: 760px) {
+  .qa-report-view:has(#workflow-controls:not([hidden])) .toolbar-identity { flex: 1 1 100px; }
+  .qa-report-view:has(#workflow-controls:not([hidden])) .toolbar-filters { flex-basis: 100%; }
+  .qa-report-view:has(.workflow-menu:not([hidden])) .toolbar-select { width: 100%; }
+  .workflow-actions .workflow-primary { padding-inline: 7px; font-size: .76rem; }
+  .qa-report-view:has(#workflow-controls:not([hidden])) #report-overview-toggle { font-size: 0; gap: 0; }
+}
+
+/* Action and history are separate controls in the existing report toolbar. */
+#workflow-controls {display:flex;align-items:center;gap:8px;border:0;flex-shrink:0;margin-inline-start:auto}
+#workflow-controls .workflow-menu {order:-1}
+#workflow-controls .workflow-menu summary {display:flex;align-items:center;gap:5px;padding:0 6px;height:34px;color:var(--muted);font-size:.78rem;font-weight:550;white-space:nowrap}
+#workflow-controls #workflow-stage {display:inline}
+#workflow-controls summary::after {width:5px;height:5px;margin-left:1px}
+#workflow-controls summary svg {width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7}
+#workflow-controls .workflow-menu summary:hover {color:var(--text);background:var(--surface-subtle);border-radius:6px}
+#workflow-controls #workflow-action, .decision-primary {min-height:36px;padding:7px 13px;border-radius:7px;border:1px solid var(--act-border);background:var(--act-fill);color:var(--act-ink);font-weight:650;white-space:nowrap}
+:root {--act-fill:var(--primary);--act-ink:#fff;--act-border:var(--primary);--act-hover:var(--primary-hover)}
+:root[data-theme="dark"] {--act-fill:#263d5b;--act-ink:#b9d7ff;--act-border:#5174a3;--act-hover:#314f76}
+:root[data-theme="graphite"] {--act-fill:#3d2a2e;--act-ink:#ffb5b1;--act-border:#82504f;--act-hover:#4d3236}
+#workflow-controls #workflow-action:hover:not(:disabled),button.decision-primary:hover:not(:disabled){background:var(--act-hover);color:var(--act-ink)}
+#workflow-controls #workflow-action:focus-visible,.decision-primary:focus-visible {outline-offset:2px}
+.workflow-popover {min-width:245px}
+.workflow-popover select{font:inherit}
+#decision {width:min(485px,calc(100% - 24px));max-height:calc(100dvh - 32px);padding:0;overflow:auto;border:1px solid var(--line);border-radius:12px;color:var(--text);background:var(--surface);box-shadow:0 16px 52px #0004}
+#decision::backdrop {background:rgb(9 17 30/.56)}
+#decision form {margin:0}
+.decision-head {display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:21px 23px 15px}
+.decision-head small {display:block;color:var(--muted);font-size:.8rem}
+.decision-head h2 {margin:2px 0 0;font-size:1.26rem;line-height:1.35}
+.decision-close {width:32px;height:32px;min-height:32px;padding:0;border:0;background:transparent;color:var(--muted);font-size:1.35rem;line-height:1}
+.decision-body {padding:0 23px 18px}
+.decision-stats {display:flex;flex-wrap:wrap;gap:6px 15px;padding-bottom:14px;font-size:.8rem;color:var(--muted)}
+.decision-stats span {display:inline-flex;align-items:center;gap:5px}
+.decision-stats i {width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.decision-stats .passed {background:var(--positive)} .decision-stats .issues {background:var(--clarification)}
+.decision-options {display:grid;gap:8px}
+.decision-options label {display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:10px;padding:12px 13px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.decision-options label:has(:checked) {border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.decision-options label:has(:disabled){cursor:default;background:var(--surface-subtle)}
+.decision-options input {width:16px;height:16px;margin:3px 0;accent-color:var(--accent)}
+.decision-options strong {display:block;font-size:.9rem}
+.decision-options small {display:block;margin-top:4px;color:var(--muted);font-size:.81rem;line-height:1.45}
+.decision-footer {display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:13px 23px;border-top:1px solid var(--line)}
+.decision-footer button {font-size:.84rem}
+.decision-footer .quiet {background:transparent;border-color:transparent;color:var(--muted)}
+@media(min-width:761px) and (max-width:1190px) {
+  .qa-report-view .toolbar-inner {display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"title info actions" "filters view actions"}
+  .toolbar-identity{grid-area:title}.toolbar-filters{grid-area:filters}.toolbar-info{grid-area:info}.answer-view-control{grid-area:view}#workflow-controls{grid-area:actions}
+}
+@media(max-width:760px){
+  .qa-report-view .toolbar-inner {display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title actions" "filters filters" "view info";align-items:center}
+  .toolbar-identity{grid-area:title}.toolbar-filters{grid-area:filters}.toolbar-info{grid-area:info}.answer-view-control{grid-area:view;width:fit-content}#workflow-controls{grid-area:actions;gap:3px}
+  #workflow-controls .workflow-menu summary{padding:0 4px} #workflow-controls #workflow-stage{display:none} #workflow-controls:not(:has(#workflow-action:not([hidden]))) #workflow-stage{display:inline}
+  #workflow-controls #workflow-action {padding:6px 8px;font-size:.75rem;max-width:47vw;white-space:normal;line-height:1.15}
+  .qa-report-view .toolbar-brand{padding-right:5px;gap:1px}.qa-report-view .report-home .brand-mark{width:36px}
+  .decision-head{padding:16px 16px 12px}.decision-body{padding:0 16px 15px}.decision-footer{padding:12px 16px}
+  #workflow-controls .workflow-popover {position:fixed;inset:48px 12px auto auto;max-height:75dvh;overflow:auto}
+}
+#workflow-controls:has(#workflow-action:not([hidden])) summary {display:flex;align-items:center;justify-content:center;gap:4px}
+#workflow-controls:has(#workflow-action:not([hidden])) #workflow-stage {display:inline}
+@media(max-width:760px){
+ .toolbar-info #workflow {position:relative}.toolbar-info #workflow summary{display:flex;align-items:center;gap:5px;color:var(--muted);padding:6px 8px;white-space:nowrap}
+ .toolbar-info #workflow summary svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7}
+ .toolbar-info #workflow summary::after{content:none}
+ .toolbar-info #workflow .workflow-popover{position:fixed;inset:137px 12px auto auto;max-height:70dvh;overflow:auto}
+ .qa-report-view:has(#workflow-controls:not([hidden])) #report-overview-toggle{min-width:24px;padding:0}
+}
+
+#workflow-controls:has(#workflow-action:not([hidden])) summary {display:flex;align-items:center;justify-content:center;gap:4px}
+#workflow-controls:has(#workflow-action:not([hidden])) #workflow-stage {display:inline}
+#workflow-dialog .decision-primary { font-size: .85rem; }
+@media(max-width:760px){
+  #workflow-controls:has(#workflow-action:not([hidden])) #workflow-stage {display:none}
+}
+#report[data-retest-table] .report-table {transform:none}
+#report[data-retest-table] .report-table :is(td,th) {
+  position:relative;inset-inline:auto;transform:none;box-shadow:none;min-width:0;width:auto;overflow-wrap:anywhere;
+}
+#report[data-retest-table] .report-table [data-retest-pinned] {
+  position:sticky;inset-inline-start:var(--pin-left);inset-inline-end:var(--pin-right);z-index:2;background-color:var(--surface)
+}
+#report[data-retest-table] .report-table thead th {background-color:var(--surface-subtle)}
+#report[data-retest-table] .report-table .response-status {border-inline-start:1px solid color-mix(in srgb, var(--muted) 42%, var(--line))}
+#report[data-retest-table] .report-table .response-comment {border-inline-end:1px solid color-mix(in srgb, var(--muted) 42%, var(--line))}
+#report[data-retest-table] .report-column-heading {justify-content:flex-start;align-items:center;gap:5px}
+#report[data-retest-table] .report-table tbody tr.answer-selected > [data-retest-pinned] {background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
+#report[data-retest-table] .report-table .correction-status {border-inline-start:0}
+#report[data-retest-table] .report-table .correction-comment.is-editable {padding:0;height:1px;cursor:text}
+#report[data-retest-table] .report-table .retest-comment {
+  position:absolute;inset:0;display:block;width:100%;height:100%;min-height:0;padding:8px 9px;
+  border:0;border-radius:0;background:transparent;color:var(--text);outline:0;resize:none;font:inherit;line-height:1.5;
+}
+#report[data-retest-table] .report-table .correction-comment.is-editable:focus-within {
+  outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 5%,var(--surface));
+}
+.retest-text-measure {display:none}
+#report[data-retest-table] .report-table .retest-text-measure {
+  display:block;min-height:54px;max-height:15rem;overflow:hidden;visibility:hidden;pointer-events:none;
+  padding:8px 9px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;
+}
+#report[data-retest-table] .report-table .correction-comment:has(.file-error:not(:empty)) .retest-comment {position:static;height:5em}
+#report[data-retest-table] .report-table .correction-comment:has(.file-error:not(:empty)) .retest-text-measure {display:none}
+#report[data-retest-table] .report-table .correction-comment :is(.file-error:not(:empty),button:not([hidden])){margin:4px 9px}
+#report[data-retest-table] .report-table .report-tag {max-width:100%}
+@media(max-width:760px){
+  #report[data-retest-table] .report-table thead :is(.response-status,.response-comment,.qa-status) {padding:5px}
+  #report[data-retest-table] .report-table thead :is(.response-status,.response-comment,.qa-status) .report-column-heading {flex-wrap:wrap;gap:0 3px}
+  #report[data-retest-table] .report-table thead .report-column-heading span {min-width:0}
+  #report[data-retest-table] .report-table .workflow-date {line-height:1.25}
+}
+#report[data-retest-table] .report-content {scrollbar-gutter:auto}
+@media(max-width:760px){
+  #report[data-retest-table] .report-table tbody :is(.response-status,.response-comment,.qa-status){padding-inline:5px}
+}
+.point-history { margin-top: 6px; color: var(--muted); font-size: .8rem; }
+.point-history p { margin: 4px 0; }
+.point-history summary { text-decoration: underline; text-underline-offset: 2px; }
+.workflow-point-note { display: block; margin-top: 4px; color: var(--muted); font-size: .78rem; }

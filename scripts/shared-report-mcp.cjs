@@ -99,6 +99,7 @@ async function siteFetch(origin, route, options = {}) {
 async function request(share, suffix = "", body) {
   const headers = { Authorization: `Bearer ${share.token}` };
   if (share.mcpAccessToken) headers["X-QA-MCP-Token"] = share.mcpAccessToken;
+  if (body && share.round) headers["X-QA-Report-Round"] = String(share.round);
   if (body) headers["Content-Type"] = "application/json";
   if (share.device || share.mcpAccessToken || share.projectPath) headers["X-QA-Report-Token"] = share.token;
   if (share.device) headers["X-QA-Developer-Device"] = share.device;
@@ -129,7 +130,8 @@ async function readReport(share) {
     throw new ToolError("QA Report вернул неполный отчёт.");
   }
   const { id, createdAt, title, issueUrl, environment, overallStatus, intro, sections, files, answers, canReply } = report;
-  return { id, createdAt, title, issueUrl, environment, overallStatus, intro, sections, files, answers, canReply };
+  return { id, createdAt, title, issueUrl, environment, overallStatus, intro, sections, files, answers, canReply,
+    ...(report.workflow && { round: report.workflow.round }) };
 }
 
 function answerFrom(args) {
@@ -208,7 +210,7 @@ async function reportAction(name, args, active) {
     update.comment ??= previous.comment;
     // Keeping the same plain text also preserves rich formatting in the existing API.
     answerFrom(update);
-    const { answer } = await readJson(await request(active, "/answers", update));
+    const { answer } = await readJson(await request({ ...active, round: report.round }, "/answers", update));
     if (!answer || answer.sectionId !== update.sectionId || answer.rowId !== update.rowId
         || answer.revision !== update.revision + 1 || answer.status !== update.status || answer.comment !== update.comment) {
       throw new ToolError("QA Report не подтвердил сохранённый ответ. Перечитайте отчёт перед повтором.");

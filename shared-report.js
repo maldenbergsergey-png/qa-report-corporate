@@ -230,7 +230,7 @@
   function registerAnswer(row, key, number, canReply, statusCell, commentCell) {
     const record = { row, key, number, canReply, statusCell, commentCell,
       statusNodes: [...statusCell.childNodes], commentNodes: [...commentCell.childNodes],
-      title: row.querySelector(".report-cell")?.innerText.trim() || `Пункт ${number}`,
+      title: row.dataset.pointCaption || row.querySelector(".report-cell")?.innerText.trim() || `Пункт ${number}`,
       sectionNumber: row.dataset.sectionNumber,
       qaStatus: row.querySelector(".qa-status .report-tag")?.textContent || "" };
     row.dataset.answerKey = key;
@@ -267,10 +267,94 @@
   });
   let reportLayoutKey;
   let sectionLayouts = [];
-  const pins = createColumnPins(view, syncReportLayout);
+  const pins = createColumnPins(view, syncReportLayout, {
+    replyStatus: [".response-status", "Статус ответа"],
+    replyComment: [".response-comment", "Комментарий к ответу"],
+  });
+  function prepareRetestRow(row, columns) {
+    const cells = Array.from(row.cells);
+    const answerColumns = cells.filter(cell => cell.matches('.report-cell')).slice(-2);
+    answerColumns[0].classList.add('response-status');
+    answerColumns[1].classList.add('response-comment');
+    const expected = columns.findIndex(column => column.id === 'expected' || /^ожидаемый результат$/i.test(column.label.trim()));
+    if (cells[0].tagName === 'TH' && row.parentElement?.tagName === 'THEAD') row.querySelector('.qa-status').title = 'Статус при публикации';
+    const status = row.querySelector('.qa-status');
+    if (expected >= 0) cells[expected + 1].after(status);
+    else answerColumns[0].before(status);
+    row.querySelector('.report-scroll-spacer')?.remove();
+  }
+
+  function layoutRetestTables(viewportWidth) {
+    const key = JSON.stringify([viewportWidth, answerView, pins.state, sections.map(section => section.element.hidden)]);
+    if (key === reportLayoutKey) return;
+    reportLayoutKey = key;
+    const compact = viewportWidth < 620;
+    const defaults = { point: compact ? 46 : 56, qa: compact ? 90 : 132, replyStatus: compact ? 96 : 158,
+      replyComment: compact ? 140 : 218, result: compact ? 144 : 162, note: compact ? 170 : 225, field: compact ? 172 : 182 };
+    const pinSize = Object.keys(pins.state).reduce((total, id) => total + (pins.state[id] ? defaults[id] : 0), 0);
+    const scale = Math.min(1, viewportWidth * (compact ? .60 : .70) / (pinSize || 1));
+    const size = id => Math.round(pins.state[id] ? defaults[id] * scale : defaults[id]);
+    const remaining = viewportWidth - Object.keys(pins.state).reduce((total, id) => total + (pins.state[id] ? size(id) : 0), 0);
+    function columnId(cell) {
+      if (cell.matches('.response-status')) return 'replyStatus';
+      if (cell.matches('.response-comment')) return 'replyComment';
+      if (cell.matches('.point-index')) return 'point';
+      if (cell.matches('.qa-status')) return 'qa';
+      if (cell.matches('.correction-status')) return 'result';
+      if (cell.matches('.correction-comment')) return 'note';
+      return 'field';
+    }
+    const plans = sections.map(section => {
+      const headers = Array.from(section.table.tHead.rows[0].cells);
+      const columns = headers.map((header, index) => {
+        const id = columnId(header);
+        const qaInput = id === 'result' || id === 'note';
+        const width = compact && qaInput ? Math.min(size(id), remaining) : size(id);
+        return {id, index, width, visible: !qaInput || answerView === 'table'};
+      }).filter(column => column.visible);
+      return {section, columns, min: columns.reduce((n, col) => n + col.width, 0)};
+    });
+    const canvasWidth = Math.max(viewportWidth, ...plans.filter(plan => !plan.section.element.hidden).map(plan => plan.min));
+    const root = document.getElementById('report-sections');
+    root.style.width = canvasWidth + 'px';
+    root.style.setProperty('--report-viewport-width', viewportWidth + 'px');
+    for (const {section, columns, min} of plans) {
+      const fields = columns.filter(col => col.id === 'field');
+      const stretch = fields.length ? fields : columns.filter(col => col.id === 'note' || col.id === 'replyComment');
+      const extra = (canvasWidth - min) / (stretch.length || 1);
+      for (const column of stretch) column.width += Math.max(0, extra);
+      const table = section.table;
+      table.style.width = Math.max(min, canvasWidth) + 'px';
+      let group = table.querySelector('colgroup');
+      if (!group) { group = element('colgroup'); table.prepend(group); }
+      group.replaceChildren(...columns.map(column => {
+        const col = element('col'); col.style.width = column.width + 'px'; return col;
+      }));
+      // An active pin stays on screen from either scroll direction, in document order.
+      let before = 0;
+      const total = columns.reduce((n, col) => n + (pins.state[col.id] ? col.width : 0), 0);
+      for (const col of columns) {
+        const pinned = Boolean(pins.state[col.id]);
+        for (const row of table.rows) {
+          const cell = row.cells[col.index];
+          cell.toggleAttribute('data-retest-pinned', pinned);
+          if (pinned) {
+            cell.style.setProperty('--pin-left', before + 'px');
+            cell.style.setProperty('--pin-right', (total - before - col.width) + 'px');
+          }
+        }
+        if (pinned) before += col.width;
+      }
+    }
+  }
+
   function syncReportLayout() {
     const viewportWidth = contentViewport.clientWidth;
     if (!viewportWidth || !sections.length) return;
+    if (view.hasAttribute("data-retest-table")) {
+      layoutRetestTables(viewportWidth);
+      return;
+    }
     const pinAnswers = answerView === "table" && matchMedia("(min-width: 761px)").matches;
     const pinColumns = pins.state.qa || pinAnswers;
     view.dataset.pinAnswers = String(pinAnswers);
@@ -538,9 +622,12 @@
       if (!response.ok) throw new Error("Не удалось подтвердить вход. Откройте отчёт заново.");
       csrf = (await response.json()).csrfToken;
     }
-    const response = await fetch(`${api}${path}`, {
+    const round = workflow?.round || requestedRound;
+    const pinned = round && (!path || /^\/(?:files|answer-files)\//.test(path)) && (!options.method || options.method === "GET");
+    const response = await fetch(`${api}${path}${pinned ? "?round=" + round : ""}`, {
       method: options.method || "GET",
       headers: { "X-QA-Report-Token": token, Authorization: `Bearer ${token}`, ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(round && { "X-QA-Report-Round": String(round) }),
         ...(options.accountToken ? { "X-QA-Report-Session": options.accountToken } : {}),
         ...(csrf ? { "X-QA-CSRF-Token": csrf } : {}) },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
@@ -1340,7 +1427,7 @@
   }
 
   function answerDraft(key, next) {
-    const storageKey = `qa-report:shared-answer:${reportId}:${key}`;
+    const storageKey = `qa-report:shared-answer:${reportId}${workflow?.round > 1 ? ":" + workflow.round : ""}:${key}`;
     try {
       if (next === undefined) return JSON.parse(sessionStorage.getItem(storageKey));
       if (next === null) sessionStorage.removeItem(storageKey);
@@ -1596,6 +1683,262 @@
     registerAnswer(row, key, number, canReply, statusCell, commentCell);
   }
 
+  const correctionLabel = round => "Доработка № " + round;
+  const retestLabel = round => "Ретест № " + round;
+  const workflowLabels = { corrections: "На доработке", ready: "Готов к ретесту", retest: "На ретесте", finished: "Ретест пройден" };
+  let workflow;
+  let requestedRound;
+  try {
+    requestedRound = Number(sessionStorage.getItem("qa-retest-view:" + reportId)) || null;
+    sessionStorage.removeItem("qa-retest-view:" + reportId);
+  } catch {}
+  const retests = new Map();
+  const returnedPoints = new Map();
+  const previousPoints = new Map();
+  const priorRowKeys = new Set();
+  const workflowBar = document.getElementById("workflow");
+  const workflowInfo = document.getElementById("workflow-info");
+  const workflowAction = document.getElementById("workflow-action");
+  const workflowNotice = document.getElementById("workflow-notice");
+  const nextRequired = document.getElementById("workflow-next");
+  const isRetest = () => Boolean(workflow?.closedAt);
+  window.addEventListener("pageshow", event => {
+    if (event.persisted && !pendingAnswers.size && workflow && !workflow.archived) location.reload();
+  });
+  const canRetest = () => workflow?.author && workflow.phase === "retest";
+  let getSessionToken = async () => null;
+  let signInForRetest;
+
+  function progress() {
+    const missing = workflow.required.filter(ids => {
+      const result = retests.get(answerKey(...ids));
+      return !result || result.status === "НЕ ПРОВЕРЕНО";
+    });
+    const requiredKeys = new Set(workflow.required.map(ids => answerKey(...ids)));
+    const additional = [...retests.keys()].filter(key => !requiredKeys.has(key)).length;
+    workflowInfo.textContent = workflow.returnedAt ? "Возвращён на доработку " + formatDate(workflow.returnedAt) :
+      workflow.phase === "corrections" ? "Ответы по замечаниям открыты" :
+      `Доработка завершена ${formatDate(workflow.closedAt)} · Проверено замечаний: ${workflow.required.length - missing.length} из ${workflow.required.length}` +
+      (additional ? ` · Дополнительно: ${additional}` : "") +
+      (workflow.finishedAt ? ` · Ретест завершён ${formatDate(workflow.finishedAt)}` : "");
+    nextRequired.hidden = !canRetest() || !missing.length;
+    nextRequired.onclick = () => {
+      workflowBar.open = false;
+      selectedStatuses.clear();
+      selectedAnswerKey = answerKey(...missing[0]);
+      updateVisibility();
+      const row = answerRows.get(selectedAnswerKey)?.row;
+      row?.scrollIntoView({ block: "nearest" });
+      row?.focus();
+    };
+
+  }
+
+  function openOriginal() {
+    if (!workflow.editorPath) throw new Error("Откройте исходный чек-лист в браузере, где он был опубликован.");
+    sessionStorage.setItem("qa-retest-transfer", JSON.stringify({ id: reportId, token, round: workflow.round, publicId: workflow.publicId }));
+    location.assign(workflow.editorPath + "?retest=" + reportId);
+  }
+
+  function confirmStage(title, text, action) {
+    const dialog = document.getElementById("workflow-dialog");
+    dialog.querySelector("h2").textContent = title;
+    dialog.querySelector("p").textContent = text;
+    dialog.querySelector("[value=accept]").textContent = action;
+    dialog.returnValue = "";
+    dialog.showModal();
+    return new Promise(resolve => dialog.addEventListener("close", () => resolve(dialog.returnValue === "accept"), { once: true }));
+  }
+
+  async function chooseRetestOutcome(report) {
+    const review = window.QaReportRetest.review({ ...workflow, results: [...retests.values()] });
+    const dialog = document.getElementById("decision");
+    const success = dialog.querySelector('[value="success"]');
+    const rework = dialog.querySelector('[value="rework"]');
+    const accept = dialog.querySelector('[value="accept"]');
+    dialog.querySelector(".decision-head small").textContent = report.title + " · " + retestLabel(workflow.round);
+    dialog.querySelector(".decision-stats").textContent = [
+      review.passed + " без замечаний", review.issues.length + " с замечаниями", review.pending.length + " без результата",
+    ].join(" · ");
+    success.disabled = !review.canFinish;
+    rework.disabled = !review.issues.length;
+    success.checked = review.canFinish && !review.issues.length;
+    rework.checked = Boolean(review.issues.length);
+    success.parentElement.querySelector("strong").textContent = review.qualified ? "Принять с замечаниями" : "Завершить успешно";
+    dialog.querySelector("#success-help").textContent = review.qualified
+      ? "В чек-листе сохранятся «Почти ОК» и комментарии."
+      : review.canFinish ? "После завершения можно обновить основной чек-лист."
+      : "Доступно после проверки обязательных пунктов и закрытия замечаний.";
+    dialog.querySelector("#return-help").textContent = review.issues.length
+      ? `В доработку № ${workflow.round + 1} попадут пункты с замечаниями (${review.issues.length}). Ссылка останется прежней.` +
+        (review.pending.length ? " Пункты без результата останутся для следующего ретеста." : "")
+      : "Для возврата укажите замечание хотя бы по одному пункту.";
+    const update = () => {
+      accept.disabled = !rework.checked && !success.checked;
+      accept.textContent = rework.checked ? "Открыть доработку" :
+        success.checked ? (review.qualified ? "Принять результат" : "Завершить успешно") : "Подтвердить";
+    };
+    dialog.onchange = update;
+    update();
+    dialog.returnValue = "";
+    dialog.showModal();
+    await new Promise(resolve => dialog.addEventListener("close", resolve, { once: true }));
+    if (dialog.returnValue !== "accept") return null;
+    return rework.checked ? "rework" : review.qualified ? "qualified" : "passed";
+  }
+
+  function configureWorkflow(report) {
+    workflow = report.workflow;
+    if (!workflow) return;
+    workflowBar.hidden = false;
+    document.getElementById("workflow-controls").hidden = false;
+    const selector = document.getElementById("workflow-round");
+    const rounds = workflow.rounds || [];
+    if (rounds.length > 1) {
+      document.getElementById("workflow-round-label").hidden = false;
+      for (const number of rounds) {
+        const latest = number === (workflow.currentRound || rounds.at(-1));
+        const title = latest && !workflow.archived
+          ? (workflow.phase === "corrections" ? correctionLabel(number) : retestLabel(number)) + " · сейчас"
+          : correctionLabel(number) + " и ретест № " + number + (latest ? " · сейчас" : " · архив");
+        selector.add(new Option(title, number));
+      }
+      selector.value = workflow.round;
+      selector.onchange = () => {
+        if (pendingAnswers.size) { selector.value = workflow.round; workflowInfo.textContent = "Дождитесь сохранения правок."; return; }
+        sessionStorage.setItem("qa-retest-view:" + reportId, selector.value);
+        location.reload();
+      };
+    }
+    const title = workflow.phase === "corrections" ? correctionLabel(workflow.round) : retestLabel(workflow.round);
+    const phase = workflow.outcome === "qualified" ? "Принято с замечаниями" : workflowLabels[workflow.phase];
+    document.getElementById("workflow-stage").textContent = workflow.archived ? title + " · архив" :
+      workflow.phase === "corrections" ? title : phase;
+    for (const item of workflow.handoff?.points || []) returnedPoints.set(answerKey(item.sectionId, item.rowId), item);
+    for (const ids of workflow.previousRows || []) priorRowKeys.add(answerKey(...ids));
+    for (const item of workflow.previous || []) previousPoints.set(answerKey(item.sectionId, item.rowId), item);
+    for (const result of workflow.results) retests.set(answerKey(result.sectionId, result.rowId), result);
+    if (isRetest()) {
+      view.setAttribute("data-retest-table", "");
+      pins.state.qa = false;
+      document.getElementById("answer-panel-status-label").textContent = "Результат ретеста";
+      document.getElementById("answer-panel-comment-label").textContent = "Комментарий ретеста";
+      document.getElementById("answer-view-label").textContent = "Ретест:";
+    }
+    const transfer = workflow.phase === "finished" && workflow.author && !workflow.archived;
+    const ready = workflow.author && workflow.phase === "ready";
+    const primary = ready ? "Начать ретест" : workflow.canClose ? "Завершить доработку" : canRetest() ? "Завершить ретест" : transfer ? "Обновить основной чек-лист" : "";
+    workflowAction.textContent = primary;
+    workflowAction.hidden = !primary;
+    document.getElementById("workflow-menu-title").textContent = title;
+    workflowBar.querySelector("summary").setAttribute("aria-label", "Этап и история отчёта");
+    workflowAction.setAttribute("aria-label", primary + (transfer || ready ? "" : " по всему отчёту"));
+    const login = document.getElementById("workflow-login");
+    login.hidden = !signInForRetest || workflow.author || workflow.archived;
+    login.onclick = async () => {
+      try { if (await signInForRetest()) location.reload(); }
+      catch (error) { workflowNotice.textContent = error.message; }
+    };
+    progress();
+    workflowAction.onclick = async () => {
+      workflowNotice.textContent = "";
+      if (pendingAnswers.size || view.querySelector("[data-answer-upload]")) {
+        workflowNotice.textContent = "Дождитесь сохранения изменений и вложений. Проверьте сообщения у пунктов.";
+        return;
+      }
+      if (transfer) {
+        try { openOriginal(); } catch (error) { workflowNotice.textContent = error.message; }
+        return;
+      }
+      const closing = workflow.phase === "corrections";
+      const outcome = closing || ready ? null : await chooseRetestOutcome(report);
+      if (closing && !await confirmStage("Завершить доработку № " + workflow.round + "?",
+        "Ответы сохранятся в истории. Автор сможет начать ретест № " + workflow.round + ".", primary)) return;
+      if (!closing && !ready && !outcome) return;
+      workflowAction.disabled = true;
+      try {
+        const action = closing ? "close-corrections" : ready ? "start-retest" : outcome === "rework" ? "return-to-corrections" : "finish-retest";
+        await request("/" + action, { method: "POST", accountToken: await getSessionToken(), body: {
+          ...(outcome && { outcome, revision: [...retests.values()].reduce((sum, item) => sum + item.revision, 0) }) } });
+        if (action === "finish-retest" && workflow.editorPath && await confirmStage("Обновить основной чек-лист?",
+          "В редакторе вы увидите, сколько пунктов можно обновить. Результаты ретеста сохранятся по этой ссылке.", "Перейти к переносу")) openOriginal();
+        else location.reload();
+      } catch (error) { workflowNotice.textContent = error.message; workflowAction.disabled = false; }
+    };
+  }
+
+  function appendRetest(tr, sectionId, rowId, number) {
+    const key = answerKey(sectionId, rowId);
+    let saved = retests.get(key);
+    const statusCell = element("td", "correction-status");
+    const commentCell = element("td", "correction-comment");
+    tr.append(statusCell, commentCell);
+    statusCell.dataset.tone = saved ? statusMeta(saved.status).tone : "neutral";
+    if (!canRetest()) {
+      statusCell.textContent = saved?.status || "Без результата";
+      commentCell.append(element("div", "answer-comment-view prose", saved?.comment || "—"));
+    } else {
+      statusCell.classList.add("is-editable");
+      const select = element("select");
+      select.setAttribute("aria-label", "Результат ретеста пункта " + number);
+      select.add(new Option("Выбрать…", ""));
+      select.options[0].disabled = true;
+      for (const status of window.QaReportRetest.outcomes) select.add(new Option(status, status));
+      select.value = saved?.status || "";
+      const comment = element("textarea", "retest-comment");
+      comment.maxLength = 10000;
+      comment.value = saved?.comment || "";
+      comment.setAttribute("aria-label", "Комментарий ретеста пункта " + number);
+      comment.placeholder = "Добавить комментарий…";
+      const message = element("p", "file-error");
+      message.setAttribute("role", "status");
+      const retry = button("Повторить сохранение");
+      retry.hidden = true;
+      statusCell.append(select);
+      commentCell.classList.add("is-editable");
+      const measure = element("span", "retest-text-measure");
+      measure.setAttribute("aria-hidden", "true");
+      const measureText = () => { measure.textContent = comment.value + "\u200b"; };
+      measureText();
+      comment.addEventListener("input", measureText);
+      commentCell.append(comment, measure, message, retry);
+      let busy = false, timer;
+      const dirty = () => select.value !== (saved?.status || "") || comment.value !== (saved?.comment || "");
+      const queue = () => {
+        clearTimeout(timer);
+        message.textContent = !select.value && comment.value ? "Выберите результат, чтобы сохранить комментарий." : "";
+        retry.hidden = true;
+        setAnswerSaveState(key, busy ? "saving" : dirty() ? "dirty" : "saved");
+        if (select.value && dirty() && !busy) timer = setTimeout(save, 350);
+      };
+      async function save() {
+        if (busy || !select.value || !dirty()) return;
+        busy = true;
+        setAnswerSaveState(key, "saving");
+        try {
+          const response = await request("/retest-result", { method: "POST", accountToken: await getSessionToken(),
+            body: { sectionId, rowId, status: select.value, comment: comment.value, revision: saved?.revision || 0 } });
+          saved = (await response.json()).result;
+          retests.set(key, saved);
+          statusCell.dataset.tone = statusMeta(saved.status).tone;
+          busy = false;
+          progress();
+          showSelectedAnswer();
+          queue();
+        } catch (error) {
+          busy = false;
+          message.textContent = error.message;
+          retry.hidden = error.status === 409;
+          setAnswerSaveState(key, "error");
+        }
+      }
+      retry.onclick = save;
+      select.addEventListener("change", queue);
+      comment.addEventListener("input", queue);
+    }
+    registerAnswer(tr, key, number, canRetest(), statusCell, commentCell);
+  }
+
   function renderPoint(section, row, number, canReply, uploadsPaused, sectionNumber) {
     const tr = element("tr");
     tr.dataset.sectionNumber = sectionNumber;
@@ -1614,6 +1957,31 @@
       if (position === 0 && bugs.children.length) td.append(bugs);
       tr.append(td);
     }
+    tr.dataset.pointCaption = tr.querySelector(".report-cell")?.innerText.trim() || "";
+    const key = answerKey(section.id, row.id);
+    const previous = returnedPoints.get(key) || previousPoints.get(key);
+    if (workflow?.round > 1 && workflow.phase === "corrections" && !workflow.archived) {
+      const cell = tr.querySelector(".report-cell");
+      if (cell && previous) {
+        cell.append(element("small", "workflow-point-note", workflow.handoff?.corrections
+          ? "Осталось замечание" : previous.status === "OK" && row.status !== "OK" ? "Замечание появилось повторно" : "Проверяли ранее"));
+        const details = element("details", "point-history");
+        details.addEventListener("click", event => event.stopPropagation());
+        details.append(element("summary", "", "Предыдущий ответ и ретест"));
+        if (previous.answer) details.append(element("p", "", [window.QaReportRetest.replies[previous.answer.status],
+          previous.answer.comment, formatDate(previous.answer.updatedAt)].filter(Boolean).join(" · ")));
+        details.append(element("p", "", [previous.status, previous.comment, formatDate(previous.updatedAt)].filter(Boolean).join(" · ")));
+        cell.append(details);
+      } else if (cell && workflow.previousRows && !priorRowKeys.has(key)) cell.append(element("small", "workflow-point-note", "Новый пункт"));
+    }
+    if (isRetest()) {
+      const answer = answers.get(key);
+      const status = element("td", "report-cell", answerStatuses.get(answer?.status)?.label || "—");
+      if (answer?.updatedAt) status.append(element("small", "workflow-date", formatDate(answer.updatedAt)));
+      const comment = element("td", "report-cell");
+      renderAnswerComment(comment, answer, key);
+      tr.append(status, comment);
+    }
     const spacer = element("td", "report-scroll-spacer");
     spacer.setAttribute("aria-hidden", "true");
     tr.append(spacer);
@@ -1621,7 +1989,11 @@
     statusCell.append(statusTag(row.status));
     if (!section.columns.length && bugs.children.length) statusCell.append(bugs);
     tr.append(statusCell);
-    appendAnswer(tr, section.id, row.id, number, canReply, uploadsPaused);
+    if (isRetest()) {
+      prepareRetestRow(tr, section.columns);
+      appendRetest(tr, section.id, row.id, number);
+    }
+    else appendAnswer(tr, section.id, row.id, number, canReply, uploadsPaused);
     return tr;
   }
 
@@ -1708,13 +2080,14 @@
   }
 
   function renderReport(report) {
+    configureWorkflow(report);
     window.QaReportMcpSetup.init({ shareUrl: `${location.origin}/shared-report/${reportId}#${token}`, canReply: report.canReply });
     const title = report.title?.trim() || window.QaReportTrackerLinks.parse(report.issueUrl)?.key || "Отчёт о тестировании";
     const titleNode = document.getElementById("report-title");
     titleNode.textContent = title;
     titleNode.title = title;
-    document.getElementById("access-label").hidden = report.canReply;
-    saveIndicator.hidden = !report.canReply;
+    document.getElementById("access-label").hidden = report.canReply || canRetest();
+    saveIndicator.hidden = !(report.canReply || canRetest());
     if (report.canReply && report.uploadsPaused) {
       document.getElementById("report-sections").before(element("p", "prose", "Загрузка вложений приостановлена. Текстовые ответы доступны."));
     }
@@ -1739,25 +2112,37 @@
     const root = document.getElementById("report-sections");
     for (const [sectionIndex, section] of report.sections.entries()) {
       const title = section.title || `Раздел ${sectionIndex + 1}`;
-      const { section: node, body: points } = createSection(title, section.columns.map(column => column.label), [
-        ["Статус ответа", "correction-status"], ["Комментарий", "correction-comment"],
+      const labels = section.columns.map(column => column.label);
+      if (isRetest()) labels.push("Статус ответа", "Комментарий к ответу");
+      const { section: node, body: points } = createSection(title, labels, [
+        [isRetest() ? "Результат ретеста" : "Статус ответа", "correction-status"],
+        [isRetest() ? "Комментарий ретеста" : "Комментарий", "correction-comment"],
       ]);
       const table = node.querySelector("table");
+      const head = table.tHead.rows[0];
+      if (isRetest()) {
+        prepareRetestRow(head, section.columns);
+      } else {
+        const spacer = element("th", "report-scroll-spacer");
+        spacer.setAttribute("aria-hidden", "true");
+        head.querySelector(".qa-status").before(spacer);
+      }
       pins.attach(table);
-      const spacer = element("th", "report-scroll-spacer");
-      spacer.setAttribute("aria-hidden", "true");
-      table.tHead.rows[0].querySelector(".qa-status").before(spacer);
       root.append(node);
       layoutObserver.observe(table);
-      const rows = section.rows.map((row, rowIndex) => {
+      const active = workflow?.phase === "corrections" && workflow.handoff?.corrections;
+      const allowed = active && new Set(active.map(ids => answerKey(...ids)));
+      const rows = section.rows.flatMap((row, rowIndex) => {
+        if (allowed && !allowed.has(answerKey(section.id, row.id))) return [];
         const sectionNumber = /^\s*(\d+(?:\.\d+)*)\.\s/.exec(title)?.[1] || String(sectionIndex + 1);
         const point = renderPoint(section, row, row.number || `${sectionIndex + 1}.${rowIndex + 1}`, report.canReply, report.uploadsPaused, sectionNumber);
         points.append(point);
-        return { element: point, status: statusKey(row.status), rank: statusMeta(row.status).rank, key: answerKey(section.id, row.id) };
+        const key = answerKey(section.id, row.id), status = row.status;
+        return { element: point, status: statusKey(status), rank: statusMeta(status).rank, key };
       });
-      sections.push({ element: node, points, rows, table, columnCount: section.columns.length });
+      sections.push({ element: node, points, rows, table, columnCount: labels.length });
     }
-    configureStatusFilter(report.defaultStatuses);
+    configureStatusFilter(isRetest() || workflow?.handoff?.corrections ? [] : report.defaultStatuses);
     order.addEventListener("change", updateVisibility);
     updateVisibility();
     setAnswerView(answerView);
